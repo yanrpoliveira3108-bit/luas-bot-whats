@@ -9,8 +9,8 @@
 
 const CONFIG = require('../../config');
 const engine = require('../../utils/stickerEngine');
+const stickerMeta = require('../../utils/stickerMeta');
 const { downloadToBuffer } = require('../../utils/download');
-const { deleteFile } = require('../../utils/download');
 const errorHandler = require('../../handlers/errorHandler');
 
 /** Converte um emoji nos code points hex do Twemoji (sem variação fe0f). */
@@ -31,7 +31,6 @@ function isEmojiChar(ch) {
 }
 
 async function svgToWebp(svgBuffer) {
-  // sharp renderiza SVG (quando disponível)
   try {
     const sharp = require('sharp');
     return await sharp(svgBuffer).resize(512, 512).webp({ quality: 85 }).toBuffer();
@@ -49,7 +48,7 @@ module.exports = [
     name: 'emojisticker',
     commands: ['emojisticker', 'emojistk', 'figemoji'],
     category: 'stickers',
-    description: 'Transforma um emoji em sticker.',
+    description: 'Transforma um emoji em sticker com bio rica.',
     usage: '!emojisticker <emoji>',
     cooldown: 5000,
     execute: async (ctx) => {
@@ -63,20 +62,17 @@ module.exports = [
 
       await ctx.reply('⏳ Criando sticker do emoji...');
       try {
-        // 1) tenta SVG (alta qualidade, via sharp)
         let webp = null;
         try {
           const svg = await downloadToBuffer(svgUrl, { timeoutMs: 20000, maxBytes: 512 * 1024 });
           webp = await svgToWebp(svg);
-        } catch (_) {
-          /* SVG indisponível — tenta PNG */
-        }
-        // 2) fallback PNG (72px) reescalado
+        } catch (_) {}
         if (!webp) {
           const png = await downloadToBuffer(pngUrl, { timeoutMs: 20000, maxBytes: 512 * 1024 });
           webp = await pngToWebp(png);
         }
-        webp = await engine.setStickerMetadata(webp, { packname: CONFIG.bot.name, author: CONFIG.bot.author });
+        const meta = stickerMeta.buildStickerMeta(ctx, { emoji });
+        webp = await engine.setStickerMetadata(webp, { packname: meta.packname, author: meta.author, emoji: meta.emoji });
         await ctx.sendSticker(webp);
       } catch (err) {
         if (err && (err.message || '').includes('404')) {

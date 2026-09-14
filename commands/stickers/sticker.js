@@ -2,6 +2,7 @@
 
 const CONFIG = require('../../config');
 const engine = require('../../utils/stickerEngine');
+const stickerMeta = require('../../utils/stickerMeta');
 const errorHandler = require('../../handlers/errorHandler');
 const logger = require('../../utils/logger').child('sticker');
 
@@ -20,9 +21,23 @@ function parsePackAuthor(args) {
 async function finalizeAndSend(ctx, webp, opts = {}) {
   const animated = !!opts.animated;
   try {
+    let meta;
+    if (opts.packname || opts.author) {
+      meta = stickerMeta.buildStickerMeta(ctx, {
+        customPack: opts.packname,
+        customAuthor: opts.author,
+        emoji: opts.emoji,
+      });
+    } else {
+      meta = stickerMeta.buildStickerMeta(ctx, {
+        emoji: opts.emoji,
+      });
+    }
+
     webp = await engine.setStickerMetadata(webp, {
-      packname: opts.packname || CONFIG.bot.name,
-      author: opts.author || CONFIG.bot.author,
+      packname: meta.packname,
+      author: meta.author,
+      emoji: meta.emoji,
     });
     webp = await engine.ensureStickerSize(webp, { animated });
   } catch (err) {
@@ -45,7 +60,6 @@ async function finalizeAndSend(ctx, webp, opts = {}) {
   );
 
   if (!check.ok) {
-    // NUNCA enviar sticker corrompido/fantasma
     logger.error({ stage: 'validation', reason: check.reason }, '[STICKER ERROR] stage=validation');
     await ctx.reply('❌ Não consegui gerar uma figurinha válida.\n▸ Tente enviar outra imagem ou vídeo.');
     return false;
@@ -67,11 +81,10 @@ module.exports = [
     name: 'sticker',
     commands: ['sticker', 's', 'fig', 'figurinha'],
     category: 'stickers',
-    description: 'Transforma imagem/vídeo/GIF em sticker.',
-    usage: '!sticker (respondendo a uma mídia)',
+    description: 'Transforma imagem/vídeo/GIF em sticker com bio rica (criador, origem, bot, dono).',
+    usage: '!sticker [pack|autor] (respondendo a uma mídia) ou !sticker <link>',
     cooldown: 5000,
     execute: async (ctx) => {
-      // "outro jeito": !sticker <url> baixa a imagem/GIF do link e converte
       const urlMatch = String(ctx.args[0] || '').match(/^https?:\/\/\S+/i);
       if (urlMatch) {
         const { downloadToBuffer } = require('../../utils/download');
@@ -120,14 +133,13 @@ module.exports = [
       try {
         let webp;
         if (media.type === 'video' || isGif) {
-          // GIF/vídeo: ffmpeg se disponível; senão, GIF puro-JS (sem binário)
           webp = engine.hasFfmpeg()
             ? await engine.videoToWebp(media.buffer, CONFIG.limits.stickerMaxSeconds)
             : isGif
               ? await engine.gifToWebp(media.buffer)
               : await engine.videoToWebp(media.buffer, CONFIG.limits.stickerMaxSeconds);
         } else if (media.type === 'sticker') {
-          webp = media.buffer; // já é sticker
+          webp = media.buffer;
         } else {
           webp = await engine.imageToWebp(media.buffer);
         }
@@ -147,7 +159,7 @@ module.exports = [
     name: 'stickerimg',
     commands: ['stickerimg', 'stickerimagem'],
     category: 'stickers',
-    description: 'Transforma uma imagem em sticker.',
+    description: 'Transforma uma imagem em sticker com bio rica.',
     usage: '!stickerimg (respondendo a uma imagem)',
     cooldown: 5000,
     execute: async (ctx) => {
@@ -167,7 +179,7 @@ module.exports = [
     name: 'stickertext',
     commands: ['stickertext', 'textosticker', 'stext'],
     category: 'stickers',
-    description: 'Cria um sticker de texto.',
+    description: 'Cria um sticker de texto com bio rica.',
     usage: '!stickertext <texto>',
     cooldown: 5000,
     execute: async (ctx) => {

@@ -1,9 +1,10 @@
 /**
- * downloaders/social.js — extração de mídia via meta tags Open Graph.
+ * downloaders/social.js — extração de mídia via Open Graph (OTIMIZADO).
  *
- * Abordagem sem chave de API: carrega a página pública e extrai
- * og:video / og:image / og:title. Funciona para muitos posts públicos do
- * Instagram/Facebook e falha graciosamente quando o site bloqueia o servidor.
+ * Melhorias:
+ * - Qualidade alta: tenta og:image com maior resolução
+ * - Retry e timeout maior
+ * - User-agent moderno
  */
 
 'use strict';
@@ -12,22 +13,34 @@ const CONFIG = require('../config');
 const { downloadToFile } = require('../utils/download');
 
 const UA =
-  'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1';
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
 async function fetchPage(url) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
-  try {
-    const res = await fetch(url, {
-      headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml' },
-      signal: controller.signal,
-      redirect: 'follow',
-    });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    return await res.text();
-  } finally {
-    clearTimeout(timer);
+  const retries = (CONFIG.downloader && CONFIG.downloader.downloadRetries) || 2;
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 25000);
+    try {
+      const res = await fetch(url, {
+        headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml' },
+        signal: controller.signal,
+        redirect: 'follow',
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return await res.text();
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+        continue;
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
   }
+  throw lastErr;
 }
 
 function pick(html, patterns) {
@@ -38,11 +51,6 @@ function pick(html, patterns) {
   return '';
 }
 
-/**
- * Muitos sites emitem `<meta content="..." property="og:...">` (ordem
- * invertida). Estes padrões casam as duas ordens e ainda as variantes
- * og:video:url / twitter:player:stream.
- */
 function metaPatterns(prop) {
   const p = prop.replace(/[:]/g, '[:]');
   return [
@@ -56,6 +64,8 @@ function extractMeta(html) {
     ...metaPatterns('og:title'),
     /<title[^>]*>([^<]+)<\/title>/i,
   ]);
+
+  // tenta vídeo em alta qualidade primeiro
   const videoUrl = pick(html, [
     ...metaPatterns('og:video:secure_url'),
     ...metaPatterns('og:video:url'),
@@ -63,15 +73,31 @@ function extractMeta(html) {
     ...metaPatterns('twitter:player:stream'),
     /<meta[^>]+property=["']twitter:player:stream["'][^>]+value=["']([^"']+)["']/i,
   ]);
-  const imageUrl = pick(html, [
-    ...metaPatterns('og:image'),
+
+  // imagem — tenta alta qualidade
+  let imageUrl = pick(html, [
     ...metaPatterns('og:image:secure_url'),
+    ...metaPatterns('og:image'),
     ...metaPatterns('twitter:image'),
   ]);
+
+  // upgrade qualidade imagem se configurado
+  if (imageUrl) {
+    const quality = (CONFIG.downloader && CONFIG.downloader.imageQuality) || 'high';
+    if (quality === 'original') {
+      imageUrl = imageUrl.replace(/\/s\d+x\d+\//, '/').replace(/w=\d+/, '').replace(/h=\d+/, '');
+    } else if (quality === 'high') {
+      // tenta forçar maior resolução em alguns CDNs
+      if (imageUrl.includes('pbs.twimg.com')) {
+        imageUrl = imageUrl.replace(/&name=\w+/, '&name=4096x4096').replace(/\?format=\w+&name=\w+/, '?format=jpg&name=4096x4096');
+        if (!imageUrl.includes('name=')) imageUrl += (imageUrl.includes('?') ? '&' : '?') + 'name=4096x4096';
+      }
+    }
+  }
+
   return { title, videoUrl, imageUrl };
 }
 
-/** Extrai metadados de mídia (e o link direto, quando disponível). */
 async function fetchOgMedia(url) {
   const html = await fetchPage(url);
   const meta = extractMeta(html);
@@ -83,7 +109,6 @@ async function fetchOgMedia(url) {
   return meta;
 }
 
-/** Baixa a mídia (vídeo se houver, senão imagem). */
 async function downloadMedia(url, suggestedName) {
   const meta = await fetchOgMedia(url);
   const mediaUrl = meta.videoUrl || meta.imageUrl;
@@ -92,6 +117,7 @@ async function downloadMedia(url, suggestedName) {
     name: suggestedName || meta.title,
     ext,
     maxBytes: CONFIG.limits.maxDownloadMB * 1024 * 1024,
+    timeoutMs: 60000,
   });
   return { ...file, title: meta.title, mimetype: meta.videoUrl ? 'video/mp4' : 'image/jpeg', isVideo: !!meta.videoUrl };
 }

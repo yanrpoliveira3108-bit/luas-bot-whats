@@ -6,6 +6,7 @@
  * 3. sessões de jogos e menus numerados (fallback)
  * 4. resolve comando por prefixo + trigger, aplica permissões e cooldown
  * 5. executa com tratamento de erro (nunca derruba o bot)
+ * 6. sugestão inteligente quando comando não existe (fuzzy + botões)
  */
 
 'use strict';
@@ -74,20 +75,15 @@ async function buildContext(sock, msg) {
   const botLid = (sock.user && sock.user.lid) || '';
   const prefix = settings.effectivePrefix();
 
-  // metadados do grupo (necessário p/ resolver LID → PN e admin)
   let meta = null;
   if (isGroup) meta = await getGroupMetadata(sock, remoteJid);
   const participants = (meta && meta.participants) || [];
-  // Comunidades usam sempre endereçamento LID; meta traz isCommunity/linkedParent.
   const isCommunity = !!(meta && (meta.isCommunity || meta.linkedParent));
-  // Mensagem de grupo endereçada por LID (comunidades caem aqui).
   const lidGroupMsg = isGroup && (
     String(msg.key.participant || '').endsWith('@lid') ||
     String(msg.key.participantAlt || '').endsWith('@lid')
   );
 
-  // remetente: PN preferido; se sobrar LID (participantAlt ausente),
-  // resolve pelo metadado do grupo (id=PN, lid=LID)
   let sender = resolveSender(msg) || remoteJid;
   if (sender.endsWith('@lid') && participants.length) {
     const pn = permissions.toPn(sender, participants);
@@ -112,8 +108,6 @@ async function buildContext(sock, msg) {
   let isBotAdmin = false;
   if (isGroup) {
     isAdmin = permissions.isAdmin(participants, sender);
-    // em grupos LID o participant do bot pode vir com `id` = LID; comparamos
-    // PN e LID para nunca tratar o bot como "não-admin" erroneamente
     isBotAdmin = permissions.isBotAdmin(participants, botLid ? [botJid, botLid] : botJid);
     if (sender === botJid) isAdmin = true;
   }
@@ -146,26 +140,18 @@ async function buildContext(sock, msg) {
     mediaType: detectMediaType(msg),
   };
 
-  /* ------------------- métodos de envio padronizados ------------------ */
   ctx.reply = async (t, opts = {}) => {
     try {
       const res = await sock.sendMessage(remoteJid, { text: String(t) }, { quoted: opts.quoted === false ? undefined : msg });
       if (isCommunity || lidGroupMsg) {
         logger.info(
           { chat: remoteJid, hasId: !!(res && res.key && res.key.id), community: !!isCommunity, lid: !!lidGroupMsg },
-          '[SEND] resposta para comunidade/LID enviada (sendMessage resolveu)'
-        );
-        activity.terminalLine(
-          `[SEND] comunidade/LID: chat=${remoteJid} resolveu=sim id=${res && res.key && res.key.id ? 'ok' : 'sem-id'}`
+          '[SEND] resposta para comunidade/LID enviada'
         );
       }
       return res;
     } catch (e) {
-      logger.warn({ chat: remoteJid, err: e && e.message, stack: e && e.stack }, '[SEND] sendMessage FALHOU');
-      activity.terminalLine(`[SEND] FALHOU: chat=${remoteJid} erro=${(e && e.message) || 'desconhecido'}`);
-      if (e && e.stack) {
-        activity.terminalLine(`[SEND] STACK: ${String(e.stack).split('\n').slice(0, 6).join(' ⏎ ')}`);
-      }
+      logger.warn({ chat: remoteJid, err: e && e.message }, '[SEND] sendMessage FALHOU');
       throw e;
     }
   };
@@ -238,7 +224,6 @@ async function executeCommand(ctx, cmd, args) {
   );
   perf.add('commands');
   try {
-    // registro organizado (terminal + !logs)
     const u = users.get(ctx.sender);
     activity.log({
       jid: ctx.sender,
@@ -249,9 +234,7 @@ async function executeCommand(ctx, cmd, args) {
       prefix: ctx.prefix,
       name: (u && u.name) || null,
     });
-  } catch (_) {
-    /* o log de atividade nunca pode derrubar o comando */
-  }
+  } catch (_) {}
   try {
     await cmd.execute(ctx);
     perf.timing('command', Date.now() - t0);
@@ -263,7 +246,6 @@ async function executeCommand(ctx, cmd, args) {
   }
 }
 
-/** Executa um comando pelo nome (usado por menus/botões). */
 async function runByName(ctx, name, args = []) {
   const cmd = registry.getCommand(name);
   if (!cmd) return false;
@@ -272,16 +254,6 @@ async function runByName(ctx, name, args = []) {
 
 /* --------------------------- mensagens ------------------------------- */
 
-/**
- * Política central: esta mensagem deve ser processada pelo bot?
- *
- * - Mensagem de TERCEIROS: SIM.
- * - Mensagem `fromMe` (enviada pelo próprio número do bot):
- *   - eco do próprio bot (IDs "3EB0...") → NÃO (evita loop infinito);
- *   - de quem NÃO é o dono → NÃO;
- *   - do DONO → apenas comandos (com prefixo) e respostas interativas
- *     (cliques em botões) — respostas em texto geradas pelo bot não reprocessam.
- */
 function shouldProcessMessage(msg) {
   if (!msg || !msg.message) return false;
   if (!msg.key || !msg.key.fromMe) return true;
@@ -303,10 +275,8 @@ async function handleMessage(sock, msg) {
     const ctx = await buildContext(sock, msg);
     if (!ctx.sender) return;
 
-    // métrica: mensagens processadas
     perf.add('messages');
 
-    // Diagnóstico de comunidades/LID (baixo ruído: só dispara nesses casos).
     const lidAddressed = ctx.isGroup && (
       String(msg.key.participant || '').endsWith('@lid') ||
       String(msg.key.participantAlt || '').endsWith('@lid')
@@ -323,32 +293,23 @@ async function handleMessage(sock, msg) {
         },
         '[COMMUNITY] mensagem recebida de comunidade/grupo LID'
       );
-      activity.terminalLine(
-        `[COMMUNITY] recebida: chat=${ctx.remoteJid} community=${ctx.isCommunity ? 'sim' : 'nao'} lid=${lidAddressed ? 'sim' : 'nao'} sender=${activity.maskJid(ctx.sender)}`
-      );
     }
 
-    // usuário bloqueado → ignora silenciosamente
     const blocked = require('../database/blocked');
     if (blocked.isBlocked(ctx.sender)) return;
 
-    // proteção global contra flood (nunca atinge dono/admins; limiar generoso)
     if (CONFIG.ui.antiFlood && !ctx.isOwner && !ctx.isAdmin) {
       const flood = require('../utils/flood');
       if (flood.hit(ctx.sender)) return;
     }
 
-    // mute: mensagens de usuários silenciados são apagadas (bot admin) ou
-    // ignoradas antes de qualquer processamento (comandos/botões/sessões)
     if (ctx.isGroup) {
       const muted = await groupHandler.enforceMute(sock, ctx);
       if (muted.blocked) return;
     }
 
-    // captura mídias de visualização única (para o comando !revelar)
     require('../utils/viewonce').capture(msg);
 
-    // registro de usuário/grupo + contadores + XP
     users.upsert(ctx.sender, msg.pushName || '');
     if (ctx.isGroup) {
       groups.ensure(ctx.remoteJid, '');
@@ -357,19 +318,22 @@ async function handleMessage(sock, msg) {
     users.incMessages(ctx.sender);
     grantXp(ctx.sender);
 
-    // remove AFK silenciosamente quando o usuário volta a falar
     const u = users.get(ctx.sender);
     if (u && u.afk) {
       users.clearAfk(ctx.sender);
     }
 
-    // AFK: avisar quem mencionou um usuário ausente
     await notifyAfk(sock, ctx);
 
-    // respostas interativas (botões/lista) têm prioridade
     if (await buttonHandler.process(ctx)) return;
 
-    // filtros de grupo
+    if (ctx.isGroup) {
+      try {
+        const antiManager = require('../utils/antiManager');
+        antiManager.addToHistory(ctx.remoteJid, ctx.sender, ctx.message.key);
+      } catch (_) {}
+    }
+
     if (ctx.isGroup) {
       const filtered = await groupHandler.applyFilters(sock, ctx);
       if (filtered.deleted) return;
@@ -380,7 +344,79 @@ async function handleMessage(sock, msg) {
 
     if (parsed) {
       const cmd = registry.resolveTrigger(parsed.command);
-      if (!cmd) return; // comando desconhecido: ignora (sem spam)
+      if (!cmd) {
+        try {
+          const fuzzy = require('../utils/fuzzySearch');
+          const allCmds = registry.all();
+          const similar = fuzzy.findSimilarCommands(parsed.command, allCmds, 3);
+
+          if (similar.length > 0) {
+            const best = similar[0];
+            const others = similar.slice(1);
+
+            let msgTxt = `❌ *Comando não existe:* ${prefix}${parsed.command}\n\n`;
+            msgTxt += `💡 *Você quis dizer:*\n`;
+            msgTxt += `▸ *${prefix}${best.trigger}* — ${best.cmd.description || ''}\n`;
+            for (const o of others) {
+              msgTxt += `▸ *${prefix}${o.trigger}* — ${o.cmd.description || ''}\n`;
+            }
+            msgTxt += `\n📌 Use *${prefix}help ${best.cmd.name}* para ver como usar`;
+
+            try {
+              const buttons = similar.map((s) => ({
+                id: `suggest_${s.cmd.name}`,
+                text: `${prefix}${s.trigger}`,
+                run: (cc) => runByName(cc, s.cmd.name, parsed.args),
+              }));
+              buttons.push({
+                id: `help_${best.cmd.name}`,
+                text: `❓ Ajuda ${best.cmd.name}`,
+                run: (cc) => runByName(cc, 'help', [best.cmd.name]),
+              });
+
+              for (const b of buttons) {
+                buttonHandler.register(`lua:${b.id}`, b.run);
+              }
+
+              const sent = await interactive.sendButtons(sock, ctx.remoteJid, {
+                text: msgTxt,
+                footer: `${CONFIG.bot.name} • ${prefix}menu para todos os comandos`,
+                buttons: buttons.slice(0, 4).map((b) => ({ id: `lua:${b.id}`, text: b.text })),
+                quoted: ctx.message,
+              });
+
+              if (!sent) {
+                await ctx.reply(msgTxt);
+              }
+            } catch (_) {
+              await ctx.reply(msgTxt);
+            }
+
+            logger.info({ query: parsed.command, suggestion: best.trigger }, 'comando não encontrado — sugestão enviada');
+            return;
+          } else {
+            try {
+              buttonHandler.register('lua:open_menu', (cc) => require('../utils/buttons').sendMainMenu(cc));
+              await interactive.sendButtons(sock, ctx.remoteJid, {
+                text: `❌ Comando *${prefix}${parsed.command}* não existe.\n\n💡 Digite *${prefix}menu* para ver todos os comandos ou *${prefix}menu <termo>* para buscar.\nEx: ${prefix}menu sticker, ${prefix}menu download`,
+                footer: `${CONFIG.bot.name} • ${registry.count()} comandos disponíveis`,
+                buttons: [
+                  { id: 'lua:open_menu', text: '📋 Abrir menu' },
+                  { id: 'lua:help_menu', text: '❓ Ajuda' },
+                ],
+                quoted: ctx.message,
+              });
+              buttonHandler.register('lua:help_menu', (cc) => cc.reply(`💡 Use *${prefix}help <comando>* para ver detalhes de qualquer comando.\nEx: ${prefix}help play, ${prefix}help sticker, ${prefix}help anti`));
+            } catch (_) {
+              await ctx.reply(`❌ Comando *${prefix}${parsed.command}* não existe. Digite *${prefix}menu* para ver os comandos.`);
+            }
+            return;
+          }
+        } catch (err) {
+          logger.warn({ err: err.message }, 'falha ao sugerir comando similar');
+          return;
+        }
+      }
       logger.info(
         { tag: 'COMMAND', sender: ctx.sender, fromMe: !!(msg.key && msg.key.fromMe) },
         `[LUA][COMMAND] Comando recebido: ${parsed.raw.split('\n')[0].slice(0, 80)}`
@@ -389,15 +425,12 @@ async function handleMessage(sock, msg) {
       return;
     }
 
-    // \"prefixo\" (sem o símbolo) → mostra o prefixo atual (ajuda novos usuários)
     const bare = (ctx.text || '').trim().toLowerCase();
     if (bare === 'prefixo' || bare === 'prefix') {
       await ctx.reply(`🔤 Prefixo atual: *${prefix}*\n\n💡 Use *${prefix}menu* para ver os comandos.`);
       return;
     }
 
-    // navegação por texto: "menu" abre o menu principal; "0"/"voltar" voltam
-    // quando existe um menu numerado ativo para o chat
     if (bare === 'menu' || bare === 'menuprincipal') {
       await require('../utils/buttons').sendMainMenu(ctx);
       return;
@@ -407,7 +440,6 @@ async function handleMessage(sock, msg) {
       return;
     }
 
-    // sem prefixo → sessão de jogo ativa?
     const gameSession = session.get(ctx.remoteJid, ctx.sender);
     if (gameSession && gameSession.onMessage) {
       try {
@@ -418,7 +450,6 @@ async function handleMessage(sock, msg) {
       return;
     }
 
-    // fallback de menu numerado
     const item = numberFallback.match(ctx.remoteJid, ctx.text);
     if (item && typeof item.run === 'function') {
       try {
@@ -429,7 +460,6 @@ async function handleMessage(sock, msg) {
       return;
     }
   } catch (err) {
-    // nunca deixar uma mensagem derrubar o bot
     logger.error({ err: err.message, stack: err.stack }, 'erro no processamento de mensagem');
   }
 }
@@ -449,7 +479,7 @@ async function notifyAfk(sock, ctx) {
     if (!u || !u.afk) continue;
     const lastKey = `${ctx.remoteJid}|${jid}`;
     const last = afkNotified.get(lastKey) || 0;
-    if (Date.now() - last < 60 * 1000) continue; // avisa no máx. 1x/min
+    if (Date.now() - last < 60 * 1000) continue;
     afkNotified.set(lastKey, Date.now());
     const reason = u.afk_reason ? `\n📝 Motivo: ${u.afk_reason}` : '';
     await sock.sendMessage(ctx.remoteJid, { text: `💤 ${u.name || jid.split('@')[0]} está AFK.${reason}` }, { quoted: ctx.message });

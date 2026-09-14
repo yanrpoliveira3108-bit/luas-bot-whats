@@ -6,5 +6,5 @@ module.exports = (ctx) =>
   categoryMenu(ctx, {
     category: 'stickers',
     title: '🎨 Stickers',
-    description: 'Crie figurinhas a partir de imagens/vídeos. Envie/marque a mídia com o comando.',
+    description: 'Crie figurinhas com bio rica (criador, origem GP/PV, bot, dono, dev). Use !take para roubar com nova bio, !stickerinfo para ver infos.',
   });

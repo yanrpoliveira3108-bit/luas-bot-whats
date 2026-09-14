@@ -11,7 +11,8 @@
 
 const logger = require('./logger').child('dqueue');
 
-const MAX_CONCURRENT = 2;
+const CONFIG = require('../config');
+const MAX_CONCURRENT = (CONFIG.downloader && CONFIG.downloader.maxConcurrentDownloads) || 3;
 let active = 0;
 let seq = 0;
 const queue = [];

@@ -1,16 +1,128 @@
+# ============================================================
+# Lua Bot — .gitignore profissional
+# Protege segredos, dados locais e arquivos temporários.
+# ============================================================
+
+# ---- Dependências ----
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+# package-lock.json é versionado para reproducibilidade (não ignorar)
+# Descomente abaixo se NÃO quiser versionar o lock:
+# package-lock.json
+
+# ---- Segredos e configuração local ----
 .env
+.env.local
+.env.*.local
+credentials.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ---- Sessão WhatsApp (credenciais) ----
 session/
-tmp/*
-!tmp/.gitkeep
+auth/
+baileys_auth_info/
+*.session
+*.session-journal
+
+# ---- Banco de dados local ----
 database/*.db
 database/*.db-*
 database/*.db-shm
 database/*.db-wal
+database/*.db-journal
+database/*.sqlite
+database/*.sqlite3
+*.db
+*.db-journal
+
+# ---- Backups e logs ----
 backup/
 logs/
 *.log
 .shutdown
+logs/*.log
+backup/*.db
+backup/*.tar.gz
+backup/*.zip
+
+# ---- Temporários e gerados ----
+tmp/*
+!tmp/.gitkeep
+*.tmp
+*.temp
+*.bak
+*.backup
+*~
+
+# ---- Player scripts temporários (ytdl-core / yt-dlp) ----
+*-player-script.js
+1788*.js
+*player-script*.js
+
+# ---- Previews e assets gerados ----
+card-*.jpg
+card-*.png
+welcome-preview.jpg
+welcome-preview.png
+tigrinho-preview.html
+preview-*.jpg
+preview-*.png
+
+# ---- Arquivos de release / pacotes ----
 release/
 *.zip
 *.tar.gz
+*.rar
+*.7z
+lua-*.zip
+lua-host-*.zip
+lua-update-*.zip
+
+# ---- Termux / gyp ----
+.gyp/
+include.gypi
+build/
+dist/
+out/
+
+# ---- OS ----
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ---- IDEs ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+
+# ---- Outros ----
+coverage/
+.nyc_output/
+.cache/
+.parcel-cache/
+.turbo/
+.next/
+.nuxt/
+.cache
+.npm/
+.eslintcache
+coverage/
+*.tgz
+
+# ---- Pastas que NUNCA devem ser versionadas (conteúdo sensível / lixo) ----
+# HutaoBot-MD-main era um projeto externo copiado — removido
+# Nova pasta continha conteúdo não relacionado — removida
+# lua/ era duplicata do projeto — removida
