@@ -94,15 +94,38 @@ restore_data() {
   if [ -d "$src/logs" ]; then mkdir -p logs; cp -a "$src/logs"/. logs/ 2>/dev/null || true; fi
 }
 
+# Allowlist ESTRITA do --delete-source (briefing 30): só estes alvos podem ser
+# removidos. Nada de glob amplo sobre a raiz (já apagou tmp/.lock e arquivos do
+# usuário no passado). Adicionar alvo aqui = decisão explícita e documentada.
+DELETE_SOURCE_TARGETS=(
+  'tmp/*.log'
+  'player-scripts'
+  '.gyp'
+  'cards'
+)
+
 clean_temp_source() {
   step "Limpando arquivos temporários seguros (--delete-source)..."
-  if [ -d tmp ]; then find tmp -type f ! -name ".gitkeep" -delete 2>/dev/null || true; ok "tmp/ limpo"; fi
-  for f in ./*.log; do [ -f "$f" ] && rm -f "$f" && echo "  removido: $f"; done
-  for f in ./*-player-script.js ./1788*.js; do [ -f "$f" ] && rm -f "$f" && echo "  removido: $f"; done
-  if [ -d .gyp ]; then rm -rf .gyp; ok ".gyp/ removido"; fi
-  for f in ./card-*.jpg ./card-*.png ./welcome-preview.jpg ./welcome-preview.png ./tigrinho-preview.html ./preview-*.jpg ./preview-*.png; do [ -f "$f" ] && rm -f "$f" && echo "  removido: $f"; done
-  if [ -d backup ]; then find backup -type d -name "pre-update-*" -mtime +30 -exec rm -rf {} + 2>/dev/null || true; ok "backups antigos limpos"; fi
-  echo ""; echo "🛡️  Protegidos: .env, session/, database/, backup/, logs/, assets/, .git/"
+  local alvo f removidos=0
+  for alvo in "${DELETE_SOURCE_TARGETS[@]}"; do
+    case "$alvo" in
+      tmp/*.log)
+        shopt -s nullglob
+        for f in tmp/*.log; do
+          rm -f -- "$f" && echo "  removido: $f" && removidos=$((removidos + 1))
+        done
+        shopt -u nullglob
+        ;;
+      *)
+        if [ -e "$alvo" ]; then
+          rm -rf -- "$alvo" && echo "  removido: $alvo/" && removidos=$((removidos + 1))
+        fi
+        ;;
+    esac
+  done
+  if [ "$removidos" -eq 0 ]; then info "Nada para limpar (allowlist: ${DELETE_SOURCE_TARGETS[*]})"; fi
+  echo ""
+  echo "🛡️  Protegidos: .env, session/, database/, backup/, logs/, assets/, .git/, tmp/ (exceto *.log)"
 }
 
 if [ -n "$ARCHIVE" ]; then
@@ -147,11 +170,26 @@ else
   HAS_LOCAL_CHANGES=0
   if ! git diff --quiet || ! git diff --cached --quiet; then HAS_LOCAL_CHANGES=1; fi
 
+  # arquivos não rastreados não bloqueiam (podem ser dados do usuário), mas
+  # precisam ser mostrados: eles sobrevivem ao update e às vezes explicam um
+  # comportamento estranho depois dele.
+  UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null | head -n 10 || true)
+  if [ -n "$UNTRACKED" ]; then
+    UNTRACKED_TOTAL=$(git ls-files --others --exclude-standard 2>/dev/null | grep -c . || true)
+    warn "Arquivos não rastreados presentes (${UNTRACKED_TOTAL:-0}) — serão preservados:"
+    echo "$UNTRACKED" | sed 's/^/    /'
+  fi
+
   if [ "$HAS_LOCAL_CHANGES" -eq 1 ]; then
     if [ "$FORCE" -eq 1 ]; then
       warn "Alterações locais detectadas — --force ativo, fazendo stash automático"
-      git stash push -m "auto-stash before update $(date +%Y%m%d-%H%M%S)" || true
-      ok "Alterações guardadas em stash"
+      STASH_NAME="lua-update-auto-$(date +%Y%m%d-%H%M%S)"
+      if git stash push -m "$STASH_NAME" >/dev/null 2>&1; then
+        ok "Alterações guardadas em stash: $STASH_NAME"
+        info "Para recuperar: git stash list  →  git stash apply stash@{0}"
+      else
+        warn "git stash não guardou nada (nada para guardar?)"
+      fi
     else
       err "Existem alterações locais em arquivos versionados."
       echo ""; git status --porcelain | head -n 50 || true; echo ""
@@ -221,7 +259,7 @@ else
 
   if [ "$LOCAL_COMMIT" = "$REMOTE_COMMIT" ]; then
     ok "Já está atualizado (local = remoto: ${LOCAL_COMMIT:0:7})"
-    if [ "$FORCE" -eq 1 ] && git stash list | grep -q "auto-stash before update"; then
+    if [ "$FORCE" -eq 1 ] && git stash list | grep -qE "lua-update-auto-|auto-stash before update"; then
       info "Restaurando stash..."
       git stash pop || warn "Conflito ao restaurar stash — resolva manualmente: git stash pop"
     fi
@@ -304,7 +342,7 @@ else
         ok "Já estava atualizado após pull (sem novos commits)"
       fi
 
-      if [ "$FORCE" -eq 1 ] && git stash list | grep -q "auto-stash before update"; then
+      if [ "$FORCE" -eq 1 ] && git stash list | grep -qE "lua-update-auto-|auto-stash before update"; then
         echo ""; info "Restaurando stash..."
         if ! git stash pop; then
           warn "Conflito ao restaurar stash — resolva manualmente: git stash list / git stash pop"

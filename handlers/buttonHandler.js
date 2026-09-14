@@ -50,9 +50,31 @@ function register(id, handler) {
 }
 
 /** Registra só se o ID ainda não existe (evita retrabalho por mensagem). */
-function registerOnce(id, handler) {
+/** Remove um handler registrado (usa em ids temporários e em testes). */
+function unregister(id) {
+  return handlers.delete(id);
+}
+
+/**
+ * Handler de uso único: some depois do primeiro clique e expira sozinho.
+ * É o que torna seguro um botão de confirmação — reenviar o clique (ou clicar
+ * tarde demais) não re-executa a ação destrutiva.
+ */
+function registerOnce(id, handler, ttlMs = 120000) {
   if (handlers.has(id)) return false;
-  return register(id, handler);
+  let timer = null;
+  const wrapped = async (ctx) => {
+    unregister(id); // consome ANTES de executar: duplo clique não duplica
+    if (timer) clearTimeout(timer);
+    await handler(ctx);
+  };
+  const registered = register(id, wrapped);
+  if (!registered) return false;
+  if (ttlMs > 0) {
+    timer = setTimeout(() => unregister(id), ttlMs);
+    if (typeof timer.unref === 'function') timer.unref();
+  }
+  return true;
 }
 
 function has(id) {
@@ -133,4 +155,4 @@ function listIds() {
   return [...handlers.keys()].sort();
 }
 
-module.exports = { register, registerOnce, has, count, process, listIds, resolveDynamic, dynamicHandler, ID_PATTERN };
+module.exports = { register, registerOnce, unregister, has, count, process, listIds, resolveDynamic, dynamicHandler, ID_PATTERN };
