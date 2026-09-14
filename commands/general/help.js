@@ -54,7 +54,9 @@ module.exports = [
             }));
 
             for (const b of buttons) {
-              buttonHandler.register(`lua:${b.id}`, b.run);
+              // registra uma única vez; cliques depois de restart caem no
+              // dispatch dinâmico do buttonHandler (lua:help_suggest_<cmd>)
+              buttonHandler.registerOnce(`lua:${b.id}`, b.run);
             }
 
             const sent = await interactive.sendButtons(ctx.socket, ctx.remoteJid, {
@@ -100,10 +102,10 @@ module.exports = [
         const commandHandler = require('../../handlers/commandHandler');
 
         const btnId = `use_${cmd.name}`;
-        buttonHandler.register(`lua:${btnId}`, (c) => commandHandler.runByName(c, cmd.name, []));
+        buttonHandler.registerOnce(`lua:${btnId}`, (c) => commandHandler.runByName(c, cmd.name, []));
 
         const helpId = `menu_${cmd.category}`;
-        buttonHandler.register(`lua:${helpId}`, (c) => c.reply(`${ctx.prefix}menu ${cmd.category}`));
+        buttonHandler.registerOnce(`lua:${helpId}`, (c) => c.reply(`${ctx.prefix}menu ${cmd.category}`));
 
         const sent = await interactive.sendButtons(ctx.socket, ctx.remoteJid, {
           text: maybeReadMore(lines.join('\n')),

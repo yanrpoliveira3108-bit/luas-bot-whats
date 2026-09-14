@@ -5,6 +5,10 @@
  * - valida o ID antes de executar
  * - não registra o mesmo handler duas vezes
  * - captura erros para nunca derrubar o bot
+ * - DISPATCH DINÂMICO: IDs de sugestão (lua:suggest_<comando>,
+ *   lua:help_<comando>, lua:use_<comando>) executam o comando na hora mesmo
+ *   sem registro prévio — assim um botão enviado antes de um restart continua
+ *   funcionando (os handlers registrados vivem só em memória).
  */
 
 'use strict';
@@ -18,6 +22,16 @@ const handlers = new Map(); // id -> { handler, registeredAt }
 // aceita 'lua:menu:general' (estilo antigo) e 'lua_commands' (IDs estáveis de lista)
 const ID_PATTERN = /^lua[a-z0-9:_-]+$/i;
 
+/**
+ * IDs dinâmicos: o nome do comando vai embutido no próprio ID.
+ * Ordem importa — "lua:help_suggest_x" casa antes de "lua:help_x".
+ */
+const DYNAMIC_RULES = [
+  { re: /^lua:(?:suggest|use|cmd|run)_([a-z0-9]+)$/i, kind: 'command' },
+  { re: /^lua:help_suggest_([a-z0-9]+)$/i, kind: 'help' },
+  { re: /^lua:help_([a-z0-9]+)$/i, kind: 'help' },
+];
+
 /** Registra um handler para um ID de botão/lista. */
 function register(id, handler) {
   if (typeof id !== 'string' || !ID_PATTERN.test(id)) {
@@ -29,11 +43,16 @@ function register(id, handler) {
     return false;
   }
   if (handlers.has(id)) {
-    logger.warn({ id }, 'handler duplicado ignorado');
-    return false;
+    return false; // já registrado — não é erro, apenas reuso silencioso
   }
   handlers.set(id, { handler, registeredAt: Date.now() });
   return true;
+}
+
+/** Registra só se o ID ainda não existe (evita retrabalho por mensagem). */
+function registerOnce(id, handler) {
+  if (handlers.has(id)) return false;
+  return register(id, handler);
 }
 
 function has(id) {
@@ -45,6 +64,40 @@ function count() {
 }
 
 /**
+ * Interpreta um ID dinâmico de sugestão/ajuda.
+ * @param {string} id
+ * @returns {{kind: 'command'|'help', name: string}|null}
+ */
+function resolveDynamic(id) {
+  if (typeof id !== 'string') return null;
+  for (const rule of DYNAMIC_RULES) {
+    const m = id.match(rule.re);
+    if (m) return { kind: rule.kind, name: m[1].toLowerCase() };
+  }
+  return null;
+}
+
+/** Monta o handler de um ID dinâmico (executa o comando embutido no ID). */
+function dynamicHandler(target) {
+  return async (ctx) => {
+    const { registry } = require('../engine/plugins');
+    const commandHandler = require('./commandHandler');
+    const name = target.name;
+    const cmd = registry.getCommand(name) || registry.resolveTrigger(name);
+    if (!cmd) {
+      logger.warn({ id: name }, 'botão dinâmico aponta para comando inexistente');
+      await ctx.reply(`⚠️ O comando *${name}* não está mais disponível. Use ${ctx.prefix || '!'}menu para ver a lista.`);
+      return;
+    }
+    if (target.kind === 'help') {
+      await commandHandler.runByName(ctx, 'help', [cmd.name]);
+      return;
+    }
+    await commandHandler.runByName(ctx, cmd.name, ctx.args || []);
+  };
+}
+
+/**
  * Processa uma mensagem de resposta interativa.
  * @returns {Promise<boolean>} true se a mensagem era um botão/lista e foi tratada
  */
@@ -52,15 +105,20 @@ async function process(ctx) {
   const payload = getInteractivePayload(ctx.message);
   if (!payload || !payload.id) return false;
 
-  const entry = handlers.get(payload.id);
+  let entry = handlers.get(payload.id);
+  let dynamic = null;
+  if (!entry) {
+    dynamic = resolveDynamic(payload.id);
+    if (dynamic) entry = { handler: dynamicHandler(dynamic) };
+  }
   if (!entry) {
     logger.warn({ id: payload.id, type: payload.type }, 'resposta interativa sem handler registrado');
     return false; // consumimos a mensagem, mas não há ação
   }
 
   logger.info(
-    { tag: 'BUTTONS', id: payload.id, user: ctx.sender, type: payload.type },
-    `[LUA][BUTTONS] Interação recebida: ${payload.id}`
+    { tag: 'BUTTONS', id: payload.id, user: ctx.sender, type: payload.type, dynamic: !!dynamic },
+    `[LUA][BUTTONS] Interação recebida: ${payload.id}${dynamic ? ` (dinâmico → ${dynamic.kind}:${dynamic.name})` : ''}`
   );
   try {
     await entry.handler(ctx);
@@ -75,4 +133,4 @@ function listIds() {
   return [...handlers.keys()].sort();
 }
 
-module.exports = { register, has, count, process, listIds };
+module.exports = { register, registerOnce, has, count, process, listIds, resolveDynamic, dynamicHandler, ID_PATTERN };

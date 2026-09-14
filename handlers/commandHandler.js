@@ -363,25 +363,32 @@ async function handleMessage(sock, msg) {
             msgTxt += `\n📌 Use *${prefix}help ${best.cmd.name}* para ver como usar`;
 
             try {
-              const buttons = similar.map((s) => ({
+              // WhatsApp aceita no máximo 3 botões: reservamos o último para a
+              // ajuda do melhor candidato (antes o botão de ajuda era cortado).
+              const clickable = similar.slice(0, 2).map((s) => ({
                 id: `suggest_${s.cmd.name}`,
                 text: `${prefix}${s.trigger}`,
                 run: (cc) => runByName(cc, s.cmd.name, parsed.args),
               }));
-              buttons.push({
-                id: `help_${best.cmd.name}`,
-                text: `❓ Ajuda ${best.cmd.name}`,
-                run: (cc) => runByName(cc, 'help', [best.cmd.name]),
-              });
+              const buttons = [
+                ...clickable,
+                {
+                  id: `help_${best.cmd.name}`,
+                  text: `❓ Ajuda ${best.cmd.name}`,
+                  run: (cc) => runByName(cc, 'help', [best.cmd.name]),
+                },
+              ];
 
               for (const b of buttons) {
-                buttonHandler.register(`lua:${b.id}`, b.run);
+                // registra só uma vez; cliques posteriores (e pós-restart)
+                // caem no dispatch dinâmico do buttonHandler
+                buttonHandler.registerOnce(`lua:${b.id}`, b.run);
               }
 
               const sent = await interactive.sendButtons(sock, ctx.remoteJid, {
                 text: msgTxt,
                 footer: `${CONFIG.bot.name} • ${prefix}menu para todos os comandos`,
-                buttons: buttons.slice(0, 4).map((b) => ({ id: `lua:${b.id}`, text: b.text })),
+                buttons: buttons.map((b) => ({ id: `lua:${b.id}`, text: b.text })),
                 quoted: ctx.message,
               });
 
@@ -396,17 +403,22 @@ async function handleMessage(sock, msg) {
             return;
           } else {
             try {
-              buttonHandler.register('lua:open_menu', (cc) => require('../utils/buttons').sendMainMenu(cc));
+              buttonHandler.registerOnce('lua:open_menu', (cc) => require('../utils/buttons').sendMainMenu(cc));
+              // id próprio: "lua:help_<comando>" é reservado ao dispatch dinâmico
+              buttonHandler.registerOnce('lua:help_usage', (cc) =>
+                cc.reply(
+                  `💡 Use *${prefix}help <comando>* para ver detalhes de qualquer comando.\nEx: ${prefix}help play, ${prefix}help sticker, ${prefix}help anti`
+                )
+              );
               await interactive.sendButtons(sock, ctx.remoteJid, {
                 text: `❌ Comando *${prefix}${parsed.command}* não existe.\n\n💡 Digite *${prefix}menu* para ver todos os comandos ou *${prefix}menu <termo>* para buscar.\nEx: ${prefix}menu sticker, ${prefix}menu download`,
                 footer: `${CONFIG.bot.name} • ${registry.count()} comandos disponíveis`,
                 buttons: [
                   { id: 'lua:open_menu', text: '📋 Abrir menu' },
-                  { id: 'lua:help_menu', text: '❓ Ajuda' },
+                  { id: 'lua:help_usage', text: '❓ Ajuda' },
                 ],
                 quoted: ctx.message,
               });
-              buttonHandler.register('lua:help_menu', (cc) => cc.reply(`💡 Use *${prefix}help <comando>* para ver detalhes de qualquer comando.\nEx: ${prefix}help play, ${prefix}help sticker, ${prefix}help anti`));
             } catch (_) {
               await ctx.reply(`❌ Comando *${prefix}${parsed.command}* não existe. Digite *${prefix}menu* para ver os comandos.`);
             }

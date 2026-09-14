@@ -42,15 +42,25 @@ function similarityScore(query, target) {
 }
 
 /**
- * Busca comandos similares
+ * Busca comandos similares.
+ *
+ * Critério (o que o usuário vê como "quis dizer"):
+ *  - distância de Levenshtein <= maxDistance (padrão 3) em relação a qualquer
+ *    trigger/alias do comando; OU
+ *  - o que foi digitado é substring do trigger (ex.: "stick" → "sticker"),
+ *    desde que tenham pelo menos 3 caracteres.
+ * Nada além disso entra na lista — sugestão distante atrapalha mais que ajuda.
+ *
  * @param {string} query - comando digitado que não existe
  * @param {Array} allCommands - lista de comandos do registry
  * @param {number} limit - quantos sugerir
- * @returns {Array<{cmd, score, trigger}>}
+ * @param {{maxDistance?: number}} [opts]
+ * @returns {Array<{cmd, score, trigger, distance}>}
  */
-function findSimilarCommands(query, allCommands, limit = 3) {
+function findSimilarCommands(query, allCommands, limit = 3, opts = {}) {
   const q = String(query || '').toLowerCase().trim();
   if (!q || q.length < 2) return [];
+  const maxDistance = Number.isFinite(opts.maxDistance) ? opts.maxDistance : 3;
 
   const candidates = [];
 
@@ -59,18 +69,28 @@ function findSimilarCommands(query, allCommands, limit = 3) {
     for (const trig of triggers) {
       const t = String(trig).toLowerCase();
       if (!t) continue;
-      const score = similarityScore(q, t);
-      // só considera se score razoável (distância pequena ou substring)
-      if (score <= 0.6 || levenshtein(q, t) <= 3) {
-        candidates.push({ cmd, score, trigger: trig, distance: levenshtein(q, t) });
-      }
+      const distance = levenshtein(q, t);
+      const isSubstring = q.length >= 3 && (t.includes(q) || q.includes(t));
+      if (distance > maxDistance && !isSubstring) continue;
+      candidates.push({ cmd, score: similarityScore(q, t), trigger: trig, distance });
     }
   }
 
-  // ordena por distância (menor = mais similar) e score
+  // Ranking: distância menor primeiro; em empate vence o trigger mais curto
+  // (erro de digitação costuma acrescentar caracteres), depois o nome canônico (não o alias),
+  // depois a ordem alfabética — sem isso o empate era decidido pela ordem de
+  // carregamento dos plugins ("pingg" → "ping2" em vez de "ping").
+  const nameRank = (c) => (c.cmd.name === c.trigger ? 0 : 1);
   candidates.sort((a, b) => {
     if (a.distance !== b.distance) return a.distance - b.distance;
-    return a.score - b.score;
+    const la = String(a.trigger).length;
+    const lb = String(b.trigger).length;
+    if (la !== lb) return la - lb;
+    const na = nameRank(a);
+    const nb = nameRank(b);
+    if (na !== nb) return na - nb;
+    if (a.score !== b.score) return a.score - b.score;
+    return String(a.trigger).localeCompare(String(b.trigger));
   });
 
   // remove duplicados (mesmo cmd)
