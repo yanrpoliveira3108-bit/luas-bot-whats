@@ -138,6 +138,19 @@ function fakeCtx(overrides = {}) {
   assert.notStrictEqual(darkMenu, defMenu, 'menu do grupo dark difere do padrão');
   ok('menu: o mesmo comando renderiza diferente conforme o modo do chat');
 
+  // ------------------------------------------------- 3b) styleFit (limite UTF-16)
+  const curto = menuRenderer.styleFit('LUA', 24, GROUP_B);
+  assert.ok(curto.length <= 24, `estilizado dentro do limite (${curto.length} unidades)`);
+  assert.notStrictEqual(curto, 'LUA', 'aplicou a fonte quando coube');
+  const longo = menuRenderer.styleFit('ADMINISTRAÇÃO DO GRUPO', 22, GROUP_B);
+  assert.ok(longo.length <= 22, `dentro do limite (${longo.length})`);
+  assert.strictEqual(longo, 'ADMINISTRAÇÃO DO GRUPO'.slice(0, 22), 'não coube → texto puro completo');
+  // nunca parte um par de surrogate: todo code point do resultado é válido
+  for (const ch of menuRenderer.styleFit('🌙 LUA BOT', 12, GROUP_B)) {
+    assert.ok(ch.codePointAt(0) > 0, 'sem surrogate órfão');
+  }
+  ok('styleFit: respeita o limite UTF-16 sem partir glifo (ou cabe inteiro, ou vai puro)');
+
   // ------------------------------------------------- 4) paginação honesta
   const p = menuRenderer.page({ page: 3, pages: 8 });
   assert.match(p, /Página 3\/8/, 'indicador de página');

@@ -96,6 +96,32 @@ function style(text, fontName, jid) {
   return fonts.apply(String(text == null ? '' : text), fontName || modeFor(jid).font);
 }
 
+/**
+ * Estiliza respeitando um limite em UNIDADES UTF-16 (é o que o WhatsApp conta).
+ * Glifo estilizado ocupa 2 unidades, então cortar com .slice() pode partir um par
+ * de surrogate e virar lixo na tela. Aqui o corte é por code point e, se sobrar
+ * qualquer code point, devolve o texto puro — título completo e legível vale
+ * mais que meia palavra enfeitada.
+ */
+function styleFit(text, maxUnits = 24, jid) {
+  const plain = String(text == null ? '' : text);
+  if (!plain) return '';
+  const limit = Math.max(4, Number(maxUnits) || 24);
+  const styled = style(plain, null, jid);
+  if (styled.length <= limit) return styled;
+  let out = '';
+  for (const ch of styled) {
+    if ((out + ch).length > limit) break;
+    out += ch;
+  }
+  const total = [...plain].length;
+  const kept = [...out].length;
+  // regra: ou cabe inteiro estilizado, ou vai o texto puro — título pela metade
+  // ("STICKER LU") é pior que título sem fonte
+  if (kept >= total) return out;
+  return [...plain].slice(0, limit).join('');
+}
+
 /** Comando executável: sempre texto puro, copiável. */
 function command(prefix, name) {
   const p = prefix || (CONFIG.bot && CONFIG.bot.prefix) || '!';
@@ -251,6 +277,7 @@ module.exports = {
   listModes,
   currentModeName,
   style,
+  styleFit,
   command,
   dividerLine,
   dividerFor,

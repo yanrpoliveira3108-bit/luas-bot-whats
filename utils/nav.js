@@ -185,9 +185,21 @@ async function render(ctx, entry) {
     screen.footer || `${CONFIG.bot.name} • ${require('../database/settings').effectivePrefix()}menu para recarregar`;
   const footer = `${menuRenderer.dividerLine(null, ctx.remoteJid)}\n${rawFooter}`.slice(0, 120);
 
+  // título da lista na fonte do modo — truncado por CODE POINT (glifo estilizado
+  // ocupa 2 unidades UTF-16; cortar por .slice() partiria o par e viraria lixo).
+  // Rótulos das linhas ficam puros: são curtos (24), clicáveis e muitas vezes
+  // contêm o comando real.
+  const styledListTitle = menuRenderer.styleFit(listTitle, 56, ctx.remoteJid);
+  const styledSectionTitle = menuRenderer.styleFit(listTitle, 22, ctx.remoteJid);
+  const styledNavTitle = menuRenderer.styleFit('Navegação', 22, ctx.remoteJid);
   const sections = [
-    { title: listTitle, rows: content.map((c) => ({ id: c.id, title: c.text, description: c.description })) },
-    ...(nav.length ? [{ title: 'Navegação', rows: nav.map((n) => ({ id: n.id, title: n.text, description: n.description })) }] : []),
+    { title: styledSectionTitle, rows: content.map((c) => ({ id: c.id, title: c.text, description: c.description })) },
+    ...(nav.length
+      ? [{
+          title: styledNavTitle,
+          rows: nav.map((n) => ({ id: n.id, title: n.text, description: n.description })),
+        }]
+      : []),
   ];
 
   // imagem de cabeçalho (opcional) — resolvida a partir da chave ou caminho
@@ -199,7 +211,7 @@ async function render(ctx, entry) {
   if (img) {
     // 1 mensagem só: lista nativa (single_select) com a imagem como cabeçalho
     ok = await interactive.sendListWithImage(ctx.socket, ctx.remoteJid, {
-      title: listTitle,
+      title: styledListTitle,
       text: body,
       footer,
       sections,
@@ -214,7 +226,7 @@ async function render(ctx, entry) {
         /* imagem quebrada não derruba o menu */
       }
       ok = await interactive.sendList(ctx.socket, ctx.remoteJid, {
-        title: listTitle,
+        title: styledListTitle,
         text: body,
         footer,
         buttonText,
@@ -224,7 +236,7 @@ async function render(ctx, entry) {
     }
   } else {
     ok = await interactive.sendList(ctx.socket, ctx.remoteJid, {
-      title: listTitle,
+      title: styledListTitle,
       text: body,
       footer,
       buttonText,
@@ -244,7 +256,17 @@ async function render(ctx, entry) {
     flat.map((b, i) => ({ num: i + 1, label: b.label, run: b.run }))
   );
   const lines = flat.map((it, i) => `${i + 1}. ${it.label}`).join('\n');
-  await ctx.reply(`*${title}*${body ? '\n' + body : ''}\n\n${lines}\n\n_Responda com o número._`);
+  await ctx.reply(
+    [
+      menuRenderer.header({ title, jid: ctx.remoteJid }),
+      rawBody ? `\n${rawBody}\n` : '',
+      menuRenderer.dividerFor(context, ctx.remoteJid),
+      '',
+      lines,
+      '',
+      menuRenderer.footer({ jid: ctx.remoteJid, hints: ['Responda com o número'] }),
+    ].join('\n')
+  );
 }
 
 async function nextPage(ctx) {

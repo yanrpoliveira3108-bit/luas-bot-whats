@@ -82,6 +82,14 @@ vez — nada de string decorativa espalhada pelos comandos.
 !menumode cute       idem
 ```
 
+**O modo vale nos dois tipos de menu.** Na navegação por lista/botões o WhatsApp
+não tem campo de descrição no fluxo nativo com imagem, então a decoração vai na
+legenda da imagem (título na fonte do modo + separador por contexto) e no rodapé;
+o título da lista e a seção "Navegação" também usam a fonte — mas só quando cabem
+inteiros no limite de 24 unidades do WhatsApp (`menuRenderer.styleFit` corta por
+code point e prefere o texto puro a uma palavra pela metade). Rótulos de linha
+ficam sempre puros: são clicáveis e muitas vezes contêm o comando real.
+
 O separador também muda por contexto, mesmo dentro de um modo: música usa
 `music`, download usa `wave`, sticker usa `cute`, admin usa `heavy`, erro usa
 `warning`.
@@ -95,6 +103,7 @@ O separador também muda por contexto, mesmo dentro de um modo: música usa
 | --- | --- |
 | `!menumode [modo]` | Lista/troca o modo visual dos menus (por grupo). |
 | `!fotobot` | (dono) Troca a foto de perfil **do bot** respondendo a uma imagem — diferente de `!foto`, que muda a do grupo. Limite de 5 MB, erro sem stack. |
+| `!fotomenubot [chave]` | (dono) Troca a **imagem de cabeçalho dos menus** (`main`, `admin`, `sticker`, `life`, `download`, `profile`). Valida a imagem, regrava como JPEG, guarda backup em `backup/menu/` e desfaz com `!fotomenubot reset [chave]`. |
 | `!twitter <url>` (alias `!tw`, `!x`) | Baixa o vídeo/foto de um tweet com fluxo em etapas e card de resultado. |
 | `!fontes [estilo] <texto>` | Mostra/aplica as 18 fontes Unicode. |
 | `!dividers [categoria]` | Lista os separadores por categoria. |
