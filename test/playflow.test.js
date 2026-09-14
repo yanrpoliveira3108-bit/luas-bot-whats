@@ -127,8 +127,17 @@ function allText(ctx) {
   return parts.join('\n');
 }
 
+/** Só arquivos (o mediaCache cria o próprio diretório dentro de tmp/). */
+function tmpFiles() {
+  return fs
+    .readdirSync(CONFIG.paths.tmpDir, { withFileTypes: true })
+    .filter((e) => e.isFile())
+    .map((e) => e.name)
+    .sort();
+}
+
 async function main() {
-  const beforeTmp = fs.readdirSync(CONFIG.paths.tmpDir);
+  const beforeTmp = tmpFiles();
 
   /* ------------------------------- !play ------------------------------- */
   {
@@ -188,14 +197,14 @@ async function main() {
     mediaCache.setCached(expiring, TMP_AUDIO, { ext: 'mp3', ttl: 1, title: 'expira' });
     await new Promise((r) => setTimeout(r, 30));
     assert.strictEqual(mediaCache.getCached(expiring), null, 'entrada expirada não pode ser servida');
+    mediaCache.clearCache();
     ok('cache YouTube: chave youtube:<id>:<tipo>:<qualidade>, hit/miss e TTL');
   }
 
   /* ---------------------------- sem temporário ---------------------------- */
   {
-    // compara o antes/depois: nada criado por este teste pode sobrar em tmp/
-    const after = fs.readdirSync(CONFIG.paths.tmpDir);
-    const created = after.filter((f) => !beforeTmp.includes(f));
+    // compara o antes/depois: nenhum ARQUIVO criado por este teste pode sobrar
+    const created = tmpFiles().filter((f) => !beforeTmp.includes(f));
     assert.deepStrictEqual(created, [], `o fluxo deixou resíduos em tmp/: ${created}`);
     fs.rmSync(TMP_AUDIO, { force: true });
     ok('fluxo não deixa temporário órfão em tmp/');
