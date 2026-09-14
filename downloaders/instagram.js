@@ -1,13 +1,11 @@
 /**
- * downloaders/instagram.js — download de mídia pública do Instagram.
+ * downloaders/instagram.js — download de mídia pública do Instagram (OTIMIZADO).
  *
- * Estratégia (sem chave de API, sem login):
- *  1. Baixa a página de embed `https://www.instagram.com/{p|reel}/{shortcode}/embed/captioned/`
- *     (acessível sem sessão) e extrai o `video_url` (mp4 do CDN) e o
- *     `display_url` (capa) do JSON embutido na página.
- *  2. Se não achar nada no embed, cai no social.js (Open Graph).
- *
- * Posts privados ou bloqueios do servidor resultam em erro amigável.
+ * Melhorias:
+ * - Qualidade alta: tenta s1080x1080, s2048x2048, original
+ * - Retry com backoff
+ * - User-agent iPhone atualizado
+ * - Timeout maior para qualidade alta
  */
 
 'use strict';
@@ -17,15 +15,13 @@ const social = require('./social');
 const { downloadToFile } = require('../utils/download');
 
 const UA =
-  'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1';
+  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
-/** Extrai o shortcode (ID público) de uma URL do Instagram. */
 function extractShortcode(url) {
   const m = String(url || '').match(/instagram\.com\/(?:p|reel|reels|tv)\/([A-Za-z0-9_-]{5,})/);
   return m ? m[1] : null;
 }
 
-/** Monta a URL de embed a partir do link original. */
 function embedUrl(url, shortcode) {
   const kind = String(url).match(/instagram\.com\/(p|reel|reels|tv)\//);
   let k = kind ? kind[1] : 'p';
@@ -33,12 +29,10 @@ function embedUrl(url, shortcode) {
   return `https://www.instagram.com/${k}/${shortcode}/embed/captioned/`;
 }
 
-/** Limpa uma URL extraída do JSON embutido (barras escapadas, &amp;). */
 function cleanUrl(s) {
   return String(s || '').replace(/\\/g, '').replace(/&amp;/g, '&').trim();
 }
 
-/** Limpa um texto (caption) com escapes \n, \uXXXX e \". */
 function cleanText(s) {
   return String(s || '')
     .replace(/\\n/g, '\n')
@@ -50,9 +44,37 @@ function cleanText(s) {
 }
 
 /**
- * Extrai um campo do JSON embutido do embed.
- * O JSON vem multi-escapado: `\"video_url\":\"https:\/\/cdn...\"`.
+ * Upgrade de qualidade de imagem Instagram
+ * Transforma s640x640, s750x750 etc em alta qualidade
  */
+function upgradeImageQuality(url) {
+  let u = String(url || '');
+  if (!u) return u;
+
+  const quality = (CONFIG.downloader && CONFIG.downloader.imageQuality) || 'high';
+
+  if (quality === 'original') {
+    // remove parâmetros de tamanho para pegar original
+    u = u.replace(/\/s\d+x\d+\//, '/');
+    u = u.replace(/\/p\d+x\d+\//, '/');
+    // remove c0.etc crop params
+    u = u.replace(/\/c\d+\.\d+\.\d+\.\d+\//, '/');
+    return u;
+  }
+
+  if (quality === 'high') {
+    // tenta 1080 ou 1350
+    if (/\/s\d+x\d+\//.test(u)) {
+      u = u.replace(/\/s\d+x\d+\//, '/s1080x1080/');
+    } else if (!/\/s1080x1080\//.test(u) && !/\/s2048x2048\//.test(u)) {
+      // se não tem tamanho, tenta forçar 1080
+      // não faz nada se já for original
+    }
+  }
+
+  return u;
+}
+
 function extractField(html, key) {
   const needle = '\\"' + key + '\\"';
   let i = html.indexOf(needle);
@@ -69,7 +91,6 @@ function extractField(html, key) {
   return cleanUrl(after.slice(k, stop < 0 ? undefined : stop));
 }
 
-/** Extrai a legenda (caption) a partir do bloco edge_media_to_caption. */
 function extractCaption(html) {
   const i = html.indexOf('edge_media_to_caption');
   if (i < 0) return '';
@@ -85,13 +106,12 @@ function extractCaption(html) {
   return cleanText(after.slice(k, stop < 0 ? undefined : stop));
 }
 
-/** Busca a página de embed e extrai { videoUrl, imageUrl, title }. */
 async function fetchEmbedMedia(url) {
   const shortcode = extractShortcode(url);
   if (!shortcode) return null;
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
+  const timer = setTimeout(() => controller.abort(), 25000);
   let html;
   try {
     const res = await fetch(embedUrl(url, shortcode), {
@@ -102,46 +122,66 @@ async function fetchEmbedMedia(url) {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     html = await res.text();
   } catch (_) {
-    return null; // embed indisponível → cai no fallback OG
+    return null;
   } finally {
     clearTimeout(timer);
   }
 
-  const videoUrl = extractField(html, 'video_url');
-  const imageUrl = extractField(html, 'display_url') || extractField(html, 'thumbnail_src');
+  let videoUrl = extractField(html, 'video_url');
+  let imageUrl = extractField(html, 'display_url') || extractField(html, 'thumbnail_src');
   const caption = extractCaption(html);
+
+  // upgrade qualidade
+  if (imageUrl) imageUrl = upgradeImageQuality(imageUrl);
+  if (videoUrl) {
+    // vídeo já é mp4 direto do CDN, qualidade original
+    videoUrl = cleanUrl(videoUrl);
+  }
+
   if (!videoUrl && !imageUrl) return null;
 
   const title = caption || 'Instagram';
   return { videoUrl, imageUrl, title, author: '' };
 }
 
-/**
- * Baixa a mídia de uma URL do Instagram.
- * @returns {{ path, title, author, mimetype, isVideo }}
- */
 async function download(url, suggestedName) {
-  const meta = await fetchEmbedMedia(url);
-  if (!meta || (!meta.videoUrl && !meta.imageUrl)) {
-    // fallback: extração Open Graph (imagem/capa ou vídeo og:video)
-    return social.downloadMedia(url, suggestedName || 'instagram');
-  }
+  const maxBytes = CONFIG.limits.maxDownloadMB * 1024 * 1024;
+  const retries = (CONFIG.downloader && CONFIG.downloader.downloadRetries) || 3;
 
-  const isVideo = Boolean(meta.videoUrl);
-  const mediaUrl = meta.videoUrl || meta.imageUrl;
-  const ext = isVideo ? 'mp4' : 'jpg';
-  const file = await downloadToFile(mediaUrl, {
-    name: suggestedName || meta.title,
-    ext,
-    maxBytes: CONFIG.limits.maxDownloadMB * 1024 * 1024,
-  });
-  return {
-    ...file,
-    title: meta.title,
-    author: meta.author,
-    mimetype: isVideo ? 'video/mp4' : 'image/jpeg',
-    isVideo,
-  };
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const meta = await fetchEmbedMedia(url);
+      if (!meta || (!meta.videoUrl && !meta.imageUrl)) {
+        return social.downloadMedia(url, suggestedName || 'instagram');
+      }
+
+      const isVideo = Boolean(meta.videoUrl);
+      const mediaUrl = meta.videoUrl || meta.imageUrl;
+      const ext = isVideo ? 'mp4' : 'jpg';
+      const file = await downloadToFile(mediaUrl, {
+        name: suggestedName || meta.title,
+        ext,
+        maxBytes,
+        timeoutMs: 45000,
+      });
+      return {
+        ...file,
+        title: meta.title,
+        author: meta.author,
+        mimetype: isVideo ? 'video/mp4' : 'image/jpeg',
+        isVideo,
+      };
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
 }
 
-module.exports = { download, extractShortcode, embedUrl, extractField, extractCaption };
+module.exports = { download, extractShortcode, embedUrl, extractField, extractCaption, upgradeImageQuality };

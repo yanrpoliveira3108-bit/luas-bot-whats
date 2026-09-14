@@ -221,14 +221,40 @@ const CONFIG = {
   waVersion: envVersion('WA_VERSION'),
 
   limits: {
-    maxDownloadMB: envInt('DOWNLOAD_MAX_MB', envInt('MAX_DOWNLOAD_MB', 50)),
-    downloadTimeoutMs: envInt('DOWNLOAD_TIMEOUT', 60000),
+    maxDownloadMB: envInt('DOWNLOAD_MAX_MB', envInt('MAX_DOWNLOAD_MB', 100)),
+    downloadTimeoutMs: envInt('DOWNLOAD_TIMEOUT', 90000),
     maxUploadMB: envInt('MAX_UPLOAD_MB', 60),
     stickerMaxMB: envInt('STICKER_MAX_MB', 15),
     stickerMaxSeconds: envInt('STICKER_MAX_SECONDS', 10),
     defaultCooldownMs: envInt('DEFAULT_COOLDOWN_MS', 3000),
     maxArgsLength: 2000,
     evalEnabled: envBool('ENABLE_EVAL', false),
+  },
+
+  /* ------------------ downloaders (qualidade e velocidade) ------------------ */
+  downloader: {
+    // YouTube — qualidade de vídeo: best, 2160, 1440, 1080, 720, 480, 360
+    // best = sem limite de altura, pega a maior disponível que couber no limite de MB
+    ytVideoQuality: (() => {
+      const v = envStr('YT_VIDEO_QUALITY', '720').toLowerCase();
+      if (v === 'best' || v === 'max') return 'best';
+      const n = parseInt(v, 10);
+      return Number.isFinite(n) ? n : 720;
+    })(),
+    // Áudio: best, 320k, 256k, 192k, 128k
+    ytAudioQuality: envStr('YT_AUDIO_QUALITY', 'best').toLowerCase(),
+    // Fragmentos concorrentes (yt-dlp) — 1 a 16, maior = mais rápido em DASH
+    ytConcurrentFragments: Math.min(16, Math.max(1, envInt('YT_CONCURRENT_FRAGMENTS', 8))),
+    // Qualidade de imagem: original, high, medium
+    imageQuality: envStr('IMAGE_QUALITY', 'high').toLowerCase(),
+    // Tentativas de download (retry)
+    downloadRetries: Math.min(5, Math.max(0, envInt('DOWNLOAD_RETRIES', 3))),
+    // Usar aria2c se disponível (ainda mais rápido)
+    useAria2c: envBool('USE_ARIA2C', false),
+    // Concorrência global de downloads
+    maxConcurrentDownloads: Math.min(5, Math.max(1, envInt('MAX_CONCURRENT_DOWNLOADS', 3))),
+    // Preferir yt-dlp sempre que disponível (mais rápido e estável que ytdl-core)
+    preferYtdlp: envBool('PREFER_YTDLP', true),
   },
 
   external: {

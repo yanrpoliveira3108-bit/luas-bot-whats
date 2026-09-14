@@ -1,12 +1,13 @@
 /**
- * downloaders/youtube.js — busca e download de áudio/vídeo do YouTube.
+ * downloaders/youtube.js — busca e download de áudio/vídeo do YouTube (OTIMIZADO).
  *
- * Usa @distube/ytdl-core (mantido) + yt-search.
- * - playerClients fixos: o YouTube bloqueia os clients padrão (MWEB/ANDROID);
- *   o client WEB é o que continua devolvendo formatos reproduzíveis.
- * - limite de tamanho e timeout
- * - nomes seguros
- * - nunca trava o processo principal (streams com AbortController/timer)
+ * Melhorias de velocidade e qualidade:
+ * - Qualidade configurável via .env: YT_VIDEO_QUALITY (best/1080/720/480), YT_AUDIO_QUALITY
+ * - Fragmentos concorrentes: YT_CONCURRENT_FRAGMENTS (1-16) — download DASH paralelo
+ * - yt-dlp com --buffer-size, --http-chunk-size, --retries, --fragment-retries
+ * - aria2c opcional (USE_ARIA2C) para download ainda mais rápido
+ * - ytdl-core fallback com highWaterMark 32MB e escolha de maior qualidade
+ * - Limite de tamanho e timeout respeitados
  */
 
 'use strict';
@@ -21,24 +22,18 @@ const logger = require('../utils/logger').child('youtube');
 const { safeFileName, deleteFile } = require('../utils/download');
 
 const MAX_BYTES = CONFIG.limits.maxDownloadMB * 1024 * 1024;
+const DL = CONFIG.downloader || {};
 
-/**
- * Clients na ordem de preferência. 'WEB' é o único que devolve formatos
- * reproduzíveis hoje; os demais servem de fallback para o futuro.
- */
 const PLAYER_CLIENTS = ['WEB', 'WEB_EMBEDDED', 'TV', 'ANDROID', 'IOS'];
 
-/* ------------------------- yt-dlp (preferencial) ---------------------- */
-// O yt-dlp acompanha as mudanças do YouTube muito mais rápido que o
-// ytdl-core (decifrador etc.). No Termux: `pkg install yt-dlp`. Quando
-// disponível, é o motor usado; senão, cai no ytdl-core.
+/* ------------------------- detecção de binários ---------------------- */
 
 let _ytdlp;
 function ytdlpAvailable() {
   if (_ytdlp === undefined) {
     _ytdlp = false;
     try {
-      const r = spawnSync('yt-dlp', ['--version'], { stdio: 'ignore', timeout: 15000 });
+      const r = spawnSync('yt-dlp', ['--version'], { stdio: 'ignore', timeout: 8000 });
       _ytdlp = !r.error && r.status === 0;
     } catch (_) {
       _ytdlp = false;
@@ -52,7 +47,7 @@ function ffmpegAvailable() {
   if (_ffmpeg === undefined) {
     _ffmpeg = false;
     try {
-      const r = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore', timeout: 15000 });
+      const r = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore', timeout: 8000 });
       _ffmpeg = !r.error && r.status === 0;
     } catch (_) {
       _ffmpeg = false;
@@ -61,9 +56,23 @@ function ffmpegAvailable() {
   return _ffmpeg;
 }
 
+let _aria2c;
+function aria2cAvailable() {
+  if (_aria2c === undefined) {
+    _aria2c = false;
+    try {
+      const r = spawnSync('aria2c', ['--version'], { stdio: 'ignore', timeout: 5000 });
+      _aria2c = !r.error && r.status === 0;
+    } catch (_) {
+      _aria2c = false;
+    }
+  }
+  return _aria2c;
+}
+
 function execYtdlp(args, timeoutMs) {
   return new Promise((resolve, reject) => {
-    execFile('yt-dlp', args, { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile('yt-dlp', args, { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
         const msg = ((stderr || err.message || '').split('\n')[0] || '').trim();
         const e = new Error(msg || 'yt-dlp falhou');
@@ -86,7 +95,6 @@ function mapYtdlpError(msg) {
   return 'DOWNLOAD_FAILED';
 }
 
-/** Acha o arquivo gerado pelo yt-dlp (o template tem .%(ext)s). */
 function findDownloaded(dir, prefix) {
   try {
     for (const f of fs.readdirSync(dir)) {
@@ -94,36 +102,60 @@ function findDownloaded(dir, prefix) {
         return path.join(dir, f);
       }
     }
-  } catch (_) {
-    /* ignora */
-  }
+  } catch (_) {}
   return null;
 }
 
-/**
- * Baixa áudio/vídeo do YouTube usando o yt-dlp.
- *
- * Tenta primeiro o client padrão (melhor qualidade: DASH mesclado via ffmpeg).
- * Se o YouTube bloquear ("Sign in to confirm you're not a bot", comum em IP de
- * datacenter) ou negar o formato, tenta de novo com o client `android`, que
- * costuma devolver o formato combinado (itag 18, 360p A+V) mesmo bloqueado.
- */
+/* ------------------------- formatos de qualidade ---------------------- */
+
+function getVideoQuality() {
+  return DL.ytVideoQuality || 720;
+}
+
+function buildVideoFormat(quality, hasFfmpeg) {
+  // quality = 'best' ou número (360,480,720,1080,1440,2160)
+  if (quality === 'best') {
+    return hasFfmpeg
+      ? 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b'
+      : 'b[ext=mp4]/b';
+  }
+  const h = Number(quality) || 720;
+  return hasFfmpeg
+    ? `bv*[height<=${h}][ext=mp4]+ba[ext=m4a]/b[ext=mp4][height<=${h}]/b[ext=mp4]/b`
+    : `b[ext=mp4][height<=${h}]/b[ext=mp4]/b`;
+}
+
+function buildAudioFormat() {
+  const q = (DL.ytAudioQuality || 'best').toLowerCase();
+  // best = melhor disponível (m4a 256k ou opus)
+  if (q === 'best') return 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best';
+  // 320k, 256k etc — tenta bitrate específico
+  if (q.includes('320')) return 'bestaudio[ext=m4a][abr>=320]/bestaudio[abr>=320]/bestaudio';
+  if (q.includes('256')) return 'bestaudio[ext=m4a][abr>=192]/bestaudio[abr>=192]/bestaudio';
+  if (q.includes('192')) return 'bestaudio[ext=m4a][abr>=128]/bestaudio/bestaudio';
+  return 'bestaudio[ext=m4a]/bestaudio/bestaudio';
+}
+
+/* ------------------------- download yt-dlp (alta velocidade) ---------------------- */
+
 async function ytdlpDownload(url, suggestedName, kind) {
   const base = safeFileName(suggestedName || 'youtube', '');
   const outTemplate = path.join(CONFIG.paths.tmpDir, base + '.%(ext)s');
 
-  const fmtDefault = kind === 'audio'
-    ? 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio'
-    : ffmpegAvailable()
-      // vídeo + áudio separados (DASH) mesclados pelo ffmpeg → mp4 final
-      ? 'bv*[height<=480][ext=mp4]+ba[ext=m4a]/b[ext=mp4][height<=480]/b[ext=mp4]/b'
-      // sem ffmpeg: só formatos já combinados
-      : 'b[ext=mp4][height<=480]/b[ext=mp4]/b';
+  const hasFfmpeg = ffmpegAvailable();
+  const quality = getVideoQuality();
+  const concurrent = DL.ytConcurrentFragments || 8;
 
-  // client android só devolve formatos combinados → sem mesclagem necessária
+  const fmtDefault = kind === 'audio'
+    ? buildAudioFormat()
+    : buildVideoFormat(quality, hasFfmpeg);
+
+  // fallback android — formatos combinados, útil quando YouTube bloqueia IP de datacenter
   const fmtAndroid = kind === 'audio'
-    ? 'b[height<=480]/b'
-    : 'b[height<=480][ext=mp4]/b[ext=mp4]/b';
+    ? 'b[height<=720]/b'
+    : quality === 'best'
+      ? 'b[ext=mp4]/b'
+      : `b[ext=mp4][height<=${quality}]/b[ext=mp4]/b`;
 
   const attempts = [
     { fmt: fmtDefault, android: false },
@@ -133,28 +165,42 @@ async function ytdlpDownload(url, suggestedName, kind) {
   let firstErr;
   for (const att of attempts) {
     try {
-      return await runYtdlpAttempt(url, suggestedName, base, outTemplate, kind, att);
+      return await runYtdlpAttempt(url, suggestedName, base, outTemplate, kind, att, concurrent);
     } catch (err) {
       if (!firstErr) firstErr = err;
       if (!att.android) {
-        logger.warn({ err: err.message, code: err.code }, 'yt-dlp (client padrão) falhou — tentando client android');
+        logger.warn({ err: err.message, code: err.code }, 'yt-dlp padrão falhou — tentando android');
       }
     }
   }
   throw firstErr;
 }
 
-/** Executa uma tentativa do yt-dlp e devolve o objeto de download. */
-async function runYtdlpAttempt(url, suggestedName, base, outTemplate, kind, att) {
+async function runYtdlpAttempt(url, suggestedName, base, outTemplate, kind, att, concurrent) {
   const args = [
     '-f', att.fmt,
     '--no-playlist',
     '--max-filesize', `${CONFIG.limits.maxDownloadMB}M`,
     '--no-warnings',
+    '--no-mtime',
+    '--no-overwrites',
+    '--retries', '3',
+    '--fragment-retries', '5',
+    '--extractor-retries', '2',
+    '--concurrent-fragments', String(concurrent),
+    '--buffer-size', '32K',
+    '--http-chunk-size', '10M',
   ];
-  if (att.android) args.push('--extractor-args', 'youtube:player_client=android');
-  // after_move: só imprime após o download (o --print simples implicaria
-  // --simulate e não baixaria nada)
+
+  // aria2c para download ainda mais rápido (se habilitado e disponível)
+  if (DL.useAria2c && aria2cAvailable()) {
+    args.push('--downloader', 'aria2c', '--downloader-args', 'aria2c:-x 8 -k 1M');
+  }
+
+  if (att.android) {
+    args.push('--extractor-args', 'youtube:player_client=android');
+  }
+
   args.push(
     '--print', 'after_move:%(title)s',
     '--print', 'after_move:%(uploader)s',
@@ -162,11 +208,22 @@ async function runYtdlpAttempt(url, suggestedName, base, outTemplate, kind, att)
     '-o', outTemplate,
     url,
   );
+
   if (kind === 'video' && ffmpegAvailable() && !att.android) {
     args.splice(args.indexOf('--no-simulate'), 0, '--merge-output-format', 'mp4');
   }
+
+  // áudio: extrai m4a de alta qualidade quando possível
+  if (kind === 'audio' && ffmpegAvailable()) {
+    // mantém m4a original se já for m4a, senão converte com bitrate alto
+    const aq = DL.ytAudioQuality || 'best';
+    if (aq !== 'best' && aq.includes('mp3')) {
+      args.splice(args.indexOf('--no-simulate'), 0, '--extract-audio', '--audio-format', 'mp3', '--audio-quality', '0');
+    }
+  }
+
   const stdout = await execYtdlp(args, CONFIG.limits.downloadTimeoutMs);
-  const lines = String(stdout || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const lines = String(stdout || '').split('\n').map(l => l.trim()).filter(Boolean);
   const title = lines[0] || suggestedName || 'YouTube';
   const author = lines[1] || '';
 
@@ -191,16 +248,17 @@ async function runYtdlpAttempt(url, suggestedName, base, outTemplate, kind, att)
     author,
     duration: 0,
     thumbnail: '',
-    mimetype: isVideo ? 'video/mp4' : ext === 'm4a' || ext === 'mp4' ? 'audio/mp4' : 'audio/webm',
+    mimetype: isVideo ? 'video/mp4' : ext === 'm4a' || ext === 'mp4' ? 'audio/mp4' : ext === 'mp3' ? 'audio/mpeg' : 'audio/webm',
     engine: att.android ? 'yt-dlp (android)' : 'yt-dlp',
   };
 }
 
-/** Busca vídeos no YouTube. */
+/* ------------------------- busca ---------------------- */
+
 async function search(query, limit = 5) {
   const r = await yts({ query: String(query || '').trim() });
   const videos = (r && r.videos) || [];
-  return videos.slice(0, limit).map((v) => ({
+  return videos.slice(0, limit).map(v => ({
     title: v.title,
     url: v.url,
     duration: v.duration && v.duration.timestamp,
@@ -214,22 +272,21 @@ function validateUrl(url) {
   return ytdl.validateURL(String(url || ''));
 }
 
-/** Converte erros do YouTube em erros amigáveis com código. */
 function friendlyError(err) {
   const m = String((err && err.message) || '');
   const code = (err && err.code) || '';
   if (m.includes('decipher') || m.includes('n transform') || m.includes('player-script') || m.includes('Could not parse')) {
-    const e = new Error('O YouTube mudou e o motor reserva (ytdl-core) não consegue extrair o vídeo.\n▸ No Termux, instale o yt-dlp: pkg install yt-dlp — e reinicie o bot.');
+    const e = new Error('O YouTube mudou e o motor reserva (ytdl-core) não consegue extrair.\n▸ No Termux: pkg install yt-dlp — e reinicie o bot.');
     e.code = 'DOWNLOAD_FAILED';
     return e;
   }
   if (m.includes('403') || m.includes('Forbidden')) {
-    const e = new Error('O YouTube recusou o download (bloqueio de rede/região ou vídeo restrito).');
+    const e = new Error('YouTube recusou o download (bloqueio de rede/região ou vídeo restrito).');
     e.code = 'YOUTUBE_BLOCKED';
     return e;
   }
   if (code === 'NO_FORMAT' || m.includes('playable formats') || m.includes('NO_FORMAT')) {
-    const e = new Error('Nenhum formato disponível para este vídeo (pode ser restrito ou muito recente).');
+    const e = new Error('Nenhum formato disponível (vídeo restrito ou muito recente).');
     e.code = 'NO_FORMAT';
     return e;
   }
@@ -248,25 +305,30 @@ async function getInfo(url) {
       return await ytdl.getInfo(url, { playerClients: clients });
     } catch (err) {
       lastErr = err;
-      logger.warn({ err: err.message, clients }, 'ytdl getInfo falhou com clients, tentando próximo');
+      logger.warn({ err: err.message, clients }, 'ytdl getInfo falhou, tentando próximo');
     }
   }
   throw friendlyError(lastErr);
 }
 
-/**
- * Escolhe um formato de áudio. Prefere áudio puro (m4a/opus); quando o
- * cliente WEB só devolve o formato combinado (A+V), usa ele como fallback —
- * o arquivo mp4 é enviado como áudio (o WhatsApp lê a faixa de áudio).
- */
+/* ------------------------- escolha de formato (alta qualidade) ---------------------- */
+
 function pickAudioFormat(info) {
-  const audioOnly = info.formats.filter((f) => f.hasAudio && !f.hasVideo);
-  const m4a = audioOnly.find((f) => f.container === 'm4a' || (f.mimeType && f.mimeType.includes('mp4')));
+  const audioOnly = info.formats
+    .filter(f => f.hasAudio && !f.hasVideo)
+    .sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0) || (b.bitrate || 0) - (a.bitrate || 0));
+
+  // prefere m4a (compatível com WhatsApp) com maior bitrate
+  const m4a = audioOnly.find(f => f.container === 'm4a' || (f.mimeType && f.mimeType.includes('mp4')));
   const chosen = m4a || audioOnly[0];
+
   if (chosen) return { format: chosen, combined: false };
+
+  // fallback: combinado com áudio
   const combined = info.formats
-    .filter((f) => f.hasAudio && f.hasVideo)
-    .sort((a, b) => (a.height || 9999) - (b.height || 9999))[0];
+    .filter(f => f.hasAudio && f.hasVideo)
+    .sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0))[0];
+
   if (!combined) {
     const e = new Error('NO_FORMAT');
     e.code = 'NO_FORMAT';
@@ -275,17 +337,33 @@ function pickAudioFormat(info) {
   return { format: combined, combined: true };
 }
 
-/** Escolhe um formato de vídeo mp4 com vídeo+áudio (menor resolução). */
 function pickVideoFormat(info) {
-  const formats = info.formats
-    .filter((f) => f.hasVideo && f.hasAudio && f.container === 'mp4')
-    .sort((a, b) => (a.height || 9999) - (b.height || 9999));
-  if (!formats.length) {
+  const quality = getVideoQuality();
+  let formats = info.formats.filter(f => f.hasVideo && f.hasAudio);
+
+  // filtra por qualidade configurada
+  if (quality !== 'best') {
+    const h = Number(quality) || 720;
+    formats = formats.filter(f => (f.height || 0) <= h);
+  }
+
+  // prefere mp4
+  const mp4 = formats.filter(f => f.container === 'mp4');
+  const pool = mp4.length ? mp4 : formats;
+
+  // ordena por qualidade DESCENDENTE (maior primeiro) — alta qualidade
+  pool.sort((a, b) => {
+    const ha = a.height || 0, hb = b.height || 0;
+    if (hb !== ha) return hb - ha;
+    return (b.bitrate || 0) - (a.bitrate || 0);
+  });
+
+  if (!pool.length) {
     const e = new Error('NO_FORMAT');
     e.code = 'NO_FORMAT';
     throw e;
   }
-  return formats[0];
+  return pool[0];
 }
 
 function streamToFile(stream, dest, maxBytes, timeoutMs = 180000) {
@@ -298,9 +376,7 @@ function streamToFile(stream, dest, maxBytes, timeoutMs = 180000) {
       settled = true;
       clearTimeout(timer);
       if (err) {
-        try {
-          fs.rmSync(dest, { force: true });
-        } catch (_) {}
+        try { fs.rmSync(dest, { force: true }); } catch (_) {}
         reject(err);
       } else {
         resolve(size);
@@ -311,22 +387,16 @@ function streamToFile(stream, dest, maxBytes, timeoutMs = 180000) {
       stream.destroy(new Error('TIMEOUT'));
     }, timeoutMs);
 
-    const file = fs.createWriteStream(dest, { flags: 'wx' });
-    stream.on('data', (c) => {
+    const file = fs.createWriteStream(dest, { flags: 'wx', highWaterMark: 1024 * 1024 });
+    stream.on('data', c => {
       received += c.length;
       if (received > maxBytes) {
         tooBig = true;
         stream.destroy(new Error('FILE_TOO_BIG'));
       }
     });
-    stream.on('error', (err) => {
-      file.destroy();
-      finish(err);
-    });
-    file.on('error', (err) => {
-      stream.destroy();
-      finish(err);
-    });
+    stream.on('error', err => { file.destroy(); finish(err); });
+    file.on('error', err => { stream.destroy(); finish(err); });
     file.on('finish', () => {
       if (tooBig) finish(new Error('FILE_TOO_BIG'));
       else finish(null, received);
@@ -335,15 +405,15 @@ function streamToFile(stream, dest, maxBytes, timeoutMs = 180000) {
   });
 }
 
-/** Baixa o áudio de um vídeo do YouTube. */
+/* ------------------------- downloads principais ---------------------- */
+
 async function downloadAudio(url, suggestedName) {
   if (!validateUrl(url)) {
     const e = new Error('URL inválida');
     e.code = 'INVALID_URL';
     throw e;
   }
-  // motor preferencial: yt-dlp (robusto contra mudanças do YouTube)
-  if (ytdlpAvailable()) {
+  if (DL.preferYtdlp !== false && ytdlpAvailable()) {
     try {
       return await ytdlpDownload(url, suggestedName, 'audio');
     } catch (err) {
@@ -354,10 +424,14 @@ async function downloadAudio(url, suggestedName) {
   try {
     const info = await getInfo(url);
     const { format, combined } = pickAudioFormat(info);
-    const ext = combined ? 'mp4' : format.container === 'm4a' ? 'm4a' : 'webm';
+    const ext = combined ? 'mp4' : format.container === 'm4a' ? 'm4a' : format.container === 'mp3' ? 'mp3' : 'webm';
     const dest = path.join(CONFIG.paths.tmpDir, safeFileName(suggestedName || info.videoDetails.title, ext));
 
-    const stream = ytdl(url, { filter: (f) => f.itag === format.itag, playerClients: PLAYER_CLIENTS });
+    const stream = ytdl(url, {
+      filter: f => f.itag === format.itag,
+      playerClients: PLAYER_CLIENTS,
+      highWaterMark: 1 << 25, // 32MB — download mais rápido
+    });
     await streamToFile(stream, dest, MAX_BYTES);
     return {
       path: dest,
@@ -365,7 +439,7 @@ async function downloadAudio(url, suggestedName) {
       author: info.videoDetails.author && info.videoDetails.author.name,
       duration: Number(info.videoDetails.lengthSeconds) || 0,
       thumbnail: info.videoDetails.thumbnails && info.videoDetails.thumbnails.length ? info.videoDetails.thumbnails[info.videoDetails.thumbnails.length - 1].url : '',
-      mimetype: combined ? 'audio/mp4' : ext === 'm4a' ? 'audio/mp4' : 'audio/ogg',
+      mimetype: combined ? 'audio/mp4' : ext === 'm4a' ? 'audio/mp4' : ext === 'mp3' ? 'audio/mpeg' : 'audio/ogg',
       combined,
     };
   } catch (err) {
@@ -373,14 +447,13 @@ async function downloadAudio(url, suggestedName) {
   }
 }
 
-/** Baixa o vídeo (mp4) de um vídeo do YouTube. */
 async function downloadVideo(url, suggestedName) {
   if (!validateUrl(url)) {
     const e = new Error('URL inválida');
     e.code = 'INVALID_URL';
     throw e;
   }
-  if (ytdlpAvailable()) {
+  if (DL.preferYtdlp !== false && ytdlpAvailable()) {
     try {
       return await ytdlpDownload(url, suggestedName, 'video');
     } catch (err) {
@@ -393,7 +466,11 @@ async function downloadVideo(url, suggestedName) {
     const format = pickVideoFormat(info);
     const dest = path.join(CONFIG.paths.tmpDir, safeFileName(suggestedName || info.videoDetails.title, 'mp4'));
 
-    const stream = ytdl(url, { filter: (f) => f.itag === format.itag, playerClients: PLAYER_CLIENTS });
+    const stream = ytdl(url, {
+      filter: f => f.itag === format.itag,
+      playerClients: PLAYER_CLIENTS,
+      highWaterMark: 1 << 25,
+    });
     await streamToFile(stream, dest, MAX_BYTES);
     return {
       path: dest,
@@ -408,4 +485,18 @@ async function downloadVideo(url, suggestedName) {
   }
 }
 
-module.exports = { search, validateUrl, getInfo, downloadAudio, downloadVideo, friendlyError, ytdlpAvailable, ffmpegAvailable, mapYtdlpError, deleteFile };
+module.exports = {
+  search,
+  validateUrl,
+  getInfo,
+  downloadAudio,
+  downloadVideo,
+  friendlyError,
+  ytdlpAvailable,
+  ffmpegAvailable,
+  aria2cAvailable,
+  mapYtdlpError,
+  deleteFile,
+  buildVideoFormat,
+  buildAudioFormat,
+};
