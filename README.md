@@ -42,6 +42,79 @@ Lua é um bot WhatsApp completo com:
 
 ---
 
+## 🎨 Lua Bot 2.0 — camada visual e de resiliência
+
+A partir da 2.0 toda a identidade visual e a robustez de I/O ficam em módulos
+centrais. Nenhum comando monta template na mão nem faz chamada externa sem
+timeout.
+
+| Módulo | Responsabilidade |
+| --- | --- |
+| `utils/fonts.js` | Fontes Unicode (18 estilos: bold, italic, script, fraktur, double, mono, smallCaps...). `fonts.safe()` estiliza **sem tocar** em comandos, URLs, jids, IDs e caminhos. |
+| `utils/dividers.js` | 56 separadores em 13 categorias (`floral`, `dark`, `minimal`, `music`, `cute`, `royal`, `warning`, `box`, `wave`, `heavy`, `anime`, `cyber`, `classic`). `divider('music')`, `divider.random()`, `divider.box(titulo)`. |
+| `utils/icons.js` | Ícones semânticos (`success`, `error`, `warning`, `loading`, `music`, `admin`...) + tema visual por categoria. |
+| `utils/uiKit.js` | Componentes: `header`, `footer`, `card`, `progress`, `list`, `button`, `divider` e mensagens `error/success/loading/permission/notFound/info`. Também `truncate`, `safeText` e `paginate` (limites do WhatsApp). |
+| `utils/progress.js` | Mensagem de progresso reutilizável: `state()`, `update({percent})`, `complete()`, `fail()`. **Uma mensagem por operação** (nada de edições concorrentes), throttle de 700 ms e TTL com coleta automática. |
+| `utils/stateMachine.js` | `SEARCHING → FOUND → DOWNLOADING → CONVERTING → UPLOADING → DONE`, com `ERROR` acessível de qualquer etapa. Transição inválida lança `INVALID_TRANSITION`. |
+| `utils/resilience.js` | `withTimeout()` (com `AbortSignal`) e `retry()` com backoff exponencial — **sem retry** para erro permanente (auth, 404, input inválido, permissão). |
+| `utils/commandCache.js` | Índice invertido (nome, alias, categoria, descrição, keywords) para `!menu <termo>` / `!help <termo>`; lookup de trigger continua O(1) pelo registry. |
+| `utils/tmpCleaner.js` | Ciclo `create → use → cleanup` (`withTempFile` com `try/finally`) + varredura de órfãos no boot e a cada 10 min. |
+
+### Fluxo de mídia em etapas (`!play`, `!ytmp3`, `!ytmp4`)
+
+```
+╔════════╗
+║ 🎵 𝓟𝓛𝓐𝓨 ║      Estado: BUSCANDO
+╚════════╝
+```
+
+O bot **não inventa porcentagem**: sem progresso real ele mostra a etapa
+(`BUSCANDO`, `ENCONTRADO`, `BAIXANDO`, `ENVIANDO`, `CONCLUÍDO`). Ao terminar,
+exibe card com título, canal, duração, formato, tamanho e tempo de
+processamento — apenas os dados que realmente existem.
+
+```
+╭─〔 🎵 𝐏𝐋𝐀𝐘 𝐑𝐄𝐀𝐃𝐘 〕
+│
+│ 🎵 *Título:* Imagine Dragons - Believer
+│ ℹ️ *Artista/Canal:* ImagineDragonsVEVO
+│ ⏱️ *Duração:* 3m 34s
+│ ⬇️ *Formato:* MP3
+│ ✨ *Tamanho:* 4.1 MB
+│
+╰──────────────────────────
+```
+
+### Identidade visual
+
+- `!fontes` lista os 18 estilos; `!fontes <estilo> <texto>` aplica no seu texto.
+- `!dividers [categoria]` mostra os separadores por categoria.
+- `!tema <preset>` troca o tema de cores (persistido no banco).
+
+Texto decorativo pode ser estilizado; **comandos executáveis nunca são** — `!fontes mono use !play` devolve `𝚞𝚜𝚎 !play`, com o comando copiável.
+
+### Metadados de comando (2.0)
+
+Além de `name`, `commands`, `category`, `description`, `usage`, `cooldown`,
+`ownerOnly`, `adminOnly`, `groupOnly`, `privateOnly` e `hidden`, os comandos
+aceitam `examples` (array) e `tags` (array, indexado pela busca do menu):
+
+```js
+module.exports = [
+  {
+    name: 'play',
+    commands: ['play'],
+    category: 'downloads',
+    description: 'Busca músicas/vídeos no YouTube e mostra opções para baixar.',
+    usage: '!play <nome da música>',
+    examples: ['!play imagine dragons - believer'],
+    tags: ['música', 'audio', 'youtube'],
+    cooldown: 8000,
+    execute: async (ctx) => { /* ... */ },
+  },
+];
+```
+
 ## Estrutura
 
 ```
