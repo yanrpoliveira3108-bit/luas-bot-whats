@@ -1,127 +1,312 @@
 # 🌙 Lua — Bot WhatsApp
 
-Bot WhatsApp **modular**, **estável** e **realmente funcional**, construído com **Node.js + Baileys**, usando **pairing code** (sem QR Code), banco de dados local (SQLite), arquitetura de **plugins/comandos** e **interface profissional de terminal** com entrada inteligente de número telefônico.
+Bot WhatsApp **modular, estável, seguro e profissional**, construído com **Node.js + Baileys**, usando **pairing code** (sem QR Code), banco local **SQLite**, arquitetura de **plugins/comandos**, **interface de terminal profissional** e sistema de **atualização via Git**.
 
-> Identidade, código e arquitetura próprios. Nenhum código proprietário de outros bots foi copiado.
+> Identidade, código e arquitetura próprios. Foco em estabilidade, segurança, compatibilidade com Termux e facilidade de manutenção pelo GitHub.
 
----
-
-## ✅ Estado atual
-
-- **273+ comandos reais**, organizados em 14 plugins/categorias — incluindo **Lua Life** (simulador de vida + economia, ver `README_LUA_LIFE.md`) e **IA** (assistente local + API externa opcional).
-- Interface de terminal interativa com **pairing code** e **parsing internacional de números** (libphonenumber-js).
-- Nenhum comando falso, nenhum botão decorativo, nenhum import quebrado.
-- Verificado por `npm test` (auditoria + smoke + testes de telefone).
+**Repositório oficial:** https://github.com/yanrpoliveira3108-bit/luas-bot-whats
 
 ---
 
-## 1. Requisitos
+## 📋 Índice
 
-| Item | Versão recomendada |
-|---|---|
-| Node.js | **22 LTS ou superior** (testado em 20.20.2 e 26.4.0) |
-| npm | vem com o Node |
-| ffmpeg | **opcional** — necessário apenas para stickers **animados** (vídeo/GIF). Stickers estáticos (imagem/texto) e `!toimg` funcionam sem ele (fallback jimp + libwebp). |
-| Celular | WhatsApp com "Aparelhos conectados" (para o pairing code) |
+- [O que é](#o-que-é)
+- [Estrutura](#estrutura)
+- [Requisitos](#requisitos)
+- [Instalação](#instalação)
+- [Configuração](#configuração)
+- [Variáveis de Ambiente](#variáveis-de-ambiente)
+- [Execução](#execução)
+- [Atualização](#atualização)
+- [Troubleshooting](#troubleshooting)
+- [Recuperação](#recuperação)
+- [Desenvolvimento](#desenvolvimento)
+- [Testes](#testes)
+- [Segurança](#segurança)
+- [Termux](#termux)
 
-> ⚠️ **Node 22+ é obrigatório**: o `better-sqlite3@13` (usado pelo banco) exige Node ≥ 22. O Node 20 está fora de suporte desde abril/2026.
+---
+
+## O que é
+
+Lua é um bot WhatsApp completo com:
+
+- **273+ comandos reais** organizados em 14 categorias (admin, downloads, stickers, IA, RPG, games, anime, utilidades etc.)
+- **Lua Life** — simulador de vida + economia (trabalho, banco, loja, fazenda, missões, conquistas)
+- **IA** — assistente local offline + API externa opcional (OpenAI compatível) com fallback honesto
+- **Pairing code** — sem QR Code, com parser internacional de números (libphonenumber-js)
+- **Banco SQLite** — via better-sqlite3, com migrações versionadas e backup automático
+- **Arquitetura de plugins** — cada pasta em `commands/` é um plugin com enable/disable
+- **Logs estruturados** — pino, sem expor segredos, com rotação diária
+- **Atualização segura via Git** — preserva `.env`, `session/`, `database/`, `backup/`, `logs/`
+
+---
+
+## Estrutura
+
+```
+lua/  (raiz do repositório = ~/lua no Termux)
+├── index.js                 # ponto de entrada
+├── config.js                # configuração central (lê .env)
+├── package.json / .npmrc
+├── .env.example / .gitignore
+├── install.sh / start.sh / update.sh
+├── README.md / HOST.md / README_LUA_LIFE.md
+├── config/
+│   └── themes.js            # 10 presets de tema (fonte única de cores)
+├── connection/
+│   ├── connect.js           # Baileys + reconexão + anti dupla conexão
+│   ├── pairing.js           # pairing code
+│   ├── phoneParser.js       # libphonenumber-js wrapper
+│   └── connectionUI.js      # interface interativa do terminal
+├── commands/                # plugins (1 pasta = 1 plugin)
+│   ├── loader.js            # carregamento automático
+│   ├── _shared/             # helpers (não são comandos)
+│   └── admin/ ai/ anime/ downloads/ fun/ games/ general/ life/ members/ owner/ rpg/ stickers/ utility/
+├── downloaders/             # youtube, tiktok, instagram, facebook, pinterest, twitter, reddit
+├── handlers/
+│   ├── commandHandler.js    # pipeline de mensagens
+│   ├── buttonHandler.js     # botões/listas
+│   ├── groupHandler.js      # eventos de grupo + filtros
+│   └── errorHandler.js
+├── engine/
+│   ├── plugins.js           # registry de comandos
+│   └── interactionEngine.js
+├── database/
+│   ├── database.js          # núcleo SQLite + migrações
+│   ├── users.js, groups.js, economy.js, life.js, etc.
+│   └── seed/                # dados iniciais
+├── utils/                   # logger, permissões, cache, cooldown, etc.
+├── menus/                   # menus interativos
+├── ai/                      # provedores de IA (local, api, fallback)
+├── anime/                   # provedores anime (jikan)
+├── assets/                  # imagens (menu.jpg, actions, welcome/goodbye)
+├── scripts/
+│   ├── audit.js             # auditoria automática
+│   ├── diagnose.js          # diagnóstico do ambiente
+│   └── sticker-selftest.js
+├── test/                    # testes automatizados
+├── vendor/
+│   └── boruto-vk7-baileys/  # Baileys vendored (JS puro, sem binários nativos)
+├── tmp/                     # temporários (.gitkeep)
+├── session/                 # credenciais WhatsApp (NÃO versionado)
+├── database/lua.db          # banco (NÃO versionado)
+├── logs/                    # logs diários (NÃO versionado)
+└── backup/                  # snapshots de atualização (NÃO versionado)
+```
+
+**O que é versionado vs local:**
+
+| Tipo | Exemplos | No Git? |
+|------|----------|---------|
+| Código | `commands/`, `handlers/`, `utils/`, `config.js`, `index.js` | ✅ Sim |
+| Configuração exemplo | `.env.example` | ✅ Sim |
+| Configuração local | `.env` | ❌ Não (.gitignore) |
+| Sessão WhatsApp | `session/` | ❌ Não |
+| Banco | `database/*.db` | ❌ Não |
+| Logs | `logs/` | ❌ Não |
+| Backups | `backup/` | ❌ Não |
+| Temporários | `tmp/`, `*-player-script.js` | ❌ Não |
+| Dependências | `node_modules/` | ❌ Não |
+
+---
+
+## Requisitos
+
+| Item | Versão |
+|------|--------|
+| Node.js | **≥22.0.0** (obrigatório para better-sqlite3@13) |
+| npm | vem com Node |
+| git | para atualização via GitHub |
+| ffmpeg | opcional, mas recomendado (stickers animados + YouTube vídeo) |
+| yt-dlp | opcional, recomendado (YouTube mais estável) |
+| Python + make + clang | apenas no Termux/Android para compilar better-sqlite3 |
 
 **Termux (Android):**
+
 ```bash
 pkg update && pkg upgrade
-pkg install nodejs-lts        # Node 22/24 (ou nodejs para o mais recente)
-pkg install python make clang # ferramentas para compilar o better-sqlite3
-pkg install ffmpeg            # recomendado (stickers de vídeo)
-pkg install git
+pkg install nodejs-lts python make clang ffmpeg yt-dlp git
 ```
 
-> ⚠️ **Correção obrigatória no Termux** (bug do node-gyp): antes do primeiro `npm install`, rode uma única vez:
-> ```bash
-> export GYP_DEFINES="android_ndk_path=''"
-> mkdir -p ~/.gyp && echo "{'variables':{'android_ndk_path':''}}" > ~/.gyp/include.gypi
-> ```
-> Isso evita o erro `gyp: Undefined variable android_ndk_path in binding.gyp`. O `install.sh` e o `update.sh` **já aplicam isso automaticamente**.
-
----
-
-## 2. Instalação
+**Linux (Ubuntu/Debian):**
 
 ```bash
-# clone/entre na pasta do projeto (Termux: crie ~/lua e extraia o zip da pasta Downloads)
-cd lua
-
-# instala tudo (dependências, diretórios, .env, banco, módulo nativo)
-./install.sh
-# ou manualmente:
-npm install   # o .npmrc do projeto já define legacy-peer-deps=true
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs build-essential ffmpeg git
+# opcional: pip install yt-dlp
 ```
-
-> **Dica (Termux):** se você baixou o projeto e ele caiu na pasta Downloads, extraia e instale assim:
-> ```bash
-> pkg install python make clang                 # necessário para compilar o better-sqlite3
-> mkdir -p ~/lua && cd ~/lua
-> unzip -q ~/storage/downloads/lua*.zip -d .   # extrai o projeto
-> mv lua-main/* . 2>/dev/null; rmdir lua-main 2>/dev/null   # sobe o conteúdo, se houver subpasta
-> bash install.sh                              # instala dependências, .env e banco
-> ```
-> O `node_modules/` **não vem no zip** — é preciso rodar o `npm install` (feito pelo `install.sh`) uma vez antes do primeiro `npm start`.
-
-> **Por que `--legacy-peer-deps`?** A árvore de dependências do Baileys declara peers opcionais (`sharp`, `jimp`, `link-preview-js`…). O `.npmrc` do projeto define `legacy-peer-deps=true` para aceitar a combinação já validada pelos testes, **sem `--force`**. No Termux, o `install.sh`/`update.sh` ainda adicionam `--ignore-scripts` para pular o build nativo de `sharp`/`wrtc` (sem binário para Android e não usados pelo Lua).
-
-### Versões utilizadas (fixadas/testadas)
-
-| Pacote | Versão |
-|---|---|
-| `@innovatorssoft/baileys` | **7.4.7** (fork mantido da linha 7; única implementação ativa) |
-| `@itsukichan/libsignal-node` | 1.0.1 (protocolo criptográfico, usado pelo Baileys 7) |
-| `jimp` | 0.16.1 (pipeline de stickers e imagens) |
-| `pino` | ^9.6.0 (mesma família usada internamente pelo Baileys) |
-| `better-sqlite3` | ^13.0.3 (exige Node ≥ 22; compatível com Node 22/24/26) |
-| `@distube/ytdl-core` | ^4.16.12 (fork mantido do ytdl-core) |
-| `yt-search` | ^2.13.1 |
-| `node-webpmux` | ^3.2.1 (metadados de sticker + fallback webp sem ffmpeg) |
-| `dotenv` | ^16.4.5 |
-| `libphonenumber-js` | ^1.13.12 (parser internacional de números) |
-| `sharp` | ^0.32.6 (opcional) |
-
-> ℹ️ **Migração**: o Lua migrou de `@whiskeysockets/baileys@6.7.24` para **`@innovatorssoft/baileys@7.4.7`**. Existe apenas UMA implementação ativa (verifique com `npm list @innovatorssoft/baileys`). As APIs usadas pelo Lua (`makeWASocket`, `useMultiFileAuthState`, `makeCacheableSignalKeyStore`, `fetchLatestBaileysVersion`, `DisconnectReason`, `Browsers`, `downloadContentFromMessage`) foram auditadas e adaptadas para a nova versão.
 
 ---
 
-## 3. Configuração (`.env`)
+## Instalação
 
-O instalador cria o `.env` a partir de `.env.example`. **Edite antes de iniciar:**
+### Instalação oficial (recomendada — via Git)
+
+```bash
+git clone https://github.com/yanrpoliveira3108-bit/luas-bot-whats.git ~/lua
+cd ~/lua
+chmod +x update.sh start.sh
+./update.sh
+./start.sh
+```
+
+**O que cada comando faz:**
+
+1. `git clone https://github.com/yanrpoliveira3108-bit/luas-bot-whats.git ~/lua`
+   - Clona o repositório oficial para `~/lua` (pasta padrão no Termux)
+   - Cria a estrutura completa do projeto
+
+2. `cd ~/lua`
+   - Entra na raiz do projeto (onde estão `package.json`, `index.js`, `update.sh`)
+
+3. `chmod +x update.sh start.sh`
+   - Devolve permissão de execução (zip pode remover +x)
+
+4. `./update.sh`
+   - **Modo Git (padrão):**
+     - Valida que é repositório Git e remote origin aponta para `luas-bot-whats`
+     - Faz `git fetch` do GitHub
+     - Detecta alterações locais e ABORTA se houver risco de sobrescrever
+     - Faz `git pull --ff-only` seguro
+     - Cria snapshot em `backup/pre-update-*/` antes de alterar
+     - Preserva `.env`, `session/`, `database/`, `backup/`, `logs/`, `assets/menu.jpg`
+     - Instala/atualiza dependências se `package.json` mudou
+     - Compila `better-sqlite3` se necessário (Android)
+     - Roda `audit.js` + `smoke.js` para validar integridade
+     - Mostra commits e arquivos atualizados
+   - **Idempotente:** rodar 2x seguidas não corrompe
+
+5. `./start.sh`
+   - Verifica Node ≥22, npm, `.env` com OWNER_NUMBER, `node_modules`, `better-sqlite3`
+   - Cria diretórios (`session/`, `tmp/`, `database/`, `logs/`, `backup/`, `assets/`)
+   - Inicia o bot com auto-restart (para se dono usar `!shutdown`)
+   - Retorna código de erro se não conseguir iniciar
+
+### Instalação via pacote (legado — Downloads)
+
+Se você baixou um `lua-update-*.zip` na pasta Downloads:
+
+```bash
+mkdir -p ~/lua && cd ~/lua
+unzip -q ~/storage/downloads/lua*.zip -d .
+mv lua-main/* . 2>/dev/null; rmdir lua-main 2>/dev/null
+bash install.sh
+```
+
+Ou use o `update.sh` em modo arquivo:
+
+```bash
+cd ~/lua
+./update.sh ~/storage/downloads/lua-update-v1.0.0.zip
+```
+
+O `install.sh` também detecta automaticamente pacotes em `~/storage/downloads/` se a pasta estiver vazia.
+
+---
+
+## Configuração
+
+O instalador cria `.env` a partir de `.env.example`. **Edite antes de iniciar:**
+
+```bash
+nano .env
+```
+
+Exemplo mínimo:
 
 ```env
 BOT_NAME=Lua
-BOT_PREFIX=!                      # ⚠️ use BOT_PREFIX, nunca "PREFIX" (ver nota abaixo)
-OWNER_NUMBER=5511999999999        # OBRIGATÓRIO — DDI+DDD+número, só dígitos
+BOT_PREFIX=!
+OWNER_NUMBER=5511999999999
 OWNER_NAME=Dono
-PAIRING_NUMBER=                   # opcional: número usado no pairing (senão, pergunta no terminal)
-DEFAULT_COUNTRY=BR                # país padrão para números sem DDI explícito
-PRIVATE_MODE=false
-MAX_DOWNLOAD_MB=50
-LOG_LEVEL=info
-ENABLE_EVAL=false                 # !eval desabilitado por padrão (segurança)
 ```
 
-Nada sensível fica no código. As credenciais de sessão ficam em `session/` (nunca versionada) e **nunca são impressas no terminal**.
-
-> ⚠️ **Por que `BOT_PREFIX` e não `PREFIX`?** No Termux, `PREFIX` é uma variável de ambiente **do próprio sistema** (aponta para `/data/data/com.termux/files/usr`). O `dotenv` não sobrescreve variáveis já existentes, então usar `PREFIX` fazia o bot adotar esse caminho como prefixo — e **nenhum comando respondia**. O Lua agora usa `BOT_PREFIX` (e ainda aceita o `PREFIX` legado, desde que não seja um caminho).
+> **IMPORTANTE:** Use `BOT_PREFIX` e NÃO `PREFIX`. No Termux, `PREFIX` já existe como variável do sistema (`/data/data/com.termux/files/usr`) e o `dotenv` não sobrescreve variáveis existentes — usar `PREFIX` quebra todos os comandos.
 
 ---
 
-## 4. Como iniciar
+## Variáveis de Ambiente
+
+Todas as variáveis ficam em `.env` (nunca versionado). Veja `.env.example` completo.
+
+### Essenciais
+
+| Variável | Descrição | Exemplo |
+|----------|-----------|---------|
+| `BOT_NAME` | Nome do bot | `Lua` |
+| `BOT_PREFIX` | Prefixo dos comandos | `!` |
+| `OWNER_NUMBER` | Dono (DDI+DDD+número) | `5511999999999` |
+| `OWNER_NUMBERS` | Vários donos (vírgula) | `551199...,551198...` |
+| `OWNER_NAME` | Nome do dono | `Dono` |
+
+### Conexão
+
+| Variável | Descrição |
+|----------|-----------|
+| `PAIRING_NUMBER` | Número para pairing code (opcional, se vazio pergunta no terminal) |
+| `DEFAULT_COUNTRY` | País padrão para números sem DDI (ex.: `BR`) |
+| `WA_VERSION` | Versão do protocolo WhatsApp (opcional, ex.: `2,3000,1043857760`). Deixe vazio para auto-detecção |
+| `SESSION_DIR` | Pasta da sessão (padrão `./session`) |
+
+### Interface
+
+| Variável | Descrição |
+|----------|-----------|
+| `BUTTONS_ENABLED` | Botões interativos no menu (`true`/`false`) |
+| `LUA_THEME` | Tema visual (`LUA_NIGHT`, `LUA_VIOLET`, `LUA_GALAXY`, etc.) |
+| `LUA_UI_MODE` | Modo de menu (`text`, `buttons`, `auto`) |
+| `LUA_READMORE` | "Ler mais" em mensagens longas |
+
+### Limites
+
+| Variável | Descrição | Padrão |
+|----------|-----------|--------|
+| `DOWNLOAD_MAX_MB` | Limite download | `100` |
+| `MAX_UPLOAD_MB` | Limite upload | `60` |
+| `STICKER_MAX_MB` | Limite sticker | `15` |
+| `DEFAULT_COOLDOWN_MS` | Cooldown comandos | `3000` |
+
+### Lua Life (economia)
+
+| Variável | Descrição |
+|----------|-----------|
+| `LUA_COIN_SYMBOL` | Símbolo moeda (`LC`) |
+| `LUA_COIN_EMOJI` | Emoji moeda (`🪙`) |
+| `LUA_START_MONEY` | Dinheiro inicial |
+| `LUA_DAILY_BASE` / `LUA_DAILY_MAX` | Limites daily |
+
+### Logs e Recursos
+
+| Variável | Descrição |
+|----------|-----------|
+| `LOG_LEVEL` | Nível log (`info`, `debug`, `warn`) |
+| `LOG_TO_FILE` | Log em arquivo (`true`/`false`) |
+| `ENABLE_EVAL` | Habilita `!eval` (desabilitado por padrão — segurança) |
+| `PRIVATE_MODE` | Apenas dono + registrados (`true`/`false`) |
+
+### APIs Externas (opcionais)
+
+| Variável | Descrição |
+|----------|-----------|
+| `OPENWEATHER_API_KEY` | Clima (`!clima`) |
+| `AI_PROVIDER` | `auto`, `local`, `api` |
+| `AI_API_URL` | URL compatível OpenAI |
+| `AI_API_KEY` | Chave API IA |
+| `AI_MODEL` | Modelo (`gpt-4o-mini`) |
+
+---
+
+## Execução
 
 ```bash
-./start.sh      # inicia com reinício automático
-# ou
-npm start
-# ou
-node index.js
+./start.sh              # com auto-restart (recomendado)
+./start.sh --no-restart # uma única vez (para pm2/systemd)
+npm start               # direto
+node index.js           # direto
 ```
 
-Ao iniciar, o Lua mostra uma **tela profissional no terminal**:
+Ao iniciar, você verá:
 
 ```
 ╔══════════════════════════════════════╗
@@ -129,410 +314,310 @@ Ao iniciar, o Lua mostra uma **tela profissional no terminal**:
 ║        WhatsApp Assistant            ║
 ╚══════════════════════════════════════╝
 
-Inicializando sistema...
-
 ✓ Configuração carregada
 ✓ Banco de dados conectado
 ✓ Plugins carregados
 ✓ Comandos carregados
 ✓ Menus carregados
 ✓ Sistema de conexão iniciado
-```
 
-Depois, um **menu interativo**:
-
-```
 [1] Conectar WhatsApp
 [2] Configurações
 [3] Verificar sistema
 [0] Sair
 ```
 
----
+### Pairing Code (primeiro login)
 
-## 5. Pairing code (primeiro login)
+1. Escolha `[1] Conectar WhatsApp`
+2. Digite número em qualquer formato: `+55 11 99999-9999`, `5511999999999`, `+1 (742) 369-1883`
+3. Confirme número mascarado (`+55 *******9999`)
+4. Terminal mostra código: `ABCD-EFGH`
+5. No celular: WhatsApp → Aparelhos conectados → Conectar com número → digite código
+6. Sessão salva em `session/` e restaurada automaticamente depois
 
-1. Escolha **`[1] Conectar WhatsApp`**.
-2. Digite o número completo em **qualquer formato** (o sistema identifica país, DDI e DDD automaticamente):
+> QR Code nunca é usado (`printQRInTerminal: false`).
 
-   ```
-   +1 (742) 369-1883
-   +1 742 3691883
-   17423691883        ← os três representam o MESMO número
-   +55 19 99999-9999
-   +351 912 345 678
-   +44 20 7946 0958
-   +81 90-1234-5678
-   ```
+### Rodar em segundo plano
 
-3. O sistema mostra a **confirmação** (número mascarado, ex.: `+55 *******9999`).
-4. Confirmando, o terminal exibe o **pairing code**:
+**pm2 (VPS):**
 
-   ```
-   ╭──────────── 🔐 PAIRING CODE ────────────╮
-   │                ABCD-EFGH                │
-   ╰─────────────────────────────────────────╯
-   ```
-
-5. No celular: **WhatsApp → Aparelhos conectados → Conectar aparelho → Conectar com número de telefone** e digite o código.
-6. Pronto — a sessão é salva e **restaurada automaticamente** nas próximas execuções.
-
-> QR Code **não é usado** em nenhum momento (`printQRInTerminal: false`).
-
----
-
-## 6. Entrada inteligente de número (sem confundir DDI com DDD)
-
-O parser usa **libphonenumber-js** (mesma metadata do libphonenumber do Google) — **não** usa regras simplistas de quantidade de dígitos:
-
-- **`+` no início** → número internacional explícito; o país é identificado pelo DDI (ex.: `+1...`, `+55...`, `+351...`).
-- **Sem `+` e sem país padrão** → o sistema tenta interpretar automaticamente:
-  - **uma única interpretação** → `✓ Número identificado`;
-  - **ambiguidade** → lista os países candidatos (`[1] 🇨🇦 Canadá (+1) ...`) e pede **apenas** a escolha do país;
-  - **nenhuma** → `❌ Número inválido. Digite novamente:`.
-- **Número local** (ex.: `19999999999`) → interpretado conforme `DEFAULT_COUNTRY` (padrão `BR`), com confirmação antes de conectar.
-- **Modo guiado** (alternativa): escolher país manualmente e informar o número nacional.
-
-Funções reutilizáveis em `connection/phoneParser.js`: `normalizePhoneNumber`, `parsePhoneNumber`, `validatePhoneNumber`, `detectCountry`, `formatPhoneNumber`, `maskPhoneNumber`.
-
-### Exemplos aceitos
-
-| Entrada | País | Normalizado |
-|---|---|---|
-| `+1 (742) 369-1883` | 🇨🇦 Canadá (área 742 — não assume EUA) | `17423691883` |
-| `+1 202 555 0148` | 🇺🇸 Estados Unidos | `12025550148` |
-| `+55 (19) 99999-9999` | 🇧🇷 Brasil | `5519999999999` |
-| `+351 912 345 678` | 🇵🇹 Portugal | `351912345678` |
-| `+44 20 7946 0958` | 🇬🇧 Reino Unido | `442079460958` |
-| `+81 90-1234-5678` | 🇯🇵 Japão | `819012345678` |
-| `+54 9 11 5555-1234` | 🇦🇷 Argentina | `5491155551234` |
-| `+34 612 345 678` | 🇪🇸 Espanha | `34612345678` |
-
----
-
-## 7. Sessão, troca e restauração
-
-- **Sessão encontrada?** → restaura automaticamente (`✓ Sessão encontrada → ✓ Restaurando sessão...`). **Não** pede número nem gera pairing de novo.
-- **Só pede novo número** quando: não há sessão, o usuário pediu troca, ou a sessão foi invalidada (logout).
-- **Menu conectado**:
-
-  ```
-  [1] Conectar
-  [2] Trocar sessão   ← encerra a sessão e apaga credenciais (com confirmação)
-  [3] Restaurar sessão
-  [4] Status
-  [0] Sair
-  ```
-
-- **Nunca** apaga a sessão por erro de conexão. Queda de rede → `↻ Restaurando conexão...` (reconexão com backoff). Logout real → `⚠ Sessão encerrada. Será necessário autenticar novamente.`
-
----
-
-## 8. Estrutura do projeto
-
+```bash
+npm install -g pm2
+pm2 start start.sh --name lua
+pm2 save && pm2 startup
+pm2 logs lua
 ```
-lua/
-├── index.js                 # ponto de entrada
-├── config.js                # configuração central (lê .env)
-├── package.json
-├── .env / .env.example
-├── install.sh / start.sh / update.sh
-├── README.md
-├── database/
-│   ├── database.js          # núcleo SQLite + migrações + backup
-│   ├── users.js             # usuários, XP, nível, reputação
-│   ├── groups.js            # grupos, membros, advertências, X9
-│   ├── economy.js           # carteira, banco, transferências, inventário
-│   ├── rpg.js               # jogador, loja, fazenda, cooldowns
-│   ├── games.js             # estatísticas de jogos + quiz
-│   ├── blocked.js           # usuários bloqueados
-│   ├── settings.js          # chave/valor (prefixo, plugins)
-│   └── seed/                # loja e perguntas do quiz
-├── connection/
-│   ├── connect.js           # Baileys + reconexão + anti dupla conexão
-│   ├── pairing.js           # pairing code (validação + geração)
-│   ├── phoneParser.js       # normalizar/validar/detectar números (libphonenumber)
-│   ├── phone.js             # decisões de alto nível sobre números
-│   ├── sessionRecovery.js   # backup/restauração/logout
-│   └── connectionUI.js      # interface interativa do terminal
-├── commands/                # plugins (1 pasta = 1 plugin)
-│   ├── loader.js            # carregamento automático + reload
-│   ├── _shared/             # helpers (não são comandos)
-│   ├── general/ owner/ admin/ members/ downloads/ stickers/
-│   ├── games/ rpg/ anime/ fun/ utility/ rankings/
-├── downloaders/             # youtube / tiktok / instagram / facebook
-├── anime/
-│   └── providers/jikan.js   # adaptador Jikan (MyAnimeList)
-├── menus/                   # menus interativos (index.js = ordem)
-├── handlers/
-│   ├── commandHandler.js    # pipeline de mensagens/comandos
-│   ├── buttonHandler.js     # roteador único de botões/listas
-│   ├── groupHandler.js      # eventos + filtros de grupo
-│   ├── mediaHandler.js      # helpers de mídia
-│   └── errorHandler.js      # erros amigáveis
-├── engine/
-│   ├── plugins.js           # registry de comandos
-│   └── interactionEngine.js # motor de interações (zueira)
-├── utils/                   # logger, permissões, cache, cooldown, terminal, etc.
-├── assets/menu.jpg          # imagem do menu
-├── scripts/audit.js         # auditoria automática
-├── scripts/make-release.sh  # gera pacote de atualização seguro
-└── test/                    # smoke.test, phone.test, drive_ui (PTY)
+
+**systemd:** crie `/etc/systemd/system/lua.service` apontando para `~/lua/start.sh`.
+
+---
+
+## Atualização
+
+### Fluxo oficial
+
+```bash
+cd ~/lua && ./update.sh --delete-source
+./start.sh
+```
+
+**O que cada comando faz:**
+
+1. `cd ~/lua && ./update.sh --delete-source`
+   - Entra em `~/lua` (raiz do projeto)
+   - Valida repositório Git e remote origin
+   - `git fetch origin --prune` — busca atualizações do GitHub
+   - Verifica alterações locais — aborta se houver risco
+   - `git pull --ff-only` — atualiza código de forma segura
+   - Cria snapshot em `backup/pre-update-YYYYMMDD-HHMMSS/`
+   - Preserva `.env`, `session/`, `database/*.db`, `backup/`, `logs/`, `assets/menu.jpg`
+   - Atualiza dependências se `package.json` mudou
+   - Compila `better-sqlite3` se necessário
+   - Valida com `audit.js` + `smoke.js`
+   - Mostra commits e arquivos alterados
+   - `--delete-source` limpa **apenas** temporários seguros:
+     - `tmp/*` (exceto `.gitkeep`)
+     - `*.log` na raiz
+     - `*-player-script.js`, `1788*.js`
+     - `.gyp/` cache
+     - previews `card-*.jpg`, `welcome-preview.jpg`, `tigrinho-preview.html`
+     - backups `pre-update-*` com +30 dias
+   - **NUNCA apaga:** `.env`, `session/`, `database/`, `backup/` recente, `logs/`, `assets/`, `.git/`, arquivos do usuário
+
+2. `./start.sh`
+   - Inicia o bot após validar que atualização foi bem-sucedida
+   - Se `update.sh` falhou, `start.sh` ainda verifica integridade antes de iniciar
+   - Retorna erro se bot não conseguir iniciar
+
+**Idempotente:** rodar `./update.sh --delete-source` duas vezes seguidas não corrompe nem duplica arquivos.
+
+### Outras formas
+
+```bash
+./update.sh              # apenas git pull, sem limpeza
+./update.sh --help       # ajuda
+./update.sh pacote.zip --delete-source  # modo legado (extrai e apaga pacote de Downloads)
+```
+
+### O que é preservado (nunca apagado)
+
+| Item | Conteúdo |
+|------|----------|
+| `.env` | configurações e dono |
+| `session/` | credenciais WhatsApp (sem novo pairing) |
+| `database/*.db` | usuários, RPG, grupos, X9, quiz |
+| `backup/` | snapshots e backups |
+| `logs/` | histórico de logs |
+| `assets/menu.jpg` | imagem personalizada do menu |
+
+### Se algo der errado
+
+```bash
+# snapshot informado pelo update.sh
+cp -a backup/pre-update-20250101-120000/. .
+./start.sh
 ```
 
 ---
 
-## 9. Comandos (por categoria)
+## Troubleshooting
 
-| Categoria | Comandos |
-|---|---|
-| ⚙️ Geral | `!ping` `!menu` `!menucompleto` `!help` `!info` `!owner` `!dono` `!prefix` `!prefixo` `!id` `!config` `!lermais` + menus `!menuadm` `!menuautomod` `!menusticker` `!menuia` `!menumedia` `!menudono` `!menulifeadmin` |
-| 👑 Dono | `!restart` `!shutdown` `!reload` `!plugins` `!pluginsreload` `!eval` `!statsbot` `!uptime` `!memory` `!system` `!logs` `!database` `!backup` `!restore` `!block` `!unblock` `!broadcast` |
-| 🛡️ Admin | `!promover` `!rebaixar` `!kick` `!ban` `!unban` `!adicionar` `!marcar` `!hidetag` `!admins` `!membros` `!inativos` `!grupo` `!abrirgrupo` `!fechargrupo` `!nomegrupo` `!descgrupo` `!linkgrupo` `!revogarlink` `!foto` `!advertir` `!rmadv` `!warnings` `!resetadv` `!mute` `!unmute` `!setwelcome` `!setgoodbye` `!welcome` `!pedidos` `!aprovar` `!rejeitar` `!aprovarall` `!rejeitarall` `!x9` + 14 filtros |
-| 👥 Membros | `!perfil` `!userinfo` `!badges` `!rank` `!top` `!level` `!xp` `!tempo` `!atividade` `!reputacao` `!sobre` `!regras` `!afk` `!voltei` `!avatar` `!banner` `!bio` `!reportar` `!sugerir` |
-| 📥 Downloads | `!play` `!ytmp3` `!ytmp4` `!youtube` `!ytsearch` `!tiktok` `!instagram` `!facebook` `!pinterest` `!download` `!audio` `!video` `!imagem` (YouTube, TikTok, Instagram, Facebook, Pinterest, X/Twitter, Reddit) |
-| 🎨 Stickers | `!sticker` `!s` `!stickerimg` `!stickertext` `!txtsticker` `!emojisticker` `!toimg` `!take` `!pack` `!rename` `!emoji` `!circle` `!crop` `!resize` |
-| 🤖 IA | `!ia` `!ai` `!ask` `!perguntar` `!chat` `!codigo` `!traduzir` `!resumir` `!aistatus` `!aimemory` (local offline + API externa opcional com fallback) |
-| 🎮 Games | `!games` `!dado` `!moeda` `!adivinhacao` `!matematica` `!jokenpo` `!batalha` `!cacatesouro` `!memoria` `!quiz` |
-| ⚔️ RPG | `!rpg` `!perfilrpg` `!saldo` `!banco` `!depositar` `!sacar` `!trabalhar` `!emprego` `!empregos` `!inventario` `!loja` `!comprar` `!vender` `!usar` `!transferir` `!daily` `!semanal` `!rankrpg` + fazenda |
-| 🍥 Anime | `!anime` `!manga` `!personagem` `!waifu` `!husbando` `!animequiz` `!animerandom` `!otaku` `!quoteanime` `!animeinfo` |
-| 😂 Zueira | `!beijo` `!abraco` `!tapinha` `!cumprimento` `!cafune` `!zoar` `!trollar` `!ship` `!casal` `!sorte` `!azar` `!gaymer` `!burro` `!inteligente` `!gado` `!sigma` `!based` `!meme` `!memeuser` `!caption` `!roast` `!elogio` `!verdade` `!desafio` `!eu` `!chance` `!rankzueira` `!karma` `!piada` `!charada` `!8ball` `!conselho` `!fato` `!horoscopo` `!sorteio` `!escolher` `!verdadeoudesafio` |
-| 🛠️ Utilidades | `!calc` `!cep` `!cnpj` `!botinfo` `!data` `!hora` `!fuso` `!qr` `!base64` `!uuid` `!senha` `!porcentagem` |
-| 📊 Rankings | `!ranking` |
+| Problema | Solução |
+|----------|---------|
+| `Node <22` | `pkg install nodejs-lts && hash -r` (Termux) ou Node 22+ via NodeSource |
+| `Cannot find module 'dotenv'` | `npm install --legacy-peer-deps` ou `./update.sh` |
+| `better-sqlite3` não carrega | `pkg install python make clang && cd node_modules/better-sqlite3 && npm run build-release` |
+| `gyp: Undefined variable android_ndk_path` | `export GYP_DEFINES="android_ndk_path=''" && mkdir -p ~/.gyp && echo "{'variables':{'android_ndk_path':''}}" > ~/.gyp/include.gypi` — `install.sh`/`update.sh` já fazem isso |
+| `sharp` erro no Termux | Inofensivo — opcional, bot usa jimp/ffmpeg no Termux |
+| `./start.sh: Permission denied` | `chmod +x *.sh` |
+| Bot não responde comandos | Verifique prefixo com mensagem `prefixo`, não teste pelo mesmo número do bot (use outro número ou grupo) |
+| Prefixo `/data/data/com.termux/...` | Use `BOT_PREFIX` no `.env`, não `PREFIX` (variável do Termux) |
+| `Bad MAC` / `Failed to decrypt` | Sessão corrompida ou número em uso em outro aparelho — apague `session/` e refaça pairing |
+| `Conexão perdida (restartRequired)` | **Sucesso** — WhatsApp aceitou código e pede reconexão, bot reconecta sozinho |
+| Pairing code não aparece / `Connection Closed` 428 | Aguarde websocket abrir (correção na versão atual). Se persistir, rate-limit 429 — aguarde 15-30min |
+| Fica "Aguardando autenticação" para sempre | Versão atual sempre mostra causa. Veja `logs/baileys-*.log` |
+| Download YouTube falha | `pkg install yt-dlp ffmpeg` + `node scripts/diagnose.js`. Bot tenta client `android` automaticamente se YouTube pedir login |
+| Sticker animado falha | `pkg install ffmpeg` — imagem funciona sem ffmpeg (WASM) |
+| Quer trocar prefixo | `!prefix <novo>` (dono) |
+| Logs JSON no terminal, sem menu bonito | Atualize código — versão antiga usava `process.stdin.isTTY` que falha no Termux. Nova usa `tty.isatty()` |
 
-> **Menu gerado dinamicamente:** se um plugin não carregar, o comando **não aparece** no menu. Não existe comando só no menu.
-
-### 🤖 IA (assistente)
-
-O bot traz um módulo de IA em camadas (`ai/`): **provider local** (offline: contas, tradução PT⇄EN básica, snippets de código, piadas/fatos/conselhos), **provider externo** (API compatível com OpenAI, via `AI_API_URL`/`AI_API_KEY`/`AI_MODEL`) e **fallback** honesto. A ordem é decidida pelo `AI_PROVIDER` (`auto`/`local`/`api`) e o usuário nunca recebe uma resposta "fingida". `!aistatus` mostra a configuração **sem expor chaves**, e `!aimemory on|off|clear` controla a memória da conversa (em RAM, nunca em disco).
-
-### 📥 Downloads modulares
-
-Cada plataforma é um provider independente em `downloaders/` (YouTube, TikTok, Instagram, Facebook, Pinterest, X/Twitter, Reddit) com fila (`utils/downloadQueue.js`), limite de tamanho, timeout, retry controlado e limpeza de temporários. Serviços públicos de terceiros (tikwm, fxtwitter, Reddit JSON, Twemoji) podem mudar ou sair do ar — nesse caso o bot responde `❌ Não foi possível baixar` com o motivo, **nunca trava o processo**.
-
-- **Instagram**: baixa o **vídeo de verdade** (não só a capa). O bot usa a página de embed (`instagram.com/{p|reel}/{id}/embed/captioned/`), que expõe o `video_url` (mp4 do CDN) mesmo sem login; se não achar, cai no Open Graph. Posts privados/bloqueados respondem erro amigável.
-
----
-
-## 10. Banco de dados
-
-- SQLite local (`database/lua.db`) via `better-sqlite3`.
-- Migrações versionadas (`schema_migrations`) e seed idempotente.
-- Backup: `!backup` (gera `.db` em `backup/`) e `!restore` (restaura o mais recente). Backup de credenciais automático ao conectar.
-
----
-
-## 11. Diagnóstico e Termux
-
-Se **stickers**, **downloads** ou **IA** não responderem no Termux, rode:
+**Diagnóstico completo:**
 
 ```bash
 node scripts/diagnose.js
 ```
 
-Ele verifica Node, `better-sqlite3`, `ffmpeg`, `yt-dlp`, conversores, `fetch`, rede e providers, e imprime exatamente o que falta. Correções comuns:
+Verifica Node, better-sqlite3, ffmpeg, yt-dlp, conversores, fetch, rede, downloaders, IA.
+
+---
+
+## Recuperação
+
+### Backup automático
+
+- Ao conectar, `sessionRecovery` faz backup de credenciais
+- Ao atualizar, `update.sh` cria `backup/pre-update-YYYYMMDD-HHMMSS/` com `.env`, `session/`, `database/`, `logs/`, `assets/menu.jpg`
+
+### Restaurar snapshot
+
+```bash
+ls backup/
+cp -a backup/pre-update-20250101-120000/. .
+./start.sh
+```
+
+### Comandos de backup no bot
+
+- `!backup` — gera `.db` em `backup/`
+- `!restore` — restaura mais recente (dono)
+
+### Recuperação total (instalação limpa sem perder dados)
+
+```bash
+# faça backup manual dos dados importantes
+cp -a ~/lua/.env /tmp/
+cp -a ~/lua/session /tmp/
+cp -a ~/lua/database /tmp/
+cp -a ~/lua/backup /tmp/
+
+# reinstala
+rm -rf ~/lua
+git clone https://github.com/yanrpoliveira3108-bit/luas-bot-whats.git ~/lua
+cd ~/lua
+chmod +x update.sh start.sh
+
+# restaura dados
+cp -a /tmp/.env ~/lua/
+cp -a /tmp/session ~/lua/
+cp -a /tmp/database ~/lua/
+cp -a /tmp/backup ~/lua/
+
+./update.sh
+./start.sh
+```
+
+---
+
+## Desenvolvimento
+
+### Arquitetura
+
+- `config.js` — lê `.env` via dotenv, expõe `CONFIG` central
+- `config/themes.js` — 10 presets, fonte única de cores (nunca espalhar cores)
+- `commands/loader.js` — carrega plugins, valida, registra no `engine/plugins.js`
+- `engine/plugins.js` — registry com validação, detecção de duplicatas, enable/disable
+- `handlers/commandHandler.js` — pipeline: registra usuário, checa bloqueados, flood, mute, filtros, resolve comando, permissões, cooldown, executa com try/catch
+- `connection/connect.js` — Baileys com reconexão backoff, anti dupla conexão, eventos de status
+- `database/database.js` — SQLite com migrações versionadas, prepared statements, backup
+- `utils/` — logger (pino, sem segredos), permissões, cache, cooldown, etc.
+
+### Adicionar comando
+
+Crie arquivo em `commands/<categoria>/meucomando.js`:
+
+```js
+module.exports = [{
+  name: 'meucomando',
+  commands: ['meucomando', 'mc'],
+  category: 'general',
+  description: 'Meu comando',
+  execute: async (ctx) => {
+    await ctx.reply('Olá!');
+  }
+}];
+```
+
+- `name` único, `commands` = triggers, `category` = pasta
+- `ownerOnly`, `adminOnly`, `groupOnly`, `privateOnly`, `botAdmin` para permissões
+- `cooldown` em ms
+- `ctx` tem `reply`, `sendImage`, `sendSticker`, etc.
+
+### Adicionar profissão/item Lua Life
+
+Edite `plugins/life/config.js` e `database/seed/life.js`.
+
+### Temas
+
+Edite apenas `config/themes.js` — nunca espalhe cores nos comandos. Use `utils/theme.js` para obter tema ativo.
+
+---
+
+## Testes
+
+```bash
+npm test                      # suíte completa
+npm run audit                 # auditoria (69 verificações)
+npm run smoke                 # smoke test (banco, economia, etc.)
+node test/phone.test.js       # parser de telefone
+node test/prefix.test.js      # prefixo BOT_PREFIX vs PREFIX
+node test/migration.test.js   # migrações
+node test/life.test.js        # Lua Life (23 regressões)
+node test/e2e.test.js         # pipeline ponta a ponta
+node scripts/diagnose.js      # diagnóstico ambiente
+node scripts/sticker-selftest.js # teste pipeline sticker
+```
+
+**Cobertura mínima validada:**
+
+- Inicialização e carregamento de configuração
+- Banco e migrações
+- Comandos e plugins (sem duplicatas, sem comandos sem execute)
+- Telefone internacional (libphonenumber-js)
+- Prefixo (BOT_PREFIX vs PREFIX do Termux)
+- Economia (race conditions, rollback)
+- Lua Life (criação, trabalho, banco, compra/venda, mineração, casa, missões, diário, loteria)
+- Downloaders (YouTube, TikTok, etc.)
+- Menus e navegação por botões
+- Tratamento de erros (bot nunca morre por exceção isolada)
+
+---
+
+## Segurança
+
+Auditoria realizada:
+
+- ✅ Sem `eval()` em código de produção (apenas teste que verifica ausência)
+- ✅ Sem `child_process.exec` com entrada de usuário (apenas `spawnSync` com args fixos para ffmpeg/yt-dlp)
+- ✅ Sem credenciais hardcoded
+- ✅ Sem command injection
+- ✅ Sem path traversal (caminhos resolvidos via `path.resolve(ROOT, ...)`)
+- ✅ Validação de entrada em todos os comandos (limite de args, tipos)
+- ✅ `.env`, `session/`, `database/*.db`, `logs/`, `backup/` protegidos por `.gitignore`
+- ✅ Logger com `redact` para `password`, `token`, `secret`, `credential`, `apiKey`
+- ✅ Baileys logs em arquivo separado, sem credenciais no terminal
+- ✅ `!eval` desabilitado por padrão (`ENABLE_EVAL=false`)
+- ✅ Permissões verificadas via `utils/permissions.js` (owner, admin, botAdmin)
+
+**Nunca versione:**
+
+- `.env`, `session/`, `database/*.db`, `logs/`, `backup/`, `node_modules/`, `*.log`, `*.db`, credenciais
+
+---
+
+## Termux
+
+O projeto é otimizado para Termux:
+
+- Detecta Android via `uname -o` e `TERMUX_VERSION`
+- Corrige `android_ndk_path` automaticamente (`.gyp/include.gypi`)
+- Usa `--ignore-scripts` no Termux para pular build de `sharp`/`wrtc` (sem binário Android)
+- Compila `better-sqlite3` do código-fonte quando necessário
+- Não assume systemd, Docker, `/home/user`, ou ferramentas de PC
+- Shebang `#!/usr/bin/env bash` compatível
+- Variáveis com aspas, exit codes corretos, sem comandos destrutivos
+
+**Dependências Termux:**
 
 ```bash
 pkg update && pkg upgrade
-pkg install ffmpeg       # vídeo do YouTube (mescla vídeo+áudio) + sticker de vídeo/GIF
-pkg install yt-dlp       # download de YouTube confiável (recomendado!)
-pkg install nodejs-lts   # Node 22 LTS (better-sqlite3 13 pede Node novo)
-hash -r
-# dentro da pasta do bot:
-npm install
-npm rebuild better-sqlite3   # se o banco não abrir
-node index.js
-```
-
-- **YouTube**: o bot usa o **yt-dlp** quando disponível (muito mais robusto que o ytdl-core, que quebra a cada mudança do YouTube). Sem yt-dlp, cai no ytdl-core (client WEB). Áudio não precisa de ffmpeg; **vídeo precisa de ffmpeg** (o YouTube serve vídeo e áudio separados — DASH). Se o YouTube responder *"Sign in to confirm you're not a bot"* (comum em IP de datacenter/VPS), o bot tenta de novo com o **client `android`** do yt-dlp, que devolve o formato combinado (360p A+V) mesmo para esses vídeos bloqueados.
-- **Stickers de imagem** funcionam sem binário nativo (conversor WASM) e **redimensionam automaticamente para 512x512** (fotos grandes não saem mais em branco/indisponíveis). Só vídeo/GIF exige `ffmpeg`.
-- **Envio de mídia (todos os downloads)**: o Baileys 7.4.7 não aceita caminho de arquivo como string pura — o bot converte para `{ url }` (ver `utils/media.js#asMedia`). Era a causa de "nenhum download funcionava" apesar do arquivo ser baixado.
-- No Termux o `sharp` (nativo glibc) é ignorado automaticamente — o bot usa ffmpeg/node-webpmux. Se você compilou o sharp do zero, defina `LUA_ALLOW_SHARP=1`.
-
-## 12. Testes
-
-```bash
-npm test                       # auditoria + smoke + testes de telefone
-node test/phone.test.js        # só os testes de número
-python3 test/drive_ui.py       # interface interativa via PTY (Linux/macOS)
-python3 test/drive_ui2.py      # ambiguidade de número + restauração de sessão
+pkg install nodejs-lts python make clang ffmpeg yt-dlp git unzip
 ```
 
 ---
 
-## 13. Troubleshooting
+## Licença
 
-| Problema | Solução |
-|---|---|
-| O terminal mostra só log JSON, sem o menu/splash bonito | sua versão é antiga ou o modo interativo não ativou. **Atualize para a versão nova** (que usa `tty.isatty`, confiável no Termux). Os logs JSON continuam sendo gravados em `logs/lua-YYYY-MM-DD.log`. Para forçar modo não interativo limpo, use `LUA_NO_UI=1 ./start.sh`. |
-| O bot conecta mas **não responde comandos** / `Bad MAC` / `Failed to decrypt message with any known session` | sessão corrompida ou **o mesmo número está ativo em outro lugar ao mesmo tempo** (celular + bot). Não use o mesmo número logado no celular e no bot simultaneamente enquanto pareia. Para limpar: pare o bot, apague a pasta `session/` (ou use `[2] Trocar sessão`), e refaça o pairing **uma única vez** com um número que não esteja em uso em outro aparelho. |
-| **Mostra o código, depois "Conexão perdida (restartRequired)"** | **isso é SUCESSO, não erro.** Quando o WhatsApp aceita o código, ele fecha a conexão com `restartRequired` e pede para o cliente reconectar — o login conclui na reconexão. A versão nova faz isso automaticamente (você verá "reconectando — o código continua válido" e depois "🌙 LUA ONLINE"). Só era um problema na versão antiga. |
-| `npm install` falha no Termux com erro de **sharp** ou **wrtc** | o `@innovatorssoft/baileys@7` traz `sharp` e `@roamhq/wrtc` como dependências (não têm binário para Android). O `install.sh`/`update.sh` já detectam o Termux e usam `--ignore-scripts` para pular o build nativo desses módulos — o Lua **não os usa** (sharp é opcional em runtime; wrtc é só para chamadas VoIP). O `better-sqlite3` é compilado normalmente em seguida. |
-| **Não mostra o pairing code** / "O WhatsApp fechou a conexão ao pedir o código" | a versão nova aguarda o websocket abrir antes de pedir o código (correção de corrida de conexão — era o erro "Connection Closed" 428). Se ainda aparecer: o WhatsApp está **limitando as tentativas** (rate-limit 429) ou o número está em uso em outro aparelho. **Aguarde 15–30 min (às vezes horas)** entre tentativas, use Wi-Fi, e não fique repetindo. |
-| Fica **"○ Aguardando autenticação..."** para sempre, sem mensagem de erro | isso acontecia quando a conexão fechava por um motivo não classificado (ex.: queda de rede) durante o pareamento. A versão nova **sempre mostra a causa** (`❌ Falha na conexão: ...`) em vez de travar até o timeout. Veja também `logs/baileys-YYYY-MM-DD.log` para o erro exato do WhatsApp. |
-| Quero ver os **erros internos do WhatsApp/Baileys** | eles são gravados em `logs/baileys-YYYY-MM-DD.log` (nível `warn` por padrão). Para diagnóstico: `BAILEYS_LOG_LEVEL=debug LUA_DEBUG_CONN=1 ./start.sh` (mostra também no terminal). Nunca usa credenciais. |
-| Fica "reconectando"/"Conexão perdida" várias vezes | a versão nova para sozinha após 8 tentativas e mostra as causas na tela. Limpe a sessão (`rm -rf session`), aguarde, e tente **uma única vez**. |
-| **Mando `!comando` e o bot não responde** | confira: (1) o prefixo é `!` (mande só `prefixo` e o bot responde qual é); (2) **não teste pelo MESMO número do bot** — mande de outro número ou num grupo; se testar pelo próprio número, use o recurso "mensagem para você mesmo" (o dono pode usar comandos por lá). Se continuar, veja `logs/lua-YYYY-MM-DD.log`. |
-| O bot responde com prefixo esquisito tipo `/data/data/com.termux/files/usr` | é a variável `PREFIX` do Termux invadindo o bot. **Atualize para a versão nova** (usa `BOT_PREFIX`). Se preferir corrigir na mão, edite o `.env`: troque `PREFIX=!` por `BOT_PREFIX=!`. |
-| O terminal mostra "Closing open session..." e despeja chaves (lixo do libsignal) | isso é log interno do libsignal (criptografia do WhatsApp) que poluía o terminal. A versão nova **filtra esse ruído** em modo interativo. Não é erro — é só log. |
-| O terminal não mostra um log organizado dos comandos | agora cada comando executado imprime uma linha organizada no terminal: `[data hora] 👤 Nome +55 *******9999 → !comando`. No WhatsApp, use `!logs` (dono) para ver as últimas execuções no mesmo formato. |
-| `Error: Cannot find module 'dotenv'` (ou outro módulo) | as dependências não estão instaladas — rode `npm install --legacy-peer-deps` (ou `bash install.sh`) uma vez antes do `npm start` |
-| `npm error ERESOLVE ... jimp@0.16.1 ... peerOptional jimp@"^1.6.0" from baileys` | use `--legacy-peer-deps`. O projeto já traz um `.npmrc` com `legacy-peer-deps=true`, então `npm install` puro funciona. Nunca use `--force`. |
-| `Cannot find module '.../better-sqlite3/build/Release/better_sqlite3.node'` | no Android o better-sqlite3 **não tem binário pré-compilado** e precisa ser compilado uma vez. Rode: `pkg install python make clang` e depois `cd node_modules/better-sqlite3 && npm run build-release`. O `install.sh` faz isso automaticamente. |
-| `gyp: Undefined variable android_ndk_path in binding.gyp` (Termux) | bug do node-gyp no Termux. Rode uma vez: `export GYP_DEFINES="android_ndk_path=''"` e `mkdir -p ~/.gyp && echo "{'variables':{'android_ndk_path':''}}" > ~/.gyp/include.gypi`. O `install.sh`/`update.sh` já aplicam isso automaticamente. |
-| `sharp: Installation error: Prebuilt libvips ... not yet available for android-arm64v8` | **inofensivo** — o `sharp` é opcional e não tem versão para Android. O Lua usa `jimp` para stickers no Termux. Ignore. |
-| `./start.sh: Permission denied` | o zip remove a permissão de execução. Rode: `chmod +x *.sh` (o `install.sh`/`update.sh` também corrigem sozinho) |
-| `better-sqlite3` falha ao instalar/compilar no Termux | instale as ferramentas: `pkg install python make clang` e rode `npm rebuild better-sqlite3` |
-| Erro de Node antigo (`node < 22`) | atualize: `pkg install nodejs-lts` (o `better-sqlite3@13` exige Node 22+) |
-| "Nenhum conversor disponível" ao criar sticker | **só para stickers animados (vídeo/GIF)**: instale o `ffmpeg` (`pkg install ffmpeg`). Stickers de imagem/texto e `!toimg` funcionam sem nada extra (fallback jimp + libwebp embutido). |
-| `❌ Número inválido` | digite o número completo com DDI (`+55...`) ou ajuste `DEFAULT_COUNTRY` |
-| `⚠ Não foi possível determinar o país` | o número é ambíguo; escolha o país na lista exibida |
-| Pairing code não conecta | confirme o número no celular e o código; o código expira em ~2 min |
-| Sessão caiu (logged out) | o bot remove as credenciais e pede **novo pairing code** |
-| Download do YouTube falha | (1) instale `pkg install yt-dlp ffmpeg` e rode `node scripts/diagnose.js`; (2) se o YouTube pedir "sign in" (IP de servidor), o bot já tenta o client `android` automaticamente; (3) em último caso o IP do servidor pode estar bloqueado — tente rede/VPS diferente |
-| `better-sqlite3` não compila no Termux | `pkg install python make clang` e `npm rebuild better-sqlite3` |
-| Quero trocar o prefixo | `!prefix <novo>` (dono) |
+MIT — veja `LICENSE` se existir.
 
----
-
-## 14. Atualização do Baileys (sem destruir o projeto)
-
-- O Baileys é usado **somente** em `connection/` e em 1 helper de mídia (`utils/media.js`).
-- Menus, comandos e handlers falam com um objeto `ctx` padronizado — **não conhecem o Baileys**.
-- Para atualizar: altere a versão no `package.json`, rode `npm install` e revise `connection/connect.js` e `utils/messages.js`, se necessário.
-
-### Botões interativos (native flow)
-
-O menu principal usa **botões clicáveis reais** (native flow do Baileys 7), com IDs estáveis:
-
-```
-LUA BOT
-[ 📋 COMANDOS ]  → lua_commands
-[ 👑 ADMINISTRAÇÃO ] → lua_admin
-[ ⚙️ CONFIGURAÇÕES ] → lua_config
-[ ℹ️ AJUDA ] → lua_help
-```
-
-- `!botao on` / `!botao off` liga/desliga os botões (persistido no banco — sobrevive ao reinício).
-- `!botao` (sem argumento) mostra o estado: `Botões: ATIVADOS/DESATIVADOS`.
-- Com botões **OFF**, `!menu` cai para o menu textual numerado (modo de compatibilidade).
-- Botões e comandos compartilham o MESMO handler (o botão `lua_config` executa o mesmo `!config`).
-
----
-
-## 15. Atualizando o Lua sem perder dados (colar por cima)
-
-Para atualizar a versão do bot **sem apagar** `.env`, `session/`, o banco, os backups, os logs e a imagem do menu, use o fluxo seguro abaixo.
-
-### O que NUNCA é apagado
-
-| Item | Conteúdo |
-|---|---|
-| `.env` | configurações, dono, país padrão |
-| `session/` | credenciais do WhatsApp (não precisa refazer o pairing) |
-| `database/*.db` | usuários, RPG, grupos, X9, quiz... |
-| `backup/` | backups e snapshots |
-| `logs/` | histórico de logs |
-| `assets/menu.jpg` | imagem do menu (se personalizada) |
-
-### ⚡ Comando único (extrai em `~/lua` e apaga o arquivo baixado)
-
-Com o pacote já baixado na pasta Downloads, **cole este único comando** no Termux:
-
-```bash
-cd ~/lua && f=$(ls -t ~/storage/downloads/lua*.zip ~/storage/downloads/lua*.tar.gz 2>/dev/null | head -1) && if [ -z "$f" ]; then echo "Nenhum pacote lua* encontrado em Downloads"; else case "$f" in *.zip) unzip -oq "$f";; *.tar.gz|*.tgz) tar -xzf "$f";; esac; cp -a lua-main/. . 2>/dev/null; rm -rf lua-main; rm -f "$f"; echo "OK: extraído em ~/lua e removido de Downloads"; fi
-```
-
-O que ele faz, em sequência: entra em `~/lua` → encontra o pacote mais recente em `~/storage/downloads` → extrai por cima (achatando subpasta `lua-main/`, se houver) → **apaga o arquivo da pasta Downloads**.
-
-> 💡 **Alternativa ainda mais segura** (também um único comando): use o atualizador, que **preserva `.env`, `session/` e o banco** e já apaga o arquivo:
-> ```bash
-> cd ~/lua && ./update.sh --delete-source
-> ```
-
-### 📲 Do jeito mais simples (Termux) — extrai da pasta Downloads sozinho
-
-```bash
-# 1) Baixe o pacote lua-update-vX.Y.Z.zip (ele cai na pasta Downloads)
-# 2) No Termux:
-cd ~/lua
-./update.sh
-```
-
-O `update.sh` **procura sozinho** o pacote mais recente em `~/storage/downloads` (e também `~/downloads`, `~/Downloads`), pergunta se pode extrair, e então:
-
-1. cria um **snapshot de segurança** em `backup/pre-update-<data>/`;
-2. **extrai o pacote dentro de `~/lua`**;
-3. restaura `.env`, `session/`, banco, `menu.jpg` e logs (mesmo que o pacote venha com arquivos indevidos);
-4. instala as dependências e roda auditoria + smoke test.
-
-### Opção A — colar os arquivos por cima e rodar o atualizador
-
-```bash
-cd ~/lua
-
-# 1) Cole/extraia a versão nova DENTRO da pasta ~/lua
-#    (o pacote de atualização já vem SEM .env, session/, banco, etc.)
-
-# 2) rode o atualizador seguro:
-./update.sh
-```
-
-### Opção B — atualizar direto pelo pacote
-
-```bash
-cd ~/lua
-./update.sh lua-update-v1.0.0.zip
-# ou:
-./update.sh lua-update-v1.0.0.tar.gz
-```
-
-### 🆕 Primeira instalação a partir da pasta Downloads
-
-```bash
-# 1) Baixe o projeto (zip) — ele cai na pasta Downloads
-# 2) Crie a pasta e entre nela:
-mkdir -p ~/lua && cd ~/lua
-# 3) Extraia o projeto (se o zip tiver uma subpasta lua-main/, suba o conteúdo):
-unzip -q ~/storage/downloads/lua*.zip -d .
-mv lua-main/* . 2>/dev/null; mv lua-main/.[!.]* . 2>/dev/null; rmdir lua-main 2>/dev/null
-# 4) Instale:
-bash install.sh
-```
-
-> O `install.sh` também detecta sozinho: se a pasta estiver vazia, ele procura o `lua*.zip`/`lua*.tar.gz` na pasta Downloads, **extrai e achata a subpasta** automaticamente antes de instalar.
-
-### Se algo der errado
-
-```bash
-# o update.sh informa o caminho exato do snapshot; restaure com:
-cp -a backup/pre-update-XXXXXXXX-XXXXXX/. .
-```
-
-### Para quem distribui a atualização (gerar o pacote seguro)
-
-```bash
-cd ~/lua
-./scripts/make-release.sh        # → release/lua-update-vX.Y.Z.zip
-./scripts/make-release.sh tar    # → release/lua-update-vX.Y.Z.tar.gz
-```
-
-O pacote gerado **já exclui** `.env`, `session/`, `database/*.db`, `backup/`, `logs/`, `tmp/*`, `node_modules/` e `.git/` — por isso pode ser colado por cima sem apagar nada. (Termux: `pkg install zip` para o formato zip.)
-
-> **Regra de ouro:** nunca edite/cole por cima dos arquivos de dados manualmente. Se você personalizou `.env` ou `assets/menu.jpg`, mantenha uma cópia — embora o atualizador já os preserve.
-
----
-
-## 16. Limitações reais do WhatsApp/Baileys
-
-- **Banner separado não existe** no WhatsApp → `!banner` mostra a foto de perfil.
-- **Gênero de personagem** não é fornecido pela API pública → `!waifu`/`!husbando` retornam personagem aleatório.
-- **Alteração de foto do grupo** não é exposta de forma confiável → o painel X9 informa isso (não inventa dados).
-- **Autor de uma ação** nem sempre é fornecido → o X9 mostra "desconhecido" quando não há.
-- **Banir** não existe nativamente → `!ban` = remover + lista local + remoção automática ao tentar voltar.
-- **Botões/listas** dependem da versão do app do usuário → há **fallback automático** para menu numerado em texto.
-- Pedidos de entrada (`!pedidos`) dependem de o grupo estar com aprovação ativada e do suporte do Baileys.
-
----
-
-Feito com 🌙 por **Lua Dev**.
+Feito com 🌙 por **Lua Dev** — Beyond the ordinary.
