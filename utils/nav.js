@@ -165,9 +165,25 @@ async function render(ctx, entry) {
 
   const title = screen.title || CONFIG.bot.name;
   const listTitle = screen.listTitle || title;
-  const body = screen.body || '';
   const buttonText = screen.buttonText || '🌙 Abrir';
-  const footer = screen.footer || `${CONFIG.bot.name} • ${require('../database/settings').effectivePrefix()}menu para recarregar`;
+
+  // camada visual 2.0 também na navegação por lista/botões (antes só o modo
+  // texto passava pelo menuRenderer). Título da lista fica puro: é chrome do
+  // WhatsApp e tem limite curto; a descrição é a área decorável.
+  const menuRenderer = require('./menuRenderer');
+  const context = screen.context || String(id || '').replace(/^lua_/, '').replace(/_menu$/, '');
+  const rawBody = screen.body || screen.header || '';
+  const body = [
+    menuRenderer.style(title, null, ctx.remoteJid),
+    menuRenderer.dividerFor(context, ctx.remoteJid),
+    rawBody,
+  ]
+    .filter(Boolean)
+    .join('\n')
+    .slice(0, 800);
+  const rawFooter =
+    screen.footer || `${CONFIG.bot.name} • ${require('../database/settings').effectivePrefix()}menu para recarregar`;
+  const footer = `${menuRenderer.dividerLine(null, ctx.remoteJid)}\n${rawFooter}`.slice(0, 120);
 
   const sections = [
     { title: listTitle, rows: content.map((c) => ({ id: c.id, title: c.text, description: c.description })) },
