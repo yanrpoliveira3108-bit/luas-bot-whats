@@ -103,7 +103,7 @@ module.exports = [
   },
   {
     name: 'base64',
-    commands: ['base64'],
+    commands: ['base64', 'encode'],
     category: 'utility',
     description: 'Codifica/decodifica em Base64.',
     usage: '!base64 <texto> | !base64 -d <texto>',
@@ -119,6 +119,42 @@ module.exports = [
       } catch (_) {
         await ctx.reply('❌ Não consegui processar (Base64 inválido?).');
       }
+    },
+  },
+  {
+    name: 'timestamp',
+    commands: ['timestamp', 'ts', 'epoch'],
+    category: 'utility',
+    description: 'Mostra/converte timestamp Unix (segundos e ms).',
+    usage: '!timestamp [valor|iso]',
+    examples: ['!timestamp', '!timestamp 1700000000', '!timestamp 2026-09-14T20:00:00Z'],
+    cooldown: 1500,
+    tags: ['tempo', 'data'],
+    execute: async (ctx) => {
+      const arg = (ctx.args[0] || '').trim();
+      let date = new Date();
+      if (arg) {
+        const asNumber = Number(arg);
+        if (Number.isFinite(asNumber) && arg.length >= 10) {
+          // 10 dígitos = segundos, 13 = milissegundos
+          date = new Date(arg.length <= 10 ? asNumber * 1000 : asNumber);
+        } else {
+          date = new Date(arg);
+        }
+        if (Number.isNaN(date.getTime())) {
+          return ctx.reply('⏰ Não reconheci a data. Use segundos (1700000000), ms ou ISO (2026-09-14T20:00:00Z).');
+        }
+      }
+      const sec = Math.floor(date.getTime() / 1000);
+      await ctx.reply(
+        [
+          '⏰ *Timestamp*',
+          `▸ Segundos: \`${sec}\``,
+          `▸ Milissegundos: \`${date.getTime()}\``,
+          `▸ ISO: \`${date.toISOString()}\``,
+          `▸ Local: ${date.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })} (America/Sao_Paulo)`,
+        ].join('\n')
+      );
     },
   },
   {

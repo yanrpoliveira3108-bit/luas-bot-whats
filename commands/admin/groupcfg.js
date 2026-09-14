@@ -7,7 +7,7 @@ const commandHandler = require('../../handlers/commandHandler');
 module.exports = [
   {
     name: 'grupo',
-    commands: ['grupo', 'grupoinfo'],
+    commands: ['grupo', 'grupoinfo', 'groupinfo'],
     category: 'admin',
     groupOnly: true,
     description: 'Informações do grupo.',
@@ -62,7 +62,7 @@ module.exports = [
   },
   {
     name: 'nomegrupo',
-    commands: ['nomegrupo', 'nome'],
+    commands: ['nomegrupo', 'nome', 'setname'],
     category: 'admin',
     adminOnly: true,
     groupOnly: true,
@@ -79,7 +79,7 @@ module.exports = [
   },
   {
     name: 'descgrupo',
-    commands: ['descgrupo', 'descricao'],
+    commands: ['descgrupo', 'descricao', 'setdesc'],
     category: 'admin',
     adminOnly: true,
     groupOnly: true,
@@ -96,7 +96,7 @@ module.exports = [
   },
   {
     name: 'linkgrupo',
-    commands: ['linkgrupo', 'link'],
+    commands: ['linkgrupo', 'link', 'linkgroup'],
     category: 'admin',
     adminOnly: true,
     groupOnly: true,
@@ -111,7 +111,7 @@ module.exports = [
   },
   {
     name: 'revogarlink',
-    commands: ['revogarlink', 'resetarlink'],
+    commands: ['revogarlink', 'resetarlink', 'revoke'],
     category: 'admin',
     adminOnly: true,
     groupOnly: true,

@@ -30,7 +30,7 @@ module.exports = [
   },
   {
     name: 'rmadv',
-    commands: ['rmadv', 'removeradv'],
+    commands: ['rmadv', 'removeradv', 'unwarn'],
     category: 'admin',
     adminOnly: true,
     groupOnly: true,

@@ -18,7 +18,7 @@ async function getSticker(ctx) {
 module.exports = [
   {
     name: 'take',
-    commands: ['take', 'roubar', 'rg', 'rgtake', 'roubargrande'],
+    commands: ['take', 'roubar', 'rg', 'rgtake', 'roubargrande', 'steal'],
     category: 'stickers',
     description: 'Rouba/reenvia sticker com bio rica: criador, origem (GP/PV), bot, dono, dev. Use !take <pack>|<autor> para custom.',
     usage: '!take [pack|autor] (respondendo a um sticker)',

@@ -40,7 +40,7 @@ module.exports = [
   },
   {
     name: 'uptime',
-    commands: ['uptime'],
+    commands: ['uptime', 'runtime'],
     category: 'owner',
     ownerOnly: true,
     description: 'Tempo online do bot.',
@@ -75,7 +75,7 @@ module.exports = [
   },
   {
     name: 'system',
-    commands: ['system', 'sistema'],
+    commands: ['system', 'sistema', 'cpu', 'ram', 'disk'],
     category: 'owner',
     ownerOnly: true,
     description: 'Informações do sistema.',

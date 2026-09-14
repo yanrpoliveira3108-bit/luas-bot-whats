@@ -40,7 +40,7 @@ module.exports = [
   },
   {
     name: 'kick',
-    commands: ['kick', 'remover', 'expulsar'],
+    commands: ['kick', 'remover', 'expulsar', 'remove'],
     category: 'admin',
     adminOnly: true,
     groupOnly: true,
@@ -110,7 +110,7 @@ module.exports = [
   },
   {
     name: 'marcar',
-    commands: ['marcar', 'tagall', 'todos'],
+    commands: ['marcar', 'tagall', 'todos', 'everyone'],
     category: 'admin',
     adminOnly: true,
     groupOnly: true,
@@ -158,7 +158,7 @@ module.exports = [
   },
   {
     name: 'membros',
-    commands: ['membros'],
+    commands: ['membros', 'members'],
     category: 'admin',
     groupOnly: true,
     description: 'Lista os membros do grupo.',
