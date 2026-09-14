@@ -6,40 +6,8 @@
 #    cd ~/lua && ./update.sh --delete-source
 #    ./start.sh
 #
-#  O que faz:
-#    1. Entra na raiz do projeto (onde este script está)
-#    2. Valida que é um repositório Git
-#    3. Valida remote origin (deve apontar para luas-bot-whats)
-#    4. Faz fetch do GitHub
-#    5. Detecta alterações locais em arquivos versionados e ABORTA
-#       se houver risco de sobrescrever sem aviso (use --force para stash)
-#    6. Faz pull seguro (--ff-only) da branch principal ou arena
-#    7. Preserva arquivos locais: .env, session/, database/*.db,
-#       backup/, logs/, assets/menu.jpg etc. (protegidos por .gitignore)
-#    8. Atualiza dependências se package.json mudou
-#    9. Executa validações (audit + smoke)
-#    10. Mostra o que foi atualizado
-#    11. Retorna código de erro apropriado se falhar
-#
-#  Idempotente: rodar 2x seguidas não corrompe nem duplica.
-#
-#  --delete-source:
-#    Remove APENAS arquivos temporários e descartáveis definidos
-#    explicitamente neste script. NUNCA apaga:
-#      .env, session/, database/, backup/, logs/, assets/, .git/
-#
-#  --force:
-#    Se houver alterações locais, faz stash automático antes do pull
-#    e tenta restaurar depois. Útil no Termux quando você editou
-#    algum arquivo sem querer.
-#
-#  Uso:
-#    ./update.sh                          → git pull seguro
-#    ./update.sh --force                  → stash + pull + pop
-#    ./update.sh --delete-source          → git pull + limpeza segura
-#    ./update.sh --help                   → ajuda
-#
-#  Compatibilidade: Termux (Android), Linux, macOS — bash
+#  Idempotente, preserva .env/session/database/backup/logs/assets
+#  Detecta alterações locais e aborta (use --force para stash auto)
 # ============================================================
 set -euo pipefail
 
@@ -76,17 +44,8 @@ Uso: ./update.sh [opções] [arquivo.zip]
 
 Opções:
   --delete-source   Limpeza segura de arquivos temporários APÓS atualizar
-  --force, -f       Se houver alterações locais, faz stash automático antes do pull
+  --force, -f       Stash automático se houver alterações locais + reset com confirmação se divergiu
   --help, -h        Mostra esta ajuda
-
-Modos:
-  1) Git (recomendado):
-     ./update.sh
-     ./update.sh --force
-     ./update.sh --delete-source
-
-  2) Arquivo (legado):
-     ./update.sh ~/storage/downloads/lua-update-*.zip
 
 Exemplos:
   cd ~/lua && ./update.sh --delete-source && ./start.sh
@@ -128,13 +87,9 @@ ok "Snapshot de segurança criado em $SNAP"
 restore_data() {
   local src="$1"
   [ -f "$src/.env" ] && cp -a "$src/.env" .env && ok ".env preservado"
-  if [ -d "$src/session" ] && [ -n "$(ls -A "$src/session" 2>/dev/null)" ]; then
-    rm -rf session; cp -a "$src/session" session; ok "session/ preservada"
-  fi
+  if [ -d "$src/session" ] && [ -n "$(ls -A "$src/session" 2>/dev/null)" ]; then rm -rf session; cp -a "$src/session" session; ok "session/ preservada"; fi
   [ -f "$src/assets/menu.jpg" ] && mkdir -p assets && cp -a "$src/assets/menu.jpg" assets/menu.jpg && ok "assets/menu.jpg preservado"
-  if [ -d "$src/database" ] && [ -n "$(ls -A "$src/database" 2>/dev/null)" ]; then
-    mkdir -p database; cp -a "$src/database"/. database/; ok "database preservado"
-  fi
+  if [ -d "$src/database" ] && [ -n "$(ls -A "$src/database" 2>/dev/null)" ]; then mkdir -p database; cp -a "$src/database"/. database/; ok "database preservado"; fi
   if [ -d "$src/logs" ]; then mkdir -p logs; cp -a "$src/logs"/. logs/ 2>/dev/null || true; fi
 }
 
@@ -173,7 +128,7 @@ if [ -n "$ARCHIVE" ]; then
   fi
 else
   step "Modo Git — atualização via GitHub"
-  if [ ! -d .git ]; then err ".git não encontrado. Instale limpo: cd ~ && git clone https://github.com/yanrpoliveira3108-bit/luas-bot-whats.git lua && cd lua && ./update.sh"; exit 1; fi
+  if [ ! -d .git ]; then err ".git não encontrado. cd ~ && git clone https://github.com/yanrpoliveira3108-bit/luas-bot-whats.git lua && cd lua && ./update.sh"; exit 1; fi
   if ! git remote get-url origin >/dev/null 2>&1; then err "Remote origin não configurado"; exit 1; fi
   ORIGIN_URL=$(git remote get-url origin)
   info "Remote origin: $ORIGIN_URL"
@@ -185,24 +140,18 @@ else
   CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
   info "Branch atual: $CURRENT_BRANCH"
 
-  # detecta se é branch arena (desenvolvimento)
   IS_ARENA=0
   if echo "$CURRENT_BRANCH" | grep -q "^arena/"; then IS_ARENA=1; info "Branch arena detectada (dev)"; fi
 
-  # se estiver na main e existir arena remota mais nova, avisa
   if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
-    # lista branches arena remotas
     ARENA_REMOTE=$(git branch -r | grep "origin/arena/" | head -n 1 | sed 's/.*origin\///' | xargs || true)
     if [ -n "$ARENA_REMOTE" ]; then
       info "Branch arena remota encontrada: $ARENA_REMOTE"
-      info "Se você quer as últimas melhorias (stickers, antis, etc), use:"
-      echo "  git checkout $ARENA_REMOTE"
-      echo "  ./update.sh"
+      info "Para últimas melhorias: git checkout $ARENA_REMOTE && ./update.sh"
       echo ""
     fi
   fi
 
-  # detecta alterações locais
   HAS_LOCAL_CHANGES=0
   if ! git diff --quiet || ! git diff --cached --quiet; then HAS_LOCAL_CHANGES=1; fi
 
@@ -214,28 +163,30 @@ else
     else
       err "Existem alterações locais em arquivos versionados."
       echo ""; git status --porcelain | head -n 50; echo ""
-      err "O update.sh NÃO sobrescreve sem aviso."
-      err "Opções:"
-      err "  ./update.sh --force   → guarda alterações e atualiza"
-      err "  git stash && ./update.sh && git stash pop"
-      err "  git diff > /tmp/minhas.patch && git checkout -- . && ./update.sh"
+      err "Opções: ./update.sh --force | git stash && ./update.sh && git stash pop"
       exit 1
     fi
   fi
 
   step "Buscando atualizações (git fetch)..."
-  if ! git fetch origin --prune; then err "Falha no git fetch. Verifique internet"; exit 1; fi
+  # Corrige clones single-branch (apenas main) — busca todas as branches
+  if ! git fetch origin --prune 2>/dev/null; then
+    if ! git fetch origin "+refs/heads/*:refs/remotes/origin/*" --prune 2>/dev/null; then
+      err "Falha no git fetch. Verifique internet"
+      exit 1
+    fi
+  fi
+  if ! git rev-parse --verify "origin/$CURRENT_BRANCH" >/dev/null 2>&1; then
+    git fetch origin "$CURRENT_BRANCH":"refs/remotes/origin/$CURRENT_BRANCH" 2>/dev/null || true
+  fi
   ok "Fetch concluído"
 
-  # determina upstream inteligente
   UPSTREAM=""
   if [ "$IS_ARENA" -eq 1 ]; then
-    # arena: tenta origin/<arena> primeiro, senão origin/main
     for candidate in "origin/$CURRENT_BRANCH" "origin/main" "origin/master"; do
       if git rev-parse --verify "$candidate" >/dev/null 2>&1; then UPSTREAM="$candidate"; break; fi
     done
   else
-    # main/master: tenta origin/main, senão origin/<current>
     for candidate in "origin/main" "origin/master" "origin/$CURRENT_BRANCH"; do
       if git rev-parse --verify "$candidate" >/dev/null 2>&1; then UPSTREAM="$candidate"; break; fi
     done
@@ -249,7 +200,6 @@ else
 
   if [ "$LOCAL_COMMIT" = "$REMOTE_COMMIT" ]; then
     ok "Já está atualizado (local = remoto: ${LOCAL_COMMIT:0:7})"
-    # mesmo atualizado, tenta restaurar stash se usou --force
     if [ "$FORCE" -eq 1 ] && git stash list | grep -q "auto-stash before update"; then
       info "Restaurando stash..."
       git stash pop || warn "Conflito ao restaurar stash — resolva manualmente: git stash pop"
@@ -258,69 +208,86 @@ else
     BEHIND=$(git rev-list --count HEAD.."$UPSTREAM" 2>/dev/null || echo "?")
     AHEAD=$(git rev-list --count "$UPSTREAM"..HEAD 2>/dev/null || echo "?")
     info "Local está $BEHIND atrás e $AHEAD à frente de $UPSTREAM"
-    BEFORE_SHA=$(git rev-parse HEAD)
 
-    step "Atualizando (git pull --ff-only $UPSTREAM)..."
-    PULLED=0
-    # tenta pull da branch atual
-    if git pull --ff-only origin "$CURRENT_BRANCH" 2>/dev/null; then
-      PULLED=1
-    elif [ "$IS_ARENA" -eq 1 ]; then
-      # arena: se falhar, tenta main como fallback (merge)
-      warn "Pull de $CURRENT_BRANCH falhou, tentando $UPSTREAM..."
-      if git merge --ff-only "$UPSTREAM" 2>/dev/null; then
-        PULLED=1
-      elif git pull --ff-only origin main 2>/dev/null; then
-        PULLED=1
-      fi
-    else
-      if git pull --ff-only origin main 2>/dev/null; then PULLED=1
-      elif git pull --ff-only origin master 2>/dev/null; then PULLED=1
+    RESET_DONE=0
+    if [ "$BEHIND" = "0" ] && [ "$AHEAD" != "0" ] && [ "$AHEAD" != "?" ]; then
+      warn "Seu branch local está $AHEAD commit(s) à frente de $UPSTREAM (commits locais)"
+      echo ""; echo "Commits locais:"; git log --oneline "$UPSTREAM"..HEAD | head -n 20; echo ""
+      if [ "$FORCE" -eq 1 ]; then
+        warn "--force ativo: fazendo reset --hard para $UPSTREAM para alinhar com GitHub"
+        if [ -t 0 ]; then
+          read -r -p "Confirmar reset --hard $UPSTREAM? [s/N]: " ans
+          case "$ans" in
+            [sS]* )
+              BEFORE_SHA="$LOCAL_COMMIT"
+              git reset --hard "$UPSTREAM"
+              AFTER_SHA=$(git rev-parse HEAD)
+              ok "Reset feito — alinhado com $UPSTREAM (${BEFORE_SHA:0:7} → ${AFTER_SHA:0:7})"
+              RESET_DONE=1
+              ;;
+            * ) err "Abortado. Para manter commits locais, faça push ou crie branch"; exit 1 ;;
+          esac
+        else
+          err "Sem TTY — abortado. Rode: git reset --hard $UPSTREAM ou git push"
+          exit 1
+        fi
+      else
+        err "Resolva divergência: git reset --hard $UPSTREAM (APAGA locais) | git push origin $CURRENT_BRANCH | ./update.sh --force"
+        exit 1
       fi
     fi
 
-    if [ "$PULLED" -eq 0 ]; then
-      err "git pull --ff-only falhou (branch divergiu)."
-      echo ""
-      echo "Isso acontece quando há commits locais ou branch arena está à frente."
-      echo "Soluções:"
-      echo "  git log --oneline HEAD..$UPSTREAM | head -20   # o que falta"
-      echo "  git log --oneline $UPSTREAM..HEAD | head -20   # commits locais"
-      echo "  ./update.sh --force                            # tenta stash + pull"
-      echo "  git reset --hard $UPSTREAM  # APAGA locais (perigoso, backup em $SNAP)"
-      echo "  git checkout $UPSTREAM      # muda para branch remota"
-      if [ "$FORCE" -eq 1 ]; then
-        warn "--force ativo, tentando reset --hard para $UPSTREAM..."
-        if [ -t 0 ]; then
-          read -r -p "Fazer git reset --hard $UPSTREAM? Apaga alterações locais! [s/N]: " ans
+    if [ "$RESET_DONE" -eq 0 ]; then
+      BEFORE_SHA=$(git rev-parse HEAD)
+      step "Atualizando (git pull --ff-only $UPSTREAM)..."
+      PULLED=0
+      if git pull --ff-only origin "$CURRENT_BRANCH" 2>/dev/null; then
+        PULLED=1
+      elif [ "$IS_ARENA" -eq 1 ]; then
+        warn "Pull de $CURRENT_BRANCH falhou, tentando $UPSTREAM..."
+        if git merge --ff-only "$UPSTREAM" 2>/dev/null; then
+          PULLED=1
+        elif git pull --ff-only origin main 2>/dev/null; then
+          PULLED=1
+        fi
+      else
+        if git pull --ff-only origin main 2>/dev/null; then PULLED=1
+        elif git pull --ff-only origin master 2>/dev/null; then PULLED=1
+        fi
+      fi
+
+      if [ "$PULLED" -eq 0 ]; then
+        err "git pull --ff-only falhou (branch divergiu)."
+        echo "  git log --oneline HEAD..$UPSTREAM | head -20"
+        echo "  git log --oneline $UPSTREAM..HEAD | head -20"
+        echo "  ./update.sh --force | git reset --hard $UPSTREAM (perigoso, backup em $SNAP)"
+        if [ "$FORCE" -eq 1 ] && [ -t 0 ]; then
+          read -r -p "Fazer git reset --hard $UPSTREAM? [s/N]: " ans
           case "$ans" in
             [sS]* ) git reset --hard "$UPSTREAM" && PULLED=1 && ok "Reset feito" ;;
             * ) err "Abortado"; exit 1 ;;
           esac
         else
-          err "Abortado (sem TTY para confirmar reset)"
           exit 1
         fi
-      else
-        exit 1
       fi
-    fi
 
-    AFTER_SHA=$(git rev-parse HEAD)
-    ok "Atualizado: ${BEFORE_SHA:0:7} → ${AFTER_SHA:0:7}"
-    echo ""; echo "📦 Alterações:"; git log --oneline "$BEFORE_SHA".."$AFTER_SHA" | head -n 20
-    echo ""; echo "📄 Arquivos alterados:"; git diff --name-status "$BEFORE_SHA".."$AFTER_SHA" | head -n 50
-
-    if [ "$FORCE" -eq 1 ] && git stash list | grep -q "auto-stash before update"; then
-      echo ""; info "Restaurando stash..."
-      if ! git stash pop; then
-        warn "Conflito ao restaurar stash — seus arquivos locais conflitaram com atualização"
-        warn "Resolva manualmente:"
-        echo "  git stash list"
-        echo "  git stash show -p"
-        echo "  git stash pop"
+      AFTER_SHA=$(git rev-parse HEAD)
+      if [ "$BEFORE_SHA" != "$AFTER_SHA" ]; then
+        ok "Atualizado: ${BEFORE_SHA:0:7} → ${AFTER_SHA:0:7}"
+        echo ""; echo "📦 Alterações:"; git log --oneline "$BEFORE_SHA".."$AFTER_SHA" | head -n 20
+        echo ""; echo "📄 Arquivos alterados:"; git diff --name-status "$BEFORE_SHA".."$AFTER_SHA" | head -n 50
       else
-        ok "Stash restaurado"
+        ok "Já estava atualizado após pull (sem novos commits)"
+      fi
+
+      if [ "$FORCE" -eq 1 ] && git stash list | grep -q "auto-stash before update"; then
+        echo ""; info "Restaurando stash..."
+        if ! git stash pop; then
+          warn "Conflito ao restaurar stash — resolva manualmente: git stash list / git stash pop"
+        else
+          ok "Stash restaurado"
+        fi
       fi
     fi
   fi
