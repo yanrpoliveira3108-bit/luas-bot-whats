@@ -185,9 +185,18 @@ else
   ok "Fetch concluído (${REMOTE_BRANCHES:-0} branch(es) remota(s))"
 
   if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
-    ARENA_REMOTE=$(git branch -r | grep "origin/arena/" | head -n 1 | sed 's|.*origin/||' | xargs || true)
+    # Pode existir mais de uma arena/*: escolha pela data do commit, nunca pela
+    # ordem alfabética — a alfabética apontava para a branch MAIS ANTIGA.
+    ARENA_REMOTE=$(git for-each-ref --sort=-committerdate refs/remotes/origin/arena/ \
+      --format='%(refname:short)' 2>/dev/null | head -n 1 | sed 's|^origin/||' | xargs || true)
+    if [ -z "$ARENA_REMOTE" ]; then
+      ARENA_REMOTE=$(git branch -r | grep "origin/arena/" | head -n 1 | sed 's|.*origin/||' | xargs || true)
+    fi
     if [ -n "$ARENA_REMOTE" ]; then
-      info "Branch arena remota encontrada: $ARENA_REMOTE"
+      ARENA_COUNT=$(git for-each-ref refs/remotes/origin/arena/ --format='%(refname:short)' 2>/dev/null | grep -c . || true)
+      ARENA_SHA=$(git log -1 --format=%h "origin/$ARENA_REMOTE" 2>/dev/null || echo '?')
+      info "Branch arena remota mais recente: $ARENA_REMOTE ($ARENA_SHA)"
+      if [ "${ARENA_COUNT:-0}" -gt 1 ]; then info "Há ${ARENA_COUNT} branches arena/* — usando a do commit mais novo"; fi
       info "Para últimas melhorias: git checkout $ARENA_REMOTE && ./update.sh"
       echo ""
     fi
