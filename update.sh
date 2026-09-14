@@ -21,6 +21,7 @@ step() { echo -e "${BLUE}▶${NC} $1"; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 ROOT="$SCRIPT_DIR"
+ALL_BRANCHES_REFSPEC='+refs/heads/*:refs/remotes/origin/*'
 
 DELETE_SOURCE=0
 FORCE=0
@@ -143,15 +144,6 @@ else
   IS_ARENA=0
   if echo "$CURRENT_BRANCH" | grep -q "^arena/"; then IS_ARENA=1; info "Branch arena detectada (dev)"; fi
 
-  if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
-    ARENA_REMOTE=$(git branch -r | grep "origin/arena/" | head -n 1 | sed 's/.*origin\///' | xargs || true)
-    if [ -n "$ARENA_REMOTE" ]; then
-      info "Branch arena remota encontrada: $ARENA_REMOTE"
-      info "Para últimas melhorias: git checkout $ARENA_REMOTE && ./update.sh"
-      echo ""
-    fi
-  fi
-
   HAS_LOCAL_CHANGES=0
   if ! git diff --quiet || ! git diff --cached --quiet; then HAS_LOCAL_CHANGES=1; fi
 
@@ -169,17 +161,37 @@ else
   fi
 
   step "Buscando atualizações (git fetch)..."
-  # Corrige clones single-branch (apenas main) — busca todas as branches
-  if ! git fetch origin --prune 2>/dev/null; then
-    if ! git fetch origin "+refs/heads/*:refs/remotes/origin/*" --prune 2>/dev/null; then
-      err "Falha no git fetch. Verifique internet"
-      exit 1
-    fi
+  # Clone single-branch (git clone --single-branch / --branch) grava UM unico
+  # refspec em remote.origin.fetch. Nesse caso "git fetch origin" termina com
+  # sucesso trazendo so aquela branch — entao o fetch "completo" precisa ser
+  # feito sempre, e nao apenas quando o primeiro falha. Ampliamos o refspec do
+  # remote para todas as branches antes de buscar.
+  if ! git config --get-all remote.origin.fetch 2>/dev/null | grep -qxF "$ALL_BRANCHES_REFSPEC"; then
+    info "Clone single-branch detectado — habilitando busca de todas as branches"
+    git remote set-branches origin '*' >/dev/null 2>&1 \
+      || git config --replace-all remote.origin.fetch "$ALL_BRANCHES_REFSPEC" \
+      || true
   fi
+  FETCH_OK=0
+  if git fetch origin --prune 2>/dev/null; then FETCH_OK=1; fi
+  # sempre garante TODAS as branches (arena/* inclusive): com refspec de
+  # single-branch o fetch acima "dá certo" sem trazer nada novo.
+  if git fetch origin "$ALL_BRANCHES_REFSPEC" --prune 2>/dev/null; then FETCH_OK=1; fi
+  if [ "$FETCH_OK" -eq 0 ]; then err "Falha no git fetch. Verifique internet"; exit 1; fi
   if ! git rev-parse --verify "origin/$CURRENT_BRANCH" >/dev/null 2>&1; then
     git fetch origin "$CURRENT_BRANCH":"refs/remotes/origin/$CURRENT_BRANCH" 2>/dev/null || true
   fi
-  ok "Fetch concluído"
+  REMOTE_BRANCHES=$(git branch -r 2>/dev/null | grep -v -- '->' | grep -c 'origin/' || true)
+  ok "Fetch concluído (${REMOTE_BRANCHES:-0} branch(es) remota(s))"
+
+  if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
+    ARENA_REMOTE=$(git branch -r | grep "origin/arena/" | head -n 1 | sed 's|.*origin/||' | xargs || true)
+    if [ -n "$ARENA_REMOTE" ]; then
+      info "Branch arena remota encontrada: $ARENA_REMOTE"
+      info "Para últimas melhorias: git checkout $ARENA_REMOTE && ./update.sh"
+      echo ""
+    fi
+  fi
 
   UPSTREAM=""
   if [ "$IS_ARENA" -eq 1 ]; then
@@ -305,15 +317,21 @@ else info ".env mantido"; fi
 
 NEED_INSTALL=0
 if [ -n "${BEFORE_SHA:-}" ] && [ -n "${AFTER_SHA:-}" ]; then
-  if git diff --name-only "$BEFORE_SHA".."$AFTER_SHA" | grep -qE "package\\.json|package-lock\\.json|vendor/"; then NEED_INSTALL=1; info "package.json mudou — precisa npm install"; fi
+  # aspas simples: o padrao chega ao grep exatamente como escrito (sem a
+  # armadilha do escape duplo dentro de aspas duplas)
+  if git diff --name-only "$BEFORE_SHA".."$AFTER_SHA" | grep -qE 'package\.json|package-lock\.json|vendor/'; then NEED_INSTALL=1; info "package.json mudou — precisa npm install"; fi
 else
   if [ ! -d node_modules ] || [ ! -f node_modules/dotenv/package.json ]; then NEED_INSTALL=1; fi
 fi
 
-if [ -f package.json ] && grep -qE '\"better-sqlite3\": *\"\\^11\\.' package.json; then
-  sed -i -E 's/\"better-sqlite3\": *\"\\^11\\.[0-9.]+\"/\"better-sqlite3\": \"^13.0.3\"/' package.json
-  sed -i -E 's/\"node\": *\">=20(\\.0\\.0)?\"/\"node\": \">=22.0.0\"/' package.json
-  info "package.json atualizado: better-sqlite3 → ^13.0.3"
+# Aspas simples SEM \" escapado: as barras invertidas antes de " chegavam ao
+# grep (aviso "stray \ before \"" em algumas builds) e o \\^ exigia uma barra
+# invertida literal antes do ^11 — o padrão nunca casava e a migração nunca
+# rodava em hosts antigos.
+if [ -f package.json ] && grep -qE '"better-sqlite3": *"\^11\.' package.json; then
+  sed -i -E 's/"better-sqlite3": *"\^11\.[0-9.]+"/"better-sqlite3": "^13.0.3"/' package.json
+  sed -i -E 's/"node": *">=20(\.0\.0)?"/"node": ">=22.0.0"/' package.json
+  info "package.json atualizado: better-sqlite3 → ^13.0.3, node → >=22"
   NEED_INSTALL=1
 fi
 
