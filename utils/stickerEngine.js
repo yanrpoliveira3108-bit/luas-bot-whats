@@ -489,12 +489,16 @@ async function setStickerMetadata(webpBuffer, { packname, author, emoji }) {
   const mux = webpmux();
   if (!mux) return webpBuffer;
 
+  // sanitiza e limita tamanhos — WhatsApp rejeita pack/author gigantes
+  const safePack = String(packname || CONFIG.bot.name || 'Lua').slice(0, 60).trim() || CONFIG.bot.name;
+  const safeAuthor = String(author || CONFIG.bot.author || 'Lua').slice(0, 120).trim() || CONFIG.bot.author;
+
   const json = {
     'sticker-pack-id': 'com.lua.bot',
-    'sticker-pack-name': packname || CONFIG.bot.name,
-    'sticker-pack-publisher': author || CONFIG.bot.author,
+    'sticker-pack-name': safePack,
+    'sticker-pack-publisher': safeAuthor,
   };
-  if (emoji) json.emojis = [emoji];
+  if (emoji) json.emojis = [String(emoji).slice(0, 8)];
 
   try {
     const { Image } = mux;

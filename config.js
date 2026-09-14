@@ -231,6 +231,18 @@ const CONFIG = {
     evalEnabled: envBool('ENABLE_EVAL', false),
   },
 
+  /* ------------------ stickers (pack/author ricos) ------------------ */
+  sticker: {
+    // Templates opcionais — deixe vazio para usar geração automática rica
+    // Placeholders: {bot}, {creator}, {owner}, {dev}, {group}, {origin}, {date}
+    packname: envStr('STICKER_PACKNAME', ''),
+    author: envStr('STICKER_AUTHOR', ''),
+    // Incluir data na bio? false = mais limpo, true = mostra data
+    includeDate: envBool('STICKER_INCLUDE_DATE', false),
+    // Ativa bio rica completa (criador, origem, bot, dono, dev)
+    richBio: envBool('STICKER_RICH_BIO', true),
+  },
+
   /* ------------------ downloaders (qualidade e velocidade) ------------------ */
   downloader: {
     // YouTube — qualidade de vídeo: best, 2160, 1440, 1080, 720, 480, 360
