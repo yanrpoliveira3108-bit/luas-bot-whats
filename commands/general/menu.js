@@ -5,26 +5,29 @@ const { registry } = require('../../engine/plugins');
 const { commandEmoji } = require('../../utils/commandEmoji');
 const { maybeReadMore } = require('../../utils/readmore');
 
-function searchCommands(query) {
+const commandCache = require('../../utils/commandCache');
+const ui = require('../../utils/uiKit');
+
+/**
+ * Busca por nome, alias, categoria, descrição e keywords usando o índice
+ * invertido do commandCache (O(tokens) em vez de varrer os 318 comandos).
+ */
+function searchCommands(query, limit = 30) {
   const q = String(query || '').toLowerCase().trim();
   if (!q) return [];
-  let cmds = [];
   try {
-    cmds = registry.all ? registry.all() : [];
-  } catch (_) {}
-  if (!cmds.length) {
-    const byCat = registry.byCategory();
-    for (const list of byCat.values()) {
-      cmds.push(...list);
-    }
+    const results = commandCache.search(q, limit);
+    if (results.length) return results;
+  } catch (_) {
+    /* cache indisponível: cai no caminho antigo */
   }
-  return cmds.filter((c) => {
-    const name = (c.name || '').toLowerCase();
-    const desc = (c.description || '').toLowerCase();
-    const triggers = (c.commands || []).join(' ').toLowerCase();
-    const cat = (c.category || '').toLowerCase();
-    return name.includes(q) || desc.includes(q) || triggers.includes(q) || cat.includes(q);
-  }).slice(0, 30);
+  let cmds = registry.all ? registry.all() : [];
+  return cmds
+    .filter((c) => {
+      const hay = `${c.name} ${(c.commands || []).join(' ')} ${c.category} ${c.description || ''}`.toLowerCase();
+      return hay.includes(q);
+    })
+    .slice(0, limit);
 }
 
 module.exports = [
@@ -51,6 +54,7 @@ module.exports = [
       }
 
       const lines = [
+        ui.divider('minimal'),
         `🔍 *Busca: ${query}* — ${results.length} resultado(s)`,
         '',
         ...results.map((c) => {
