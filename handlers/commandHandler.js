@@ -369,6 +369,14 @@ async function handleMessage(sock, msg) {
     // respostas interativas (botões/lista) têm prioridade
     if (await buttonHandler.process(ctx)) return;
 
+    // registra histórico para anti purge (mesmo se não houver anti ativo, para !apagar manual)
+    if (ctx.isGroup) {
+      try {
+        const antiManager = require('../utils/antiManager');
+        antiManager.addToHistory(ctx.remoteJid, ctx.sender, ctx.message.key);
+      } catch (_) {}
+    }
+
     // filtros de grupo
     if (ctx.isGroup) {
       const filtered = await groupHandler.applyFilters(sock, ctx);

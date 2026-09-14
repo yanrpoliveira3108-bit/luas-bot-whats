@@ -22,6 +22,36 @@ const { sanitize } = require('./formatter');
 
 function ensureTmp() {
   fs.mkdirSync(CONFIG.paths.tmpDir, { recursive: true });
+  fs.mkdirSync(path.join(CONFIG.paths.tmpDir, 'cache'), { recursive: true });
+}
+
+function cacheKey(url) {
+  const crypto = require('crypto');
+  return crypto.createHash('sha1').update(String(url)).digest('hex').slice(0, 16);
+}
+
+function getCachedBuffer(url, maxAgeMs = 24 * 60 * 60 * 1000) {
+  try {
+    const key = cacheKey(url);
+    const fp = path.join(CONFIG.paths.tmpDir, 'cache', key);
+    if (!fs.existsSync(fp)) return null;
+    const stat = fs.statSync(fp);
+    if (Date.now() - stat.mtimeMs > maxAgeMs) {
+      try { fs.unlinkSync(fp); } catch (_) {}
+      return null;
+    }
+    return fs.readFileSync(fp);
+  } catch (_) {
+    return null;
+  }
+}
+
+function setCachedBuffer(url, buf) {
+  try {
+    const key = cacheKey(url);
+    const fp = path.join(CONFIG.paths.tmpDir, 'cache', key);
+    fs.writeFileSync(fp, buf);
+  } catch (_) {}
 }
 
 function safeFileName(suggested, ext) {
@@ -131,6 +161,15 @@ async function downloadToBuffer(url, opts = {}) {
   const maxBytes = opts.maxBytes || 10 * 1024 * 1024;
   const timeoutMs = opts.timeoutMs || 30000;
   const retries = opts.retries !== undefined ? opts.retries : 2;
+  const useCache = opts.cache !== false; // cache por padrão
+
+  if (useCache) {
+    const cached = getCachedBuffer(url, opts.cacheTtlMs || 24 * 60 * 60 * 1000);
+    if (cached) {
+      logger.info({ url: String(url).slice(0, 80), bytes: cached.length }, 'cache hit downloadToBuffer');
+      return cached;
+    }
+  }
 
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -154,6 +193,7 @@ async function downloadToBuffer(url, opts = {}) {
       const buf = Buffer.from(await res.arrayBuffer());
       if (buf.length > maxBytes) throw new Error('FILE_TOO_BIG');
       if (buf.length === 0) throw new Error('EMPTY_FILE');
+      if (useCache) setCachedBuffer(url, buf);
       return buf;
     } catch (err) {
       lastErr = err;
@@ -174,19 +214,32 @@ function cleanupTmp(maxAgeMs = 30 * 60 * 1000) {
   try {
     ensureTmp();
     const now = Date.now();
-    const files = fs.readdirSync(CONFIG.paths.tmpDir);
     let removed = 0;
-    for (const f of files) {
-      if (f === '.gitkeep') continue;
-      const p = path.join(CONFIG.paths.tmpDir, f);
+    const cleanDir = (dir, age) => {
       try {
-        const st = fs.statSync(p);
-        if (now - st.mtimeMs > maxAgeMs) {
-          fs.unlinkSync(p);
-          removed++;
+        const files = fs.readdirSync(dir);
+        for (const f of files) {
+          if (f === '.gitkeep') continue;
+          const p = path.join(dir, f);
+          try {
+            const st = fs.statSync(p);
+            if (st.isDirectory()) {
+              cleanDir(p, age);
+              // remove diretório vazio
+              if (fs.readdirSync(p).length === 0) {
+                try { fs.rmdirSync(p); } catch (_) {}
+              }
+            } else if (now - st.mtimeMs > age) {
+              fs.unlinkSync(p);
+              removed++;
+            }
+          } catch (_) {}
         }
       } catch (_) {}
-    }
+    };
+    cleanDir(CONFIG.paths.tmpDir, maxAgeMs);
+    // cache tem TTL maior (24h)
+    cleanDir(path.join(CONFIG.paths.tmpDir, 'cache'), 24 * 60 * 60 * 1000);
     if (removed > 0) logger.info({ removed }, 'tmp limpo');
     return removed;
   } catch (err) {

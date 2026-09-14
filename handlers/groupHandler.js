@@ -5,7 +5,8 @@
  * - registro X9 (entradas, saídas, promoções, rebaixamentos, nome, descrição)
  * - filtros: antilink, antispam, antiflood, antifake, antibot, antiparentese,
  *   antiinvite, antimedia/antiimagem/antivideo/antiaudio/antidocumento/
- *   antisticker/antiviewonce
+ *   antisticker/antiviewonce + sistema avançado de antis com ação configurável
+ *   (ban/warn/mute/delete + purge de histórico)
  * - mute de usuários
  *
  * Nenhum filtro age sobre administradores, dono ou o próprio bot.
@@ -26,9 +27,10 @@ const FLOOD_WINDOW_MS = 8000;
 const FLOOD_MAX = 8;
 
 function checkSpamFlood(ctx) {
-  const s = groups.getSettings(ctx.remoteJid);
-  const f = s.filters || {};
-  if (!f.antispam && !f.antiflood) return { action: null };
+  const antiManager = require('../utils/antiManager');
+  const isSpamEnabled = antiManager.isAntiEnabled(ctx.remoteJid, 'antispam') || (groups.getSettings(ctx.remoteJid).filters || {}).antispam;
+  const isFloodEnabled = antiManager.isAntiEnabled(ctx.remoteJid, 'antiflood') || (groups.getSettings(ctx.remoteJid).filters || {}).antiflood;
+  if (!isSpamEnabled && !isFloodEnabled) return { action: null };
 
   const now = Date.now();
   const key = ctx.sender;
@@ -39,11 +41,11 @@ function checkSpamFlood(ctx) {
   }
   st.count++;
 
-  if (f.antiflood && st.count > FLOOD_MAX) {
+  if (isFloodEnabled && st.count > FLOOD_MAX) {
     spamState.set(key, { count: 0, windowStart: now, lastText: '' });
     return { action: 'flood' };
   }
-  if (f.antispam && st.lastText && st.lastText === ctx.text && ctx.text.length > 3) {
+  if (isSpamEnabled && st.lastText && st.lastText === ctx.text && ctx.text.length > 3) {
     return { action: 'spam' };
   }
   st.lastText = ctx.text;
@@ -60,9 +62,7 @@ function extractDomains(text) {
     try {
       const host = m[0].replace(/^https?:\/\//i, '').replace(/^www\./i, '').split(/[/?#]/)[0];
       if (host) domains.push(host.toLowerCase());
-    } catch (_) {
-      /* ignora */
-    }
+    } catch (_) {}
   }
   return domains;
 }
@@ -79,15 +79,11 @@ const PIX_DOMAINS = [
   'buymeacoffee.com', 'picpay.com', 'iti.itau', 'efi.com.br', 'gerencianet',
 ];
 
-/** Detecta texto de pagamento: links de pix/cobrança, pix copia-e-cola ou chave pix. */
 function isPaymentContent(text) {
   const t = String(text || '');
   if (!t) return false;
-  // pix "copia e cola" (EMV) tem o padrão br.gov.bcb.pix
   if (/br\.gov\.bcb\.pix/i.test(t)) return true;
-  // chave pix explícita (chave: ... ou chave pix: email/telefone)
   if (/chave[:\s]*pix|pix[:\s]+[a-z0-9._%+-]+@[a-z0-9.-]+/i.test(t)) return true;
-  // domínios de pagamento/cobrança
   const lower = t.toLowerCase();
   return PIX_DOMAINS.some((d) => lower.includes(d));
 }
@@ -108,62 +104,100 @@ function isViewOnce(ctx) {
  * @returns {Promise<{deleted:boolean, action:string|null}>}
  */
 async function applyFilters(sock, ctx) {
+  try {
+    const antiManager = require('../utils/antiManager');
+    antiManager.addToHistory(ctx.remoteJid, ctx.sender, ctx.message.key);
+  } catch (_) {}
+
   const s = groups.getSettings(ctx.remoteJid);
   const f = s.filters || {};
-  const active = Object.keys(f).filter((k) => f[k]);
-  if (active.length === 0) return { deleted: false, action: null };
+  const anti = s.anti || {};
+  const hasActiveOld = Object.keys(f).some((k) => f[k]);
+  const hasActiveNew = anti && Object.keys(anti).some((k) => anti[k] && anti[k].enabled);
+  if (!hasActiveOld && !hasActiveNew) return { deleted: false, action: null };
 
-  // nunca filtrar admins, dono ou o bot
   if (ctx.isOwner || ctx.isAdmin || ctx.isBot) return { deleted: false, action: null };
 
   const actions = [];
+  const antiManager = require('../utils/antiManager');
 
-  // antilink / antiinvite
-  if (f.antilink || f.antiinvite) {
+  const isLinkEnabled = antiManager.isAntiEnabled(ctx.remoteJid, 'antilink') || f.antilink;
+  const isInviteEnabled = antiManager.isAntiEnabled(ctx.remoteJid, 'antiinvite') || f.antiinvite;
+
+  if (isLinkEnabled || isInviteEnabled) {
     const domains = extractDomains(ctx.text);
-    if (f.antilink && domains.length > 0) {
+    if (isLinkEnabled && domains.length > 0) {
       const whitelist = (s.antilink_whitelist || []).map((d) => String(d).toLowerCase());
       const blocked = domains.filter((d) => !whitelist.some((w) => d === w || d.endsWith('.' + w)));
       if (blocked.length > 0) actions.push('antilink');
     }
-    if (f.antiinvite && isGroupInviteLink(ctx.text)) actions.push('antiinvite');
+    if (isInviteEnabled && isGroupInviteLink(ctx.text)) actions.push('antiinvite');
   }
 
-  // antipix (anti-pagamento): cobrança/pix/chave pix
-  if (f.antipix && isPaymentContent(ctx.text)) actions.push('antipix');
+  const isPixEnabled = antiManager.isAntiEnabled(ctx.remoteJid, 'antipix') || f.antipix;
+  if (isPixEnabled && isPaymentContent(ctx.text)) actions.push('antipix');
 
-  // antispam / antiflood
   const spam = checkSpamFlood(ctx);
-  if (spam.action) actions.push(spam.action);
+  if (spam.action) actions.push(spam.action === 'flood' ? 'antiflood' : 'antispam');
 
-  // anti-mídia
   const mediaType = detectMediaType(ctx.message);
-  if (f.antimedia || f.antiimagem || f.antivideo || f.antiaudio || f.antidocumento || f.antisticker || f.antiviewonce || f.antilocalizacao || f.anticontato) {
-    if (f.antiviewonce && isViewOnce(ctx)) actions.push('antiviewonce');
-    if (mediaType === 'image' && (f.antimedia || f.antiimagem)) actions.push('antiimagem');
-    if (mediaType === 'video' && (f.antimedia || f.antivideo)) actions.push('antivideo');
-    if (mediaType === 'audio' && (f.antimedia || f.antiaudio)) actions.push('antiaudio');
-    if (mediaType === 'document' && (f.antimedia || f.antidocumento)) actions.push('antidocumento');
-    if (mediaType === 'sticker' && (f.antimedia || f.antisticker)) actions.push('antisticker');
-    if (mediaType === 'location' && f.antilocalizacao) actions.push('antilocalizacao');
-    if (mediaType === 'contact' && f.anticontato) actions.push('anticontato');
+  const checkMediaAnti = (type) => antiManager.isAntiEnabled(ctx.remoteJid, type) || f[type];
+  if (
+    checkMediaAnti('antimedia') ||
+    checkMediaAnti('antiimagem') ||
+    checkMediaAnti('antivideo') ||
+    checkMediaAnti('antiaudio') ||
+    checkMediaAnti('antidocumento') ||
+    checkMediaAnti('antisticker') ||
+    checkMediaAnti('antiviewonce') ||
+    checkMediaAnti('antilocalizacao') ||
+    checkMediaAnti('anticontato')
+  ) {
+    if (checkMediaAnti('antiviewonce') && isViewOnce(ctx)) actions.push('antiviewonce');
+    if (mediaType === 'image' && (checkMediaAnti('antimedia') || checkMediaAnti('antiimagem'))) actions.push('antiimagem');
+    if (mediaType === 'video' && (checkMediaAnti('antimedia') || checkMediaAnti('antivideo'))) actions.push('antivideo');
+    if (mediaType === 'audio' && (checkMediaAnti('antimedia') || checkMediaAnti('antiaudio'))) actions.push('antiaudio');
+    if (mediaType === 'document' && (checkMediaAnti('antimedia') || checkMediaAnti('antidocumento'))) actions.push('antidocumento');
+    if (mediaType === 'sticker' && (checkMediaAnti('antimedia') || checkMediaAnti('antisticker'))) actions.push('antisticker');
+    if (mediaType === 'location' && checkMediaAnti('antilocalizacao')) actions.push('antilocalizacao');
+    if (mediaType === 'contact' && checkMediaAnti('anticontato')) actions.push('anticontato');
   }
 
-  // antiparentese: mensagem dominada por símbolos (spam de símbolos)
-  if (f.antiparentese && ctx.text && ctx.text.length > 2) {
+  const isParenEnabled = antiManager.isAntiEnabled(ctx.remoteJid, 'antiparentese') || f.antiparentese;
+  if (isParenEnabled && ctx.text && ctx.text.length > 2) {
     const symbols = (ctx.text.match(/[^\w\sà-úÀ-Ú]/g) || []).length;
     if (symbols / ctx.text.length > 0.7) actions.push('antiparentese');
   }
 
   if (actions.length === 0) return { deleted: false, action: null };
 
-  const action = actions[0];
-  const deleted = await tryDelete(sock, ctx);
-  logger.info({ group: ctx.remoteJid, user: ctx.sender, action, deleted }, 'filtro acionado');
+  let antiType = actions[0];
+  if (antiType === 'flood') antiType = 'antiflood';
+  if (antiType === 'spam') antiType = 'antispam';
 
-  // se o bot não é admin (não conseguiu apagar), avisa no grupo para o
-  // filtro ficar VISÍVEL e o usuário entender que ele está ativo
-  if (!deleted) {
+  const reasonMap = {
+    antilink: 'Link não permitido',
+    antiinvite: 'Link de convite não permitido',
+    antipix: 'Conteúdo de pagamento/pix não permitido',
+    antiimagem: 'Imagens não permitidas',
+    antivideo: 'Vídeos não permitidos',
+    antiaudio: 'Áudios não permitidos',
+    antidocumento: 'Documentos não permitidos',
+    antisticker: 'Stickers não permitidos',
+    antiviewonce: 'Mídia de visualização única não permitida',
+    antilocalizacao: 'Localizações não permitidas',
+    anticontato: 'Contatos não permitidos',
+    antimedia: 'Mídias não permitidas',
+    antispam: 'Spam (mensagem repetida)',
+    antiflood: 'Flood (muitas mensagens)',
+    antiparentese: 'Mensagem com excesso de símbolos',
+  };
+  const reason = reasonMap[antiType] || `Filtro ${antiType}`;
+
+  const result = await antiManager.executeAntiAction(sock, ctx, antiType, reason);
+  logger.info({ group: ctx.remoteJid, user: ctx.sender, anti: antiType, action: result.action, deleted: result.deleted }, 'filtro acionado');
+
+  if (!result.deleted) {
     const labels = {
       antilink: '🚫 Links não são permitidos aqui',
       antiinvite: '🚫 Links de convite não são permitidos',
@@ -181,14 +215,29 @@ async function applyFilters(sock, ctx) {
       antiflood: '🌊 Flood não é permitido aqui',
       antiparentese: '🧹 Mensagens com símbolos não são permitidas',
     };
-    const label = labels[action] || `🚫 Filtro ${action} ativo`;
+    const label = labels[antiType] || `🚫 Filtro ${antiType} ativo`;
     await sock.sendMessage(
       ctx.remoteJid,
       { text: `${label}, @${ctx.sender.split('@')[0]}.\n_💡 Para o bot apagar automaticamente, ele precisa ser admin do grupo._`, mentions: [ctx.sender] },
       { quoted: ctx.message }
     ).catch(() => {});
+    return { deleted: false, action: antiType };
   }
-  return { deleted: true, action };
+
+  if (result.action && result.action !== 'delete') {
+    const actionLabels = {
+      warn: `⚠️ @${ctx.sender.split('@')[0]} advertido por ${reason}`,
+      mute: `🔇 @${ctx.sender.split('@')[0]} mutado por ${reason}${result.purged ? ` — ${result.purged} msgs apagadas` : ''}`,
+      ban: `🚫 @${ctx.sender.split('@')[0]} banido por ${reason}${result.purged ? ` — ${result.purged} msgs apagadas` : ''}`,
+      kick: `👢 @${ctx.sender.split('@')[0]} removido por ${reason}`,
+    };
+    const msg = actionLabels[result.action];
+    if (msg) {
+      await sock.sendMessage(ctx.remoteJid, { text: msg, mentions: [ctx.sender] }).catch(() => {});
+    }
+  }
+
+  return { deleted: true, action: antiType };
 }
 
 /** Tenta deletar a mensagem (exige bot admin). */
@@ -225,12 +274,6 @@ function isMuted(jid, userJid) {
   return mutedList(jid).includes(userJid);
 }
 
-/**
- * Bloqueia mensagens de usuários mutados: apaga (se o bot for admin) e
- * impede que a mensagem prossiga no pipeline (comandos/botões/sessões).
- * Nunca age sobre administradores, dono ou o próprio bot.
- * @returns {Promise<{blocked:boolean, deleted?:boolean}>}
- */
 async function enforceMute(sock, ctx) {
   if (!ctx.isGroup) return { blocked: false };
   if (ctx.isOwner || ctx.isAdmin || ctx.isBot) return { blocked: false };
@@ -266,7 +309,6 @@ async function handleGroupParticipants(sock, ev) {
   }
 }
 
-/** Alterações de nome/descrição/configuração (groups.update). */
 async function handleGroupUpdate(sock, ev) {
   for (const u of ev || []) {
     const g = groups.get(u.id);
@@ -309,11 +351,6 @@ async function maybeGoodbye(sock, jid, userJid) {
   }
 }
 
-/**
- * Welcome na entrada: tenta a CARD VISUAL (novo sistema); se não estiver
- * ativada (ou falhar), mantém o fallback textual antigo. Nunca deixa o
- * grupo sem mensagem nem derruba o bot.
- */
 async function welcomeMember(sock, jid, userJid) {
   let handled = false;
   try {
@@ -325,7 +362,6 @@ async function welcomeMember(sock, jid, userJid) {
   if (!handled) await maybeWelcome(sock, jid, userJid);
 }
 
-/** Despedida na saída: card visual (novo) com fallback textual antigo. */
 async function goodbyeMember(sock, jid, userJid) {
   let handled = false;
   try {
@@ -337,31 +373,30 @@ async function goodbyeMember(sock, jid, userJid) {
   if (!handled) await maybeGoodbye(sock, jid, userJid);
 }
 
-/** Heurísticas de antifake/antibot na entrada de novos membros. */
 async function maybeAntiFakeAntiBot(sock, jid, userJid, author) {
   const s = groups.getSettings(jid);
   const f = s.filters || {};
-  if (!f.antifake && !f.antibot) return;
+  const anti = s.anti || {};
+  const isFakeEnabled = (anti.antifake && anti.antifake.enabled) || f.antifake;
+  const isBotEnabled = (anti.antibot && anti.antibot.enabled) || f.antibot;
+  if (!isFakeEnabled && !isBotEnabled) return;
 
   const number = String(userJid).split('@')[0];
   const isBR = number.startsWith('55');
   const flags = [];
-  if (f.antifake && !isBR) flags.push('número estrangeiro (antifake)');
-  if (f.antibot) {
+  if (isFakeEnabled && !isBR) flags.push('número estrangeiro (antifake)');
+  if (isBotEnabled) {
     try {
       const m = await sock.groupMetadata(jid);
       const p = (m.participants || []).find((x) => x.id === userJid);
       const name = (p && (p.notify || p.name || p.id)) || userJid;
       if (/bot|robo|robô|spam/i.test(name)) flags.push('possível bot (antibot)');
-    } catch (_) {
-      /* ignora */
-    }
+    } catch (_) {}
   }
 
   if (flags.length === 0) return;
 
   groups.logEvent(jid, author, 'config', `${userJid} marcado: ${flags.join(', ')}`);
-  // Sem ação automática sem configuração explícita.
   if (s.autoaction_antifake || s.autoaction_antibot) {
     try {
       await sock.groupParticipantsUpdate(jid, [userJid], 'remove');
@@ -371,7 +406,6 @@ async function maybeAntiFakeAntiBot(sock, jid, userJid, author) {
   }
 }
 
-/** Remove automaticamente membros banidos que tentarem voltar. */
 async function maybeKickBanned(sock, jid, userJid) {
   try {
     const s = groups.getSettings(jid);
@@ -385,9 +419,6 @@ async function maybeKickBanned(sock, jid, userJid) {
   }
 }
 
-/* ------------------------------ avisos ------------------------------- */
-
-/** Aplica a lógica de advertências (1 aviso, 2, 3...). Sem punição automática. */
 async function applyWarningFlow(sock, groupJid, userJid, reason, adminId) {
   groups.addWarning(groupJid, userJid, reason, adminId);
   const count = groups.countWarnings(groupJid, userJid);
