@@ -388,7 +388,82 @@ async function handleMessage(sock, msg) {
 
     if (parsed) {
       const cmd = registry.resolveTrigger(parsed.command);
-      if (!cmd) return; // comando desconhecido: ignora (sem spam)
+      if (!cmd) {
+        // comando não existe — tenta sugerir similares com botão para usar na hora
+        try {
+          const fuzzy = require('../utils/fuzzySearch');
+          const allCmds = registry.all();
+          const similar = fuzzy.findSimilarCommands(parsed.command, allCmds, 3);
+
+          if (similar.length > 0) {
+            const best = similar[0];
+            const others = similar.slice(1);
+
+            let msg = '❌ *Comando não existe:* ' + prefix + parsed.command + '\n\n';
+            msg += '💡 *Você quis dizer:*\n';
+            msg += '▸ *' + prefix + best.trigger + '* — ' + (best.cmd.description || '') + '\n';
+            if (others.length) {
+              for (const o of others) {
+                msg += '▸ ' + prefix + o.trigger + ' — ' + (o.cmd.description || '') + '\n';
+              }
+            }
+            msg += '\n📌 Use *' + prefix + 'help ' + best.cmd.name + '* para ver como usar';
+
+            try {
+              const buttons = similar.map((s) => ({
+                id: 'suggest_' + s.cmd.name,
+                text: prefix + s.trigger,
+                run: (cc) => runByName(cc, s.cmd.name, parsed.args),
+              }));
+              buttons.push({
+                id: 'help_' + best.cmd.name,
+                text: '❓ Ajuda ' + best.cmd.name,
+                run: (cc) => runByName(cc, 'help', [best.cmd.name]),
+              });
+
+              for (const b of buttons) {
+                buttonHandler.register('lua:' + b.id, b.run);
+              }
+
+              const sent = await interactive.sendButtons(sock, ctx.remoteJid, {
+                text: msg,
+                footer: CONFIG.bot.name + ' • ' + prefix + 'menu para todos os comandos',
+                buttons: buttons.slice(0, 4).map((b) => ({ id: 'lua:' + b.id, text: b.text })),
+                quoted: ctx.message,
+              });
+
+              if (!sent) {
+                await ctx.reply(msg);
+              }
+            } catch (_) {
+              await ctx.reply(msg);
+            }
+
+            logger.info({ query: parsed.command, suggestion: best.trigger }, 'comando não encontrado — sugestão enviada');
+            return;
+          } else {
+            try {
+              buttonHandler.register('lua:open_menu', (cc) => require('../utils/buttons').sendMainMenu(cc));
+              await interactive.sendButtons(sock, ctx.remoteJid, {
+                text: '❌ Comando *' + prefix + parsed.command + '* não existe.\n\n💡 Digite *' + prefix + 'menu* para ver todos os comandos ou *' + prefix + 'menu <termo>* para buscar.\nEx: ' + prefix + 'menu sticker, ' + prefix + 'menu download',
+                footer: CONFIG.bot.name + ' • ' + registry.count() + ' comandos disponíveis',
+                buttons: [
+                  { id: 'lua:open_menu', text: '📋 Abrir menu' },
+                  { id: 'lua:help_menu', text: '❓ Ajuda' },
+                ],
+                quoted: ctx.message,
+              });
+              buttonHandler.register('lua:help_menu', (cc) => cc.reply('💡 Use *' + prefix + 'help <comando>* para ver detalhes de qualquer comando.\nEx: ' + prefix + 'help play, ' + prefix + 'help sticker, ' + prefix + 'help anti'));
+            } catch (_) {
+              await ctx.reply('❌ Comando *' + prefix + parsed.command + '* não existe. Digite *' + prefix + 'menu* para ver os comandos.');
+            }
+            return;
+          }
+        } catch (err) {
+          logger.warn({ err: err.message }, 'falha ao sugerir comando similar');
+          return;
+        }
+      }
       logger.info(
         { tag: 'COMMAND', sender: ctx.sender, fromMe: !!(msg.key && msg.key.fromMe) },
         `[LUA][COMMAND] Comando recebido: ${parsed.raw.split('\n')[0].slice(0, 80)}`
