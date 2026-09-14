@@ -193,7 +193,15 @@ else
     else
       err "Existem alterações locais em arquivos versionados."
       echo ""; git status --porcelain | head -n 50 || true; echo ""
-      err "Opções: ./update.sh --force | git stash && ./update.sh && git stash pop"
+      # uma opção por linha: com "|" na mesma linha o usuário cola tudo como
+      # pipeline e o git stash engole a saída do update.sh (aconteceu de verdade)
+      err "Escolha UMA opção (copie só uma linha):"
+      err "  1) ./update.sh --force"
+      err "     → guarda suas alterações em stash (lua-update-auto-...) e atualiza"
+      err "  2) git stash"
+      err "     ./update.sh"
+      err "     git stash pop"
+      err "  3) git checkout -- <arquivo>   (descartar a alteração local)"
       exit 1
     fi
   fi
@@ -291,7 +299,10 @@ else
           exit 1
         fi
       else
-        err "Resolva divergência: git reset --hard $UPSTREAM (APAGA locais) | git push origin $CURRENT_BRANCH | ./update.sh --force"
+        err "Escolha UMA opção (copie só uma linha):"
+        err "  1) git push origin $CURRENT_BRANCH    (publica seus commits)"
+        err "  2) ./update.sh --force                (stash + reset com confirmação)"
+        err "  3) git reset --hard $UPSTREAM         (APAGA os commits locais)"
         exit 1
       fi
     fi
@@ -384,11 +395,31 @@ if [ -f package.json ] && grep -qE '"better-sqlite3": *"\^11\.' package.json; th
   NEED_INSTALL=1
 fi
 
+# package.json difere do que está instalado? Acontece em checkout de branch
+# (o pull não roda, então a comparação BEFORE..AFTER nunca dispara) e deixava o
+# node_modules antigo — ex.: better-sqlite3 ^11 instalado com código que pede ^13.
+# node_modules symlink é setup de dev/teste: não mexe.
+PKG_HASH=""
+if command -v sha1sum >/dev/null 2>&1; then PKG_HASH=$(sha1sum package.json 2>/dev/null | cut -d' ' -f1)
+elif command -v shasum >/dev/null 2>&1; then PKG_HASH=$(shasum package.json 2>/dev/null | cut -d' ' -f1)
+elif command -v md5sum >/dev/null 2>&1; then PKG_HASH=$(md5sum package.json 2>/dev/null | cut -d' ' -f1); fi
+PKG_HASH_FILE="node_modules/.lua-package-json.hash"
+if [ -n "$PKG_HASH" ] && [ -d node_modules ] && [ ! -L node_modules ]; then
+  if [ ! -f "$PKG_HASH_FILE" ] || [ "$(cat "$PKG_HASH_FILE" 2>/dev/null || true)" != "$PKG_HASH" ]; then
+    NEED_INSTALL=1
+    info "package.json difere do último npm install — reinstalando dependências"
+  fi
+fi
+
 if [ "$NEED_INSTALL" -eq 1 ]; then
   step "Instalando dependências..."
   INSTALL_FLAGS="--legacy-peer-deps --no-audit --no-fund"
   if [ "$(uname -o 2>/dev/null)" = "Android" ] || [ -n "${TERMUX_VERSION:-}" ]; then INSTALL_FLAGS="$INSTALL_FLAGS --ignore-scripts"; info "Termux: ignore-scripts"; fi
   if ! npm install $INSTALL_FLAGS; then err "npm install falhou"; exit 1; fi
+  if [ -n "$PKG_HASH" ]; then
+    mkdir -p node_modules 2>/dev/null || true
+    printf '%s' "$PKG_HASH" > "$PKG_HASH_FILE" 2>/dev/null || true
+  fi
   ok "Dependências instaladas"
 else ok "Dependências já atualizadas"; fi
 
