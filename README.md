@@ -687,6 +687,47 @@ pkg update && pkg upgrade
 pkg install nodejs-lts python make clang ffmpeg yt-dlp git unzip
 ```
 
+### Instalação completa no Termux (copia e cola)
+
+```bash
+pkg update -y && pkg upgrade -y
+pkg install -y nodejs-lts python make clang ffmpeg yt-dlp git unzip
+git clone https://github.com/yanrpoliveira3108-bit/luas-bot-whats.git ~/lua
+cd ~/lua && chmod +x update.sh start.sh
+cp .env.example .env          # só na primeira vez
+nano .env                     # OWNER_NUMBER=5511999999999 e BOT_PREFIX=!
+./update.sh                   # deps + compila better-sqlite3 + audit + smoke
+./start.sh                    # escaneia o QR na tela
+```
+
+**Ordem importa:** crie o `.env` **antes** do `./update.sh`. A etapa final do
+update roda a auditoria, e ela falha com `Dono configurado via .env — 0 dono(s)`
+se o `.env` ainda não existir.
+
+> **Enquanto o PR do Lua Bot 2.0 não for mergado na `main`**, troque a linha do
+> clone por:
+> ```bash
+> git clone -b arena/01a0a187-luas-bot-whats https://github.com/yanrpoliveira3108-bit/luas-bot-whats.git ~/lua
+> ```
+> A `main` ainda não tem as correções de botões, do SIGPIPE do `start.sh` nem do
+> fetch single-branch.
+
+No Termux o `npm install` usa `--ignore-scripts` (não há binário Android de
+`sharp`/`wrtc`) e o `update.sh` compila o `better-sqlite3` do código-fonte — por
+isso `python`, `make` e `clang` são obrigatórios. Leva alguns minutos na
+primeira vez. Se faltar algo, o script diz exatamente qual pacote instalar.
+
+**Atualizações seguintes** (preserva `.env`, `session/`, `database/`, `backup/`,
+`logs/`, `assets/`):
+
+```bash
+cd ~/lua && ./update.sh
+```
+
+Use `BOT_PREFIX` no `.env`, **nunca** `PREFIX`: no Termux `PREFIX` já existe
+(`/data/data/com.termux/files/usr`) e o `dotenv` não sobrescreve variáveis
+existentes — usar `PREFIX` quebra todos os comandos.
+
 ---
 
 ## Licença
