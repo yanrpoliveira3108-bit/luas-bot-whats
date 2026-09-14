@@ -106,6 +106,65 @@ function findDownloaded(dir, prefix) {
   return null;
 }
 
+function execFfmpeg(args, timeoutMs = 120000) {
+  return new Promise((resolve, reject) => {
+    execFile('ffmpeg', args, { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) {
+        reject(new Error((stderr || err.message || '').split('\n')[0] || 'ffmpeg falhou'));
+      } else {
+        resolve(stdout);
+      }
+    });
+  });
+}
+
+/**
+ * Garante que o vídeo seja compatível com WhatsApp (mp4 h264 + aac)
+ * Se o arquivo já for mp4 h264, retorna ele mesmo
+ * Se for webm/vp9/av1 ou outro, converte para mp4 h264/aac
+ */
+async function ensureWhatsAppCompatible(filePath) {
+  if (!ffmpegAvailable()) return filePath;
+
+  const ext = path.extname(filePath).toLowerCase();
+  // se já é mp4, tenta verificar rapidamente se precisa converter
+  // por simplicidade, se for mp4, assume que está ok (yt-dlp já forçou avc)
+  // mas se for webm, mkv, etc, converte
+  if (ext === '.mp4') {
+    return filePath;
+  }
+
+  const outPath = filePath.replace(/\.[^.]+$/, '_whatsapp.mp4');
+  try {
+    // converte para h264 + aac, preset ultrafast para velocidade, qualidade alta
+    await execFfmpeg([
+      '-y',
+      '-i', filePath,
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-crf', '23',
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      '-movflags', '+faststart',
+      outPath,
+    ], 120000);
+
+    // verifica tamanho
+    const bytes = fs.statSync(outPath).size;
+    if (bytes > MAX_BYTES) {
+      deleteFile(outPath);
+      return filePath; // mantém original se conversão estourar limite
+    }
+
+    deleteFile(filePath);
+    return outPath;
+  } catch (err) {
+    logger.warn({ err: err.message }, 'falha ao converter para WhatsApp mp4, mantendo original');
+    deleteFile(outPath);
+    return filePath;
+  }
+}
+
 /* ------------------------- formatos de qualidade ---------------------- */
 
 function getVideoQuality() {
@@ -114,15 +173,17 @@ function getVideoQuality() {
 
 function buildVideoFormat(quality, hasFfmpeg) {
   // quality = 'best' ou número (360,480,720,1080,1440,2160)
+  // Usa h264 (avc) explicitamente para compatibilidade com WhatsApp
+  // WhatsApp NÃO aceita vp9/av01 em muitos aparelhos — força avc1
   if (quality === 'best') {
     return hasFfmpeg
-      ? 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b'
-      : 'b[ext=mp4]/b';
+      ? 'bv*[ext=mp4][vcodec^=avc]+ba[ext=m4a]/b[ext=mp4][vcodec^=avc]/b[ext=mp4]/b'
+      : 'b[ext=mp4][vcodec^=avc]/b[ext=mp4]/b';
   }
   const h = Number(quality) || 720;
   return hasFfmpeg
-    ? `bv*[height<=${h}][ext=mp4]+ba[ext=m4a]/b[ext=mp4][height<=${h}]/b[ext=mp4]/b`
-    : `b[ext=mp4][height<=${h}]/b[ext=mp4]/b`;
+    ? `bv*[height<=${h}][ext=mp4][vcodec^=avc]+ba[ext=m4a]/b[ext=mp4][height<=${h}][vcodec^=avc]/b[ext=mp4]/b`
+    : `b[ext=mp4][height<=${h}][vcodec^=avc]/b[ext=mp4][height<=${h}]/b[ext=mp4]/b`;
 }
 
 function buildAudioFormat() {
@@ -154,8 +215,8 @@ async function ytdlpDownload(url, suggestedName, kind) {
   const fmtAndroid = kind === 'audio'
     ? 'b[height<=720]/b'
     : quality === 'best'
-      ? 'b[ext=mp4]/b'
-      : `b[ext=mp4][height<=${quality}]/b[ext=mp4]/b`;
+      ? 'b[ext=mp4][vcodec^=avc]/b[ext=mp4]/b'
+      : `b[ext=mp4][height<=${quality}][vcodec^=avc]/b[ext=mp4][height<=${quality}]/b[ext=mp4]/b`;
 
   const attempts = [
     { fmt: fmtDefault, android: false },
@@ -233,17 +294,22 @@ async function runYtdlpAttempt(url, suggestedName, base, outTemplate, kind, att,
     e.code = 'DOWNLOAD_FAILED';
     throw e;
   }
-  const ext = path.extname(file).replace('.', '');
+  let finalFile = file;
+  // garante compatibilidade com WhatsApp (mp4 h264)
+  if (kind === 'video') {
+    finalFile = await ensureWhatsAppCompatible(file);
+  }
+  const ext = path.extname(finalFile).replace('.', '');
   const isVideo = kind === 'video';
-  const bytes = fs.statSync(file).size;
+  const bytes = fs.statSync(finalFile).size;
   if (bytes > MAX_BYTES) {
-    deleteFile(file);
+    deleteFile(finalFile);
     const e = new Error('FILE_TOO_BIG');
     e.code = 'FILE_TOO_BIG';
     throw e;
   }
   return {
-    path: file,
+    path: finalFile,
     title,
     author,
     duration: 0,
