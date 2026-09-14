@@ -1,0 +1,123 @@
+<style>
+*{-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;box-sizing:border-box}
+body{margin:0;background:transparent;font-family:Arial,sans-serif;color:#f6d77a;touch-action:manipulation}
+.wrap{width:100%;max-width:560px;margin:auto;padding:10px}
+.card{position:relative;background:linear-gradient(165deg,#180902,#2a0d04 40%,#120602);border:1px solid rgba(255,190,60,.5);border-radius:20px;overflow:hidden;box-shadow:0 0 44px rgba(255,150,20,.25),0 12px 36px rgba(0,0,0,.65)}
+.marquee{overflow:hidden;background:linear-gradient(90deg,#8b0000,#c02800 50%,#8b0000);border-bottom:1px solid rgba(255,190,60,.5);white-space:nowrap;padding:5px 0}
+.marquee span{display:inline-block;padding-left:100%;animation:scroll 14s linear infinite;font-size:10px;letter-spacing:2px;color:#ffd86b;text-shadow:0 0 8px rgba(255,190,60,.7);font-weight:bold}
+@keyframes scroll{0%{transform:translateX(0)}100%{transform:translateX(-100%)}}
+.head{padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px;background:linear-gradient(135deg,rgba(139,0,0,.5),rgba(255,190,60,.08))}
+.brand{display:flex;align-items:center;gap:8px}
+.tiger{font-size:30px;filter:drop-shadow(0 0 10px rgba(255,170,30,.7));animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.12)}}
+.brand .tt{font-size:16px;font-weight:bold;color:#ffc63c;text-shadow:0 0 12px rgba(255,180,30,.7);letter-spacing:1px}
+.stats{display:flex;gap:14px;text-align:right}
+.value{font:700 17px monospace;color:#ffd54a;text-shadow:0 0 12px rgba(255,190,40,.5)}
+.label{font-size:8px;color:rgba(255,196,60,.65);letter-spacing:1px;text-transform:uppercase}
+.main{padding:14px 14px 12px}
+.machine{position:relative;background:radial-gradient(130% 130% at 50% -10%,rgba(139,0,0,.45),rgba(0,0,0,.8));border:2px solid rgba(255,190,60,.55);border-radius:16px;padding:14px 10px 12px;margin-bottom:14px;box-shadow:inset 0 0 30px rgba(139,0,0,.4),0 0 26px rgba(255,150,20,.3);animation:frameGlow 2.4s ease-in-out infinite}
+@keyframes frameGlow{0%,100%{box-shadow:inset 0 0 30px rgba(139,0,0,.4),0 0 18px rgba(255,150,20,.25)}50%{box-shadow:inset 0 0 30px rgba(139,0,0,.4),0 0 34px rgba(255,170,30,.55)}}
+.payline{display:flex;justify-content:center;gap:8px;margin-bottom:8px}
+.payline i{width:46px;text-align:center;font-style:normal;color:#ffb830;font-size:9px;letter-spacing:1px;opacity:.8}
+.reels{display:flex;gap:6px;justify-content:center}
+.reel{flex:1;max-width:64px;background:rgba(0,0,0,.6);border:1px solid rgba(255,190,60,.4);border-radius:10px;padding:4px 0;box-shadow:inset 0 0 14px rgba(0,0,0,.7);overflow:hidden}
+.cell{height:46px;display:flex;align-items:center;justify-content:center;font-size:28px;line-height:1;transition:none}
+.reel.spinning .cell{filter:blur(1.2px)}
+.machine.win .reels{animation:winGlow .55s ease 3}
+.machine.jackpot .reels{animation:jackGlow .45s ease 5}
+@keyframes winGlow{0%,100%{box-shadow:0 0 0 rgba(255,210,60,0)}50%{box-shadow:0 0 36px rgba(255,210,60,.7)}}
+@keyframes jackGlow{0%,100%{box-shadow:0 0 0 rgba(255,120,20,0);transform:scale(1)}50%{box-shadow:0 0 52px rgba(255,150,20,.95);transform:scale(1.03)}}
+.spin{position:relative;display:block;width:100%;min-height:48px;border:1px solid rgba(255,190,60,.8);border-radius:12px;color:#fff;font-weight:bold;font-size:16px;letter-spacing:2px;background:linear-gradient(135deg,rgba(255,190,60,.75),rgba(139,0,0,.6));box-shadow:0 0 20px rgba(255,150,20,.5);text-transform:uppercase;cursor:pointer;overflow:hidden}
+.spin::after{content:'';position:absolute;top:0;left:-60%;width:40%;height:100%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.45),transparent);transform:skewX(-20deg);animation:shine 2.6s ease-in-out infinite}
+@keyframes shine{0%{left:-60%}60%,100%{left:130%}}
+.spin:active{transform:scale(.97)}
+.status{text-align:center;font:10px monospace;color:rgba(255,196,60,.8);margin-top:12px;min-height:12px;text-transform:uppercase;letter-spacing:.6px}
+.paytable{padding:10px 14px;border-top:1px dashed rgba(255,190,60,.25);background:rgba(0,0,0,.35)}
+.paytable .pt{font-size:8px;letter-spacing:1.5px;color:rgba(255,196,60,.6);text-transform:uppercase;margin-bottom:6px}
+.paytable .rows{display:flex;flex-wrap:wrap;gap:4px 12px}
+.paytable .r{font-size:11px;color:#ffe9ad}
+.foot{padding:10px 16px;border-top:1px solid rgba(255,190,60,.2);font-size:10px;color:rgba(255,196,60,.6);text-align:center;background:rgba(0,0,0,.4)}
+.foot b{color:#ffc63c}
+</style><body><div class="wrap"><div class="card">
+<div class="marquee"><span>✦ LUA TIGRINHO ✦ JACKPOT ✦ 5 ROLOS ✦ VALENDO 🪙 ✦ LUA TIGRINHO ✦ JACKPOT ✦ 5 ROLOS ✦</span></div>
+<div class="head"><div class="brand"><div class="tiger">🐯</div><div><div class="tt">LUA TIGRINHO</div></div></div><div class="stats"><div><div class="label">SALDO</div><div class="value" id="chips">12500</div></div><div><div class="label">JACKPOTS</div><div class="value" id="jackpots">0</div></div></div></div>
+<div class="main"><div class="machine" id="machine">
+<div class="payline"><i>1</i><i>2</i><i>3</i><i>4</i><i>5</i></div>
+<div class="reels">
+<div class="reel" id="reel0"><div class="cell">🍒</div><div class="cell">🔔</div><div class="cell">👑</div></div>
+<div class="reel" id="reel1"><div class="cell">💎</div><div class="cell">🍋</div><div class="cell">🍊</div></div>
+<div class="reel" id="reel2"><div class="cell">🐯</div><div class="cell">🍒</div><div class="cell">🔔</div></div>
+<div class="reel" id="reel3"><div class="cell">🍋</div><div class="cell">💎</div><div class="cell">🍊</div></div>
+<div class="reel" id="reel4"><div class="cell">👑</div><div class="cell">🔔</div><div class="cell">🍒</div></div>
+</div></div>
+<button class="spin" id="spin">🎰 GIRAR</button>
+<div class="status" id="status">TOQUE EM GIRAR</div></div>
+<div class="paytable"><div class="pt">Tabela de prêmios</div><div class="rows">
+<div class="r">🐯×5 <b>425x</b></div><div class="r">👑×5 <b>130x</b></div><div class="r">💎×5 <b>65x</b></div><div class="r">🔔×5 <b>32x</b></div><div class="r">🍒×5 <b>16x</b></div><div class="r">🍊×5 <b>16x</b></div><div class="r">🍋×5 <b>12x</b></div><div class="r">3/4 iguais <b>menor</b></div><div class="r">2 iguais <b>0,2x</b></div>
+</div></div>
+<div class="foot">Valendo 🪙 de verdade: <b>!tigrinho jogar</b> · !tigrinho fichas · !tigrinho ranking</div>
+</div></div><script>
+(function(){
+var SYM=['🍒','🍋','🍊','🔔','💎','👑','🐯'];
+var spinning=false;
+var machine=document.getElementById('machine');
+var reels=[document.getElementById('reel0'),document.getElementById('reel1'),document.getElementById('reel2'),document.getElementById('reel3'),document.getElementById('reel4')];
+var spinBtn=document.getElementById('spin');
+var statusEl=document.getElementById('status');
+var audioCtx=null;
+function getAudio(){if(!audioCtx){try{audioCtx=new (window.AudioContext||window.webkitAudioContext)()}catch(e){audioCtx=null}}return audioCtx}
+function beep(freq,dur,type,vol){var ac=getAudio();if(!ac)return;var o=ac.createOscillator();var g=ac.createGain();o.type=type||'square';o.frequency.value=freq;g.gain.value=vol||0.07;o.connect(g);g.connect(ac.destination);var t=ac.currentTime;g.gain.setValueAtTime(g.gain.value,t);g.gain.exponentialRampToValueAtTime(0.0001,t+dur);o.start(t);o.stop(t+dur)}
+function playClick(){beep(520,0.06,'square',0.07)}
+function playSpin(){beep(200,0.6,'sawtooth',0.05)}
+function playStop(){beep(660,0.07,'square',0.07)}
+function playWin(){beep(660,0.09,'square',0.08);setTimeout(function(){beep(880,0.09,'square',0.08)},80);setTimeout(function(){beep(1320,0.14,'square',0.08)},160)}
+function playJackpot(){var n=[523,659,784,1047,1319,1568];n.forEach(function(f,i){setTimeout(function(){beep(f,0.16,'square',0.09)},i*110)})}
+function randSym(){return SYM[Math.floor(Math.random()*SYM.length)]}
+function setStatus(t){statusEl.textContent=t}
+function rollReel(reel,done){
+  var cells=reel.querySelectorAll('.cell');
+  var step=0,max=18+Math.floor(Math.random()*10),delay=40;
+  reel.classList.add('spinning');
+  (function tick(){
+    var last=cells[2].textContent;
+    cells[2].textContent=cells[1].textContent;
+    cells[1].textContent=cells[0].textContent;
+    cells[0].textContent=randSym();
+    step++;
+    if(step>=max){reel.classList.remove('spinning');playStop();done();return}
+    delay=Math.min(150,delay*1.09);
+    setTimeout(tick,delay);
+  })();
+}
+function middle(){
+  return reels.map(function(r){return r.querySelectorAll('.cell')[1].textContent});
+}
+function afterSpin(){
+  spinning=false;
+  var m=middle();
+  var win=false,jack=false;
+  var first=m[0],run=1;
+  while(run<m.length&&m[run]===first)run++;
+  if(run>=3)win=true;
+  if(run===5&&first==='🐯')jack=true;
+  machine.classList.remove('win','jackpot');
+  if(jack){machine.classList.add('jackpot');playJackpot();setStatus('🐯 LINDA JOGADA! ✨')}
+  else if(win){machine.classList.add('win');playWin();setStatus('✨ LINDA JOGADA! ✨')}
+  else{setStatus('😿 TENTE DE NOVO')}
+}
+function spin(){
+  if(spinning)return;
+  spinning=true;playSpin();
+  machine.classList.remove('win','jackpot');
+  setStatus('GIRANDO...');
+  var done=0;
+  reels.forEach(function(reel,idx){
+    setTimeout(function(){rollReel(reel,function(){done++;if(done===reels.length)afterSpin()})},idx*320);
+  });
+}
+spinBtn.addEventListener('pointerdown',function(e){e.preventDefault();spin()});
+machine.addEventListener('pointerdown',function(){playClick()});
+document.addEventListener('keydown',function(e){if(e.key===' '||e.key==='Space'||e.key==='Enter'){e.preventDefault();spin()}});
+setStatus('TOQUE EM GIRAR');
+})();
+</script></body>
