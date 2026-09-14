@@ -53,6 +53,7 @@ timeout.
 | `utils/fonts.js` | Fontes Unicode (18 estilos: bold, italic, script, fraktur, double, mono, smallCaps...). `fonts.safe()` estiliza **sem tocar** em comandos, URLs, jids, IDs e caminhos. |
 | `utils/dividers.js` | 56 separadores em 13 categorias (`floral`, `dark`, `minimal`, `music`, `cute`, `royal`, `warning`, `box`, `wave`, `heavy`, `anime`, `cyber`, `classic`). `divider('music')`, `divider.random()`, `divider.box(titulo)`. |
 | `utils/icons.js` | Ícones semânticos (`success`, `error`, `warning`, `loading`, `music`, `admin`...) + tema visual por categoria. |
+| `utils/menuRenderer.js` | Renderizador **central** de menus: `header`, `section`, `row`, `footer`, `statusBlock`, `page`, `mainMenu`. Lê o modo visual do chat e decide fonte + família de separadores. Comandos executáveis saem sempre em texto puro. |
 | `utils/uiKit.js` | Componentes: `header`, `footer`, `card`, `progress`, `list`, `button`, `divider` e mensagens `error/success/loading/permission/notFound/info`. Também `truncate`, `safeText` e `paginate` (limites do WhatsApp). |
 | `utils/progress.js` | Mensagem de progresso reutilizável: `state()`, `update({percent})`, `complete()`, `fail()`. **Uma mensagem por operação** (nada de edições concorrentes), throttle de 700 ms e TTL com coleta automática. |
 | `utils/stateMachine.js` | `SEARCHING → FOUND → DOWNLOADING → CONVERTING → UPLOADING → DONE`, com `ERROR` acessível de qualquer etapa. Transição inválida lança `INVALID_TRANSITION`. |
@@ -60,7 +61,46 @@ timeout.
 | `utils/commandCache.js` | Índice invertido (nome, alias, categoria, descrição, keywords) para `!menu <termo>` / `!help <termo>`; lookup de trigger continua O(1) pelo registry. |
 | `utils/tmpCleaner.js` | Ciclo `create → use → cleanup` (`withTempFile` com `try/finally`) + varredura de órfãos no boot e a cada 10 min. |
 
-### Fluxo de mídia em etapas (`!play`, `!ytmp3`, `!ytmp4`)
+### Modos de menu (`!menumode`)
+
+O visual dos menus é trocável em runtime e **vale por grupo** (no PV, vale
+global). Cada modo muda a fonte dos títulos e a família de separadores de uma
+vez — nada de string decorativa espalhada pelos comandos.
+
+| Modo | Fonte | Separadores |
+| --- | --- | --- |
+| `default` | boldScript | royal |
+| `dark` | fraktur | dark |
+| `cute` | script | cute |
+| `minimal` | sans | minimal |
+| `royal` | boldItalic | floral |
+| `cyber` | mono | cyber |
+
+```
+!menumode            lista os modos com prévia de cada um
+!menumode dark       aplica no grupo atual
+!menumode cute       idem
+```
+
+O separador também muda por contexto, mesmo dentro de um modo: música usa
+`music`, download usa `wave`, sticker usa `cute`, admin usa `heavy`, erro usa
+`warning`.
+
+> **Regra:** a fonte é só decoração. `!play música do ano` continua
+> `!play música do ano` — copiável e executável.
+
+### Novos comandos da camada 2.0
+
+| Comando | O que faz |
+| --- | --- |
+| `!menumode [modo]` | Lista/troca o modo visual dos menus (por grupo). |
+| `!fotobot` | (dono) Troca a foto de perfil **do bot** respondendo a uma imagem — diferente de `!foto`, que muda a do grupo. Limite de 5 MB, erro sem stack. |
+| `!twitter <url>` (alias `!tw`, `!x`) | Baixa o vídeo/foto de um tweet com fluxo em etapas e card de resultado. |
+| `!fontes [estilo] <texto>` | Mostra/aplica as 18 fontes Unicode. |
+| `!dividers [categoria]` | Lista os separadores por categoria. |
+| `!timestamp [seg\|ms\|iso]` | Converte timestamp Unix (s, ms, ISO, horário em America/Sao_Paulo). |
+
+### Fluxo de mídia em etapas (`!play`, `!ytmp3`, `!ytmp4`, `!twitter`)
 
 ```
 ╔════════╗
