@@ -21,6 +21,7 @@ const ui = require('./ui');
 const { registry } = require('../engine/plugins');
 const { commandEmoji } = require('./commandEmoji');
 const MENUS = require('../menus');
+const menuRenderer = require('./menuRenderer');
 
 let registered = false;
 
@@ -54,16 +55,26 @@ async function sendTextMainMenu(ctx) {
   const digits = String(ctx.sender || '').split('@')[0];
   await ctx.reply(
     [
-      ui.createHeader('🌙 LUA', '«WhatsApp Multi-Function System»'),
-      ui.createDivider(),
-      `👤 Usuário: @${digits}`,
-      `⚡ Prefixo: ${ctx.prefix}`,
-      `📦 Comandos: ${registry.count()}`,
-      `🟢 Status: Online`,
-      ui.createDivider(),
+      menuRenderer.header({ title: CONFIG.bot.name, subtitle: '«WhatsApp Multi-Function System»', jid: ctx.remoteJid }),
+      '',
+      menuRenderer.statusBlock({
+        jid: ctx.remoteJid,
+        user: `@${digits}`,
+        prefix: ctx.prefix,
+        commands: registry.count(),
+      }),
+      '',
+      menuRenderer.dividerLine(null, ctx.remoteJid),
+      '',
       rows,
-      ui.createDivider(),
-      '_Digite o número da categoria (menu = voltar)._',
+      '',
+      menuRenderer.footer({
+        jid: ctx.remoteJid,
+        hints: [
+          `Digite o número da categoria (${ctx.prefix}menu = voltar)`,
+          `${ctx.prefix}menumode <modo> troca o visual`,
+        ],
+      }),
     ].join('\n')
   );
 }
@@ -84,11 +95,13 @@ async function sendCategoryAsText(ctx, category, title) {
   const rows = items.map((it) => ui.createButton(it.num, it.label)).join('\n');
   await ctx.reply(
     [
-      ui.createHeader(title, 'Categoria de comandos'),
-      ui.createDivider(),
+      menuRenderer.header({ title, subtitle: 'Categoria de comandos', jid: ctx.remoteJid }),
+      '',
+      menuRenderer.dividerFor(category, ctx.remoteJid),
+      '',
       rows,
-      ui.createDivider(),
-      '_Digite o número do comando (0 = voltar)._',
+      '',
+      menuRenderer.footer({ jid: ctx.remoteJid, hints: ['Digite o número do comando (0 = voltar)'] }),
     ].join('\n')
   );
 }
