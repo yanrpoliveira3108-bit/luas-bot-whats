@@ -50,7 +50,16 @@ function acquireLock() {
         try { fs.rmSync(LOCK_FILE, { force: true }); } catch (_) {}
       }
     }
-    fs.writeFileSync(LOCK_FILE, String(process.pid));
+    // 'wx' = cria exclusivamente. Dois processos iniciando juntos não podem
+    // passar ambos: o segundo recebe EEXIST e cai no tratamento acima.
+    try {
+      fs.writeFileSync(LOCK_FILE, String(process.pid), { flag: 'wx' });
+    } catch (race) {
+      if (race.code !== 'EEXIST') throw race;
+      logger.error({ lock: LOCK_FILE }, 'lock criado por outro processo durante a inicialização');
+      console.error('\n❌ Outra instância do bot acabou de assumir o lock.');
+      process.exit(1);
+    }
     logger.info({ pid: process.pid, lock: LOCK_FILE }, 'lock adquirido');
     return true;
   } catch (err) {
@@ -71,8 +80,20 @@ function releaseLock() {
   } catch (_) {}
 }
 
+/** PID gravado no lock (ou null). Usado em diagnósticos e testes. */
+function readLockPid() {
+  try {
+    const pid = parseInt(fs.readFileSync(LOCK_FILE, 'utf-8').trim(), 10);
+    return Number.isFinite(pid) ? pid : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 module.exports = {
   acquireLock,
   releaseLock,
+  readLockPid,
+  isProcessAlive,
   LOCK_FILE,
 };
