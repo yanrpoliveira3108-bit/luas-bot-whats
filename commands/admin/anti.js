@@ -47,6 +47,8 @@ const TYPE_DESCRIPTIONS = {
   antiviewonce: 'Mídia de visualização única',
   antilocalizacao: 'Localizações',
   anticontato: 'Contatos',
+  antitoxic: 'Conteúdo tóxico/ofensivo',
+  antipalavrao: 'Palavrões',
 };
 
 function formatAntiList(groupJid) {

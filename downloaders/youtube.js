@@ -20,6 +20,7 @@ const yts = require('yt-search');
 const CONFIG = require('../config');
 const logger = require('../utils/logger').child('youtube');
 const { safeFileName, deleteFile } = require('../utils/download');
+const mediaCache = require('../utils/mediaCache');
 
 const MAX_BYTES = CONFIG.limits.maxDownloadMB * 1024 * 1024;
 const DL = CONFIG.downloader || {};
@@ -479,9 +480,29 @@ async function downloadAudio(url, suggestedName) {
     e.code = 'INVALID_URL';
     throw e;
   }
+
+  // cache: tenta reutilizar áudio baixado recentemente (24h)
+  try {
+    const cached = mediaCache.getCached(url + '|audio|' + (DL.ytAudioQuality || 'best'));
+    if (cached && fs.existsSync(cached.path)) {
+      logger.info({ url, cached: cached.path }, 'cache hit áudio YouTube');
+      return {
+        path: cached.path,
+        title: cached.meta.title || suggestedName || 'YouTube',
+        author: '',
+        duration: 0,
+        thumbnail: '',
+        mimetype: 'audio/mp4',
+        engine: 'cache',
+      };
+    }
+  } catch (_) {}
+
   if (DL.preferYtdlp !== false && ytdlpAvailable()) {
     try {
-      return await ytdlpDownload(url, suggestedName, 'audio');
+      const result = await ytdlpDownload(url, suggestedName, 'audio');
+      try { mediaCache.setCached(url + '|audio|' + (DL.ytAudioQuality || 'best'), result.path, { ext: path.extname(result.path).replace('.', '') || 'm4a', ttl: 24 * 60 * 60 * 1000, title: result.title }); } catch (_) {}
+      return result;
     } catch (err) {
       if (err.code && err.code !== 'DOWNLOAD_FAILED') throw friendlyError(err);
       logger.warn({ err: err.message }, 'yt-dlp falhou — tentando ytdl-core');
@@ -519,9 +540,33 @@ async function downloadVideo(url, suggestedName) {
     e.code = 'INVALID_URL';
     throw e;
   }
+
+  // cache: tenta reutilizar vídeo baixado recentemente (1h)
+  try {
+    const cacheKey = url + '|video|' + (DL.ytVideoQuality || 720);
+    const cached = mediaCache.getCached(cacheKey);
+    if (cached && fs.existsSync(cached.path)) {
+      logger.info({ url, cached: cached.path }, 'cache hit vídeo YouTube');
+      return {
+        path: cached.path,
+        title: cached.meta.title || suggestedName || 'YouTube',
+        author: '',
+        duration: 0,
+        thumbnail: '',
+        mimetype: 'video/mp4',
+        engine: 'cache',
+      };
+    }
+  } catch (_) {}
+
   if (DL.preferYtdlp !== false && ytdlpAvailable()) {
     try {
-      return await ytdlpDownload(url, suggestedName, 'video');
+      const result = await ytdlpDownload(url, suggestedName, 'video');
+      try {
+        const cacheKey = url + '|video|' + (DL.ytVideoQuality || 720);
+        mediaCache.setCached(cacheKey, result.path, { ext: 'mp4', ttl: 60 * 60 * 1000, title: result.title });
+      } catch (_) {}
+      return result;
     } catch (err) {
       if (err.code && err.code !== 'DOWNLOAD_FAILED') throw friendlyError(err);
       logger.warn({ err: err.message }, 'yt-dlp falhou — tentando ytdl-core');

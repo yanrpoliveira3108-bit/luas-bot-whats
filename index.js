@@ -45,6 +45,11 @@ const CONFIG = require('./config');
 CONFIG.helpers.ensureDirs();
 ui.ok('Configuração carregada');
 
+// single instance lock (evita duplicar bot no Termux)
+const singleInstance = require('./utils/singleInstance');
+singleInstance.acquireLock();
+ui.ok('Instância única verificada');
+
 // ── validação do .env: nunca inicializar sem dono ──────────────────────
 if (!CONFIG.owner.numbers.length) {
   console.error('ERRO: dono não configurado no .env');
@@ -89,6 +94,8 @@ const commandHandler = require('./handlers/commandHandler');
 const groupHandler = require('./handlers/groupHandler');
 const connection = require('./connection/connect');
 const { cleanupTmp } = require('./utils/download');
+const autoBackup = require('./utils/autoBackup');
+autoBackup.startAutoBackup();
 
 /* ------------------------- roteamento de eventos ------------------------ */
 
@@ -138,6 +145,14 @@ async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   logger.info({ signal }, 'desligando...');
+  try {
+    const autoBackup = require('./utils/autoBackup');
+    autoBackup.stopAutoBackup();
+  } catch (_) {}
+  try {
+    const singleInstance = require('./utils/singleInstance');
+    singleInstance.releaseLock();
+  } catch (_) {}
   try {
     await connection.shutdown();
   } catch (_) {}

@@ -19,6 +19,7 @@ const logger = require('../utils/logger').child('group');
 const groups = require('../database/groups');
 const { extractText, detectMediaType, getMentionedJids } = require('../utils/messages');
 const permissions = require('../utils/permissions');
+const toxicFilter = require('../utils/toxicFilter');
 
 /* ----------------------- anti-flood / anti-spam ---------------------- */
 
@@ -169,6 +170,17 @@ async function applyFilters(sock, ctx) {
     if (symbols / ctx.text.length > 0.7) actions.push('antiparentese');
   }
 
+  // antitoxic / antipalavrao
+  const isToxicEnabled = antiManager.isAntiEnabled(ctx.remoteJid, 'antitoxic') || f.antitoxic;
+  const isPalavraoEnabled = antiManager.isAntiEnabled(ctx.remoteJid, 'antipalavrao') || f.antipalavrao;
+  if ((isToxicEnabled || isPalavraoEnabled) && ctx.text && ctx.text.length > 2) {
+    const check = toxicFilter.containsToxic(ctx.text);
+    if (check.toxic) {
+      if (isPalavraoEnabled && check.level >= 1) actions.push('antipalavrao');
+      else if (isToxicEnabled && check.level >= 1) actions.push('antitoxic');
+    }
+  }
+
   if (actions.length === 0) return { deleted: false, action: null };
 
   let antiType = actions[0];
@@ -191,6 +203,8 @@ async function applyFilters(sock, ctx) {
     antispam: 'Spam (mensagem repetida)',
     antiflood: 'Flood (muitas mensagens)',
     antiparentese: 'Mensagem com excesso de símbolos',
+    antitoxic: 'Conteúdo tóxico/ofensivo',
+    antipalavrao: 'Palavrão não permitido',
   };
   const reason = reasonMap[antiType] || `Filtro ${antiType}`;
 
@@ -214,6 +228,8 @@ async function applyFilters(sock, ctx) {
       antispam: '📨 Spam não é permitido aqui',
       antiflood: '🌊 Flood não é permitido aqui',
       antiparentese: '🧹 Mensagens com símbolos não são permitidas',
+      antitoxic: '🤬 Conteúdo tóxico não é permitido',
+      antipalavrao: '🤬 Palavrões não são permitidos',
     };
     const label = labels[antiType] || `🚫 Filtro ${antiType} ativo`;
     await sock.sendMessage(

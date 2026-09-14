@@ -73,6 +73,8 @@ const ANTI_TYPES = [
   'antiviewonce',
   'antilocalizacao',
   'anticontato',
+  'antitoxic',
+  'antipalavrao',
 ];
 
 function normalizeAction(raw) {

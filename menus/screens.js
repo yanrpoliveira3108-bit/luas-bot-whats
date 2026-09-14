@@ -265,6 +265,8 @@ nav.registerScreen('lua_automod', () => ({
     { id: 'anticontato', text: '👤 Anti-contato', run: run('anti', ['config', 'anticontato']) },
     { id: 'antifake', text: '🌎 Anti-fake', run: run('anti', ['config', 'antifake']) },
     { id: 'antibot', text: '🤖 Anti-bot', run: run('anti', ['config', 'antibot']) },
+    { id: 'antitoxic', text: '🤬 Anti-tóxico', run: run('anti', ['config', 'antitoxic']) },
+    { id: 'antipalavrao', text: '🤬 Anti-palavrão', run: run('anti', ['config', 'antipalavrao']) },
     { id: 'apagar', text: '🧹 Apagar histórico', run: run('apagar') },
     { id: 'antireset', text: '♻️ Resetar todos', run: run('anti', ['reset']) },
   ],
