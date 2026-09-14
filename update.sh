@@ -154,7 +154,7 @@ else
       ok "Alterações guardadas em stash"
     else
       err "Existem alterações locais em arquivos versionados."
-      echo ""; git status --porcelain | head -n 50; echo ""
+      echo ""; git status --porcelain | head -n 50 || true; echo ""
       err "Opções: ./update.sh --force | git stash && ./update.sh && git stash pop"
       exit 1
     fi
@@ -224,7 +224,7 @@ else
     RESET_DONE=0
     if [ "$BEHIND" = "0" ] && [ "$AHEAD" != "0" ] && [ "$AHEAD" != "?" ]; then
       warn "Seu branch local está $AHEAD commit(s) à frente de $UPSTREAM (commits locais)"
-      echo ""; echo "Commits locais:"; git log --oneline "$UPSTREAM"..HEAD | head -n 20; echo ""
+      echo ""; echo "Commits locais:"; git log --oneline "$UPSTREAM"..HEAD | head -n 20 || true; echo ""
       if [ "$FORCE" -eq 1 ]; then
         warn "--force ativo: fazendo reset --hard para $UPSTREAM para alinhar com GitHub"
         if [ -t 0 ]; then
@@ -287,8 +287,10 @@ else
       AFTER_SHA=$(git rev-parse HEAD)
       if [ "$BEFORE_SHA" != "$AFTER_SHA" ]; then
         ok "Atualizado: ${BEFORE_SHA:0:7} → ${AFTER_SHA:0:7}"
-        echo ""; echo "📦 Alterações:"; git log --oneline "$BEFORE_SHA".."$AFTER_SHA" | head -n 20
-        echo ""; echo "📄 Arquivos alterados:"; git diff --name-status "$BEFORE_SHA".."$AFTER_SHA" | head -n 50
+        # "|| true": com pipefail, o SIGPIPE do head em listas longas (exit 141)
+        # abortaria o script no meio da atualização.
+        echo ""; echo "📦 Alterações:"; git log --oneline "$BEFORE_SHA".."$AFTER_SHA" | head -n 20 || true
+        echo ""; echo "📄 Arquivos alterados:"; git diff --name-status "$BEFORE_SHA".."$AFTER_SHA" | head -n 50 || true
       else
         ok "Já estava atualizado após pull (sem novos commits)"
       fi
