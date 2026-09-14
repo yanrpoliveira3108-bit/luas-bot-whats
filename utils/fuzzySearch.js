@@ -70,7 +70,13 @@ function findSimilarCommands(query, allCommands, limit = 3, opts = {}) {
       const t = String(trig).toLowerCase();
       if (!t) continue;
       const distance = levenshtein(q, t);
-      const isSubstring = q.length >= 3 && (t.includes(q) || q.includes(t));
+      // Substring só vale quando os dois lados têm tamanho comparável. Antes,
+      // qualquer trigger de 1 letra ("x") era "substring" de qualquer coisa e o
+      // bot sugeria Twitter para lixo tipo "xyzabc123".
+      const shorter = Math.min(q.length, t.length);
+      const longer = Math.max(q.length, t.length);
+      const isSubstring =
+        shorter >= 3 && (t.includes(q) || q.includes(t)) && shorter / longer >= 0.5;
       if (distance > maxDistance && !isSubstring) continue;
       candidates.push({ cmd, score: similarityScore(q, t), trigger: trig, distance });
     }

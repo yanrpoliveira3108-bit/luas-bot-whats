@@ -141,7 +141,9 @@ async function main() {
     sent.length = 0;
     const ctx = await ctxFor(sock, mkMsg({ message: { conversation: '!menu' } }));
     await commandHandler.runByName(ctx, 'menu');
-    const txt = sent.find((s) => s.content && /🌙 LUA/.test(s.content.text || ''));
+    // o cabeçalho é decorativo e muda com o modo do menu (!menumode), então o
+    // menu textual é identificado pelo contrato estável: as linhas numeradas
+    const txt = sent.find((s) => s.content && /\[\s*1\s*\]\s*•/.test(s.content.text || ''));
     assert.ok(txt, 'menu textual numerado');
     assert.ok(/Digite o número/.test(txt.content.text || ''), 'instrução de navegação por número');
     assert.ok(!sent.some((s) => s.content && (Array.isArray(s.content.sections) || Array.isArray(s.content.interactiveButtons))), 'sem lista interativa');
