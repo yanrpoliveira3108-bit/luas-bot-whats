@@ -82,6 +82,26 @@ vez — nada de string decorativa espalhada pelos comandos.
 !menumode cute       idem
 ```
 
+### Identidade editável por comando
+
+```
+!setcriador                          → lista os campos e o valor atual
+!setcriador name Ana                 → nome do criador
+!setcriador developer Ana Dev        → desenvolvedor
+!setcriador about dev do Lua|Node.js → itens separados por |
+!setcriador supportUrl https://wa.me/5511999999999
+!setcriador photoUrl https://exemplo.com/eu.jpg
+!setcriador reset name               → volta ao padrão do arquivo
+!selo random                         → sorteia o selo a cada cartão
+!selo seguranca                      → fixa um selo
+```
+
+Os valores ficam na tabela `settings` (chave `creator.<campo>`) e são lidos por
+`utils/creatorProfile.js`, que é a fonte única de `!criador`, `!owner` e do selo.
+Os padrões continuam no topo de `utils/creatorProfile.js` para quem preferir
+editar o arquivo. `!setcriador supportUrl https://wa.me/<numero>` também define o
+número do contato que o `!owner` envia.
+
 ### Cartão do criador (`!criador`)
 
 ```
@@ -155,6 +175,8 @@ O separador também muda por contexto, mesmo dentro de um modo: música usa
 | --- | --- |
 | `!menumode [modo]` | Lista/troca o modo visual dos menus (por grupo). |
 | `!fotobot` | (dono) Troca a foto de perfil **do bot** respondendo a uma imagem — diferente de `!foto`, que muda a do grupo. Limite de 5 MB, erro sem stack. |
+| `!setcriador <campo> <valor>` | (dono) Edita a identidade que aparece no `!criador` e no `!owner`: `name`, `developer`, `about`, `quote`, `instagram`, `instagramUrl`, `tiktok`, `tiktokUrl`, `supportUrl`, `photoUrl`, `botPhotoUrl`. Fica no banco — sobrevive a restart e a update. `!setcriador reset [campo]` volta ao padrão. |
+| `!selo [nome\|random]` | (dono) Escolhe o selo (citação) do cartão `!criador`: `lua`, `sistema`, `seguranca`, `suporte`, `premium`, `anuncio`, `dev` — ou `random` para sortear a cada envio. |
 | `!criador [pergunta]` | Quem criou o Lua Bot: cartão **richResponse/GenAI** via `relayMessage` (imagem, dados reais do bot, redes sociais, suporte, data/hora). Se o servidor recusar o cartão, entrega as mesmas informações em texto. Dados editáveis no topo de `commands/general/criador.js`. |
 | `!poll <pergunta> \| <opção 1> \| <opção 2> [--selectableCount=N] [--announcement=true\|false]` | Cria uma **enquete** no chat (`pollCreationMessage` / V3 / V2). Pede confirmação antes de enviar. |
 | `!pollresult <nome> \| <opção>:<votos> \| ...` | Envia o **placar** de uma enquete (`pollResultSnapshotMessage`). Pede confirmação antes de enviar. |

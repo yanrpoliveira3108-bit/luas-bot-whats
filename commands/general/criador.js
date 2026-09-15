@@ -9,6 +9,10 @@
  *     ├ submessages = 2   ├ unifiedResponse = 3 (bytes)   └ contextInfo = 4
  *   MessageContextInfo.botMetadata = 7 (messageDisclaimerText = 11)
  *
+ * Os dados do criador vêm de utils/creatorProfile.js — editáveis em runtime por
+ * !setcriador (banco), com os padrões do arquivo como fallback. O selo da
+ * citação vem de utils/consts.js, escolhido por !selo (fixo ou aleatório).
+ *
  * Se o servidor recusar o payload, o comando cai para uma mensagem de texto
  * normal — a informação chega de qualquer forma.
  */
@@ -16,37 +20,14 @@
 'use strict';
 
 const { seloNubank } = require('../../utils/consts.js');
+const creatorProfile = require('../../utils/creatorProfile');
 const CONFIG = require('../../config');
 const { registry } = require('../../engine/plugins');
 const { formatUptime } = require('../../utils/menuRenderer');
 const logger = require('../../utils/logger').child('criador');
 
-/* ══════════════════════════════════════════════════════════════════════════
-   ✏️  ÁREA EDITÁVEL — troque apenas isto para personalizar o comando
-   ══════════════════════════════════════════════════════════════════════════ */
-const REPO_RAW = 'https://raw.githubusercontent.com/yanrpoliveira3108-bit/luas-bot-whats/main';
-
 /** Como o bot é apresentado no cartão. Sempre "Lua Bot 🌙". */
 const BOT_DISPLAY = `${(CONFIG.bot && CONFIG.bot.name) || 'Lua'} Bot 🌙`;
-
-const CREATOR = {
-  name: (CONFIG.owner && CONFIG.owner.name) || 'SEU NOME',
-  about: ['desenvolvedor(a) do Lua Bot 🌙', 'Node.js + Baileys', 'disponível no suporte abaixo'],
-  instagram: 'SEU_INSTAGRAM',
-  instagramUrl: 'https://www.instagram.com/SEU_INSTAGRAM',
-  tiktok: 'SEU_TIKTOK',
-  tiktokUrl: 'https://www.tiktok.com/@SEU_TIKTOK',
-  supportUrl: `https://wa.me/${((CONFIG.owner && CONFIG.owner.numbers) || ['5500000000000'])[0]}`,
-  photoUrl: `${REPO_RAW}/assets/menu.jpg`,
-  botPhotoUrl: `${REPO_RAW}/assets/menu.jpg`,
-  quote: 'Feito com café, código e um pouco de luar. 🌙',
-  cards: [
-    { title: 'Lua Bot 🌙', brand: 'bot de WhatsApp', price: 'R$ 0,00', salePrice: 'GRÁTIS', image: `${REPO_RAW}/assets/menu.jpg` },
-    { title: 'Menu interativo', brand: 'botões e listas', price: 'R$ 0,00', salePrice: 'GRÁTIS', image: `${REPO_RAW}/assets/menu.jpg` },
-    { title: 'Stickers & Downloads', brand: 'mídia de verdade', price: 'R$ 0,00', salePrice: 'GRÁTIS', image: `${REPO_RAW}/assets/menu.jpg` },
-  ],
-};
-/* ══════════════════════════════════════════════════════ fim da área editável */
 
 const TEXT = (text) => ({
   view_model: {
@@ -67,12 +48,12 @@ const IMAGE = (url) => ({
   },
 });
 
-const CARD = (card) => ({
+const CARD = (card, supportUrl) => ({
   title: card.title,
   brand: card.brand,
   price: card.price || '',
   sale_price: card.salePrice || '',
-  product_url: CREATOR.supportUrl,
+  product_url: supportUrl,
   image: { url: card.image },
   __typename: 'GenAIProductItemCardPrimitive',
 });
@@ -80,6 +61,16 @@ const CARD = (card) => ({
 const HSCROLL = (primitives) => ({
   view_model: { primitives, __typename: 'GenAIHScrollLayoutViewModel' },
 });
+
+/** Cartões do botão — usam a foto configurada, sem outro lugar para editar. */
+function cards(profile) {
+  const image = profile.botPhotoUrl || profile.photoUrl;
+  return [
+    { title: BOT_DISPLAY, brand: 'bot de WhatsApp', price: 'R$ 0,00', salePrice: 'GRÁTIS', image },
+    { title: 'Menu interativo', brand: 'botões e listas', price: 'R$ 0,00', salePrice: 'GRÁTIS', image },
+    { title: 'Stickers & Downloads', brand: 'mídia de verdade', price: 'R$ 0,00', salePrice: 'GRÁTIS', image },
+  ];
+}
 
 function nowPtBr() {
   try {
@@ -106,22 +97,23 @@ function botFacts() {
 }
 
 /** Versão texto (fallback quando o richResponse não é aceito). */
-function plainText(botName, query, facts) {
+function plainText(query, facts, profile) {
   return [
     `*${BOT_DISPLAY}* — informações do criador`,
     '',
     `🔍 *Pesquisa:* ${query}`,
     '',
-    `👤 *Criador:* ${CREATOR.name}`,
-    ...CREATOR.about.map((a) => `▸ ${a}`),
+    `👤 *Criador:* ${profile.name}`,
+    `👨‍💻 *Desenvolvedor:* ${profile.developer}`,
+    ...profile.about.map((a) => `▸ ${a}`),
     '',
     `🤖 *Bot:* ${BOT_DISPLAY} • v${facts.version} • ${facts.commands} comandos`,
     `⏱️ *Online há:* ${facts.uptime} • Node ${facts.node}`,
     `📅 ${nowPtBr()}`,
     '',
-    `📸 Instagram: ${CREATOR.instagramUrl}`,
-    `🎵 TikTok: ${CREATOR.tiktokUrl}`,
-    `💬 Suporte: ${CREATOR.supportUrl}`,
+    `📸 Instagram: ${profile.instagramUrl}`,
+    `🎵 TikTok: ${profile.tiktokUrl}`,
+    `💬 Suporte: ${profile.supportUrl}`,
   ].join('\n');
 }
 
@@ -139,7 +131,7 @@ module.exports = [
       // reply primeiro: é o que o catch usa, então precisa estar pronto sempre
       const reply = (ctx && ctx.reply) || (async () => {});
       const facts = botFacts();
-      const botName = (CONFIG.bot && CONFIG.bot.name) || 'Lua Bot';
+      const profile = creatorProfile.all();
 
       try {
         /* ---- nomes do seu código de referência, apontando para o ctx real ---- */
@@ -149,8 +141,6 @@ module.exports = [
         const args = Array.isArray(ctx.args) ? ctx.args : []; // nunca undefined
         const sender = ctx.sender;
         const pushname = (msg && msg.pushName) || '';
-        const config = { botName, ...CONFIG };
-        if (!config.botName) config.botName = botName;
 
         const query = (args.join(' ') || '').trim() || 'informações do criador';
 
@@ -165,11 +155,12 @@ module.exports = [
 
         const sections = [
           TEXT('① Abaixo está quem me criou'),
-          IMAGE(CREATOR.photoUrl),
+          IMAGE(profile.photoUrl),
           TEXT(
             [
-              `*Sobre ${CREATOR.name}:*`,
-              ...CREATOR.about.map((a) => `▸ ${a}`),
+              `*Sobre ${profile.name}:*`,
+              `👨‍💻 Desenvolvedor: ${profile.developer}`,
+              ...profile.about.map((a) => `▸ ${a}`),
               '',
               `🔎 Sua pergunta: “${query}”`,
             ].join('\n')
@@ -184,21 +175,21 @@ module.exports = [
             ].join('\n')
           ),
           TEXT('meus cartões 😌'),
-          HSCROLL(CREATOR.cards.map(CARD)),
+          HSCROLL(cards(profile).map((c) => CARD(c, profile.supportUrl))),
           TEXT('📰 redes do criador'),
           HSCROLL([
             {
-              title: 'perfil do meu criador',
+              title: `perfil de ${profile.name}`,
               subtitle: 'Instagram',
-              username: CREATOR.instagram,
-              profile_picture_url: CREATOR.photoUrl,
+              username: profile.instagram,
+              profile_picture_url: profile.photoUrl,
               is_verified: true,
-              thumbnail_url: CREATOR.botPhotoUrl,
-              post_caption: `${CREATOR.name} no Instagram`,
+              thumbnail_url: profile.botPhotoUrl,
+              post_caption: `${profile.name} no Instagram`,
               likes_count: 0,
               comments_count: 0,
               shares_count: 0,
-              post_url: CREATOR.instagramUrl,
+              post_url: profile.instagramUrl,
               source_app: 'INSTAGRAM',
               footer_label: 'IG',
               is_carousel: false,
@@ -216,9 +207,9 @@ module.exports = [
                   {
                     key: 'IE_0',
                     metadata: {
-                      display_name: CREATOR.tiktok,
+                      display_name: profile.tiktok,
                       is_trusted: true,
-                      url: CREATOR.tiktokUrl,
+                      url: profile.tiktokUrl,
                       __typename: 'GenAIInlineLinkItem',
                     },
                   },
@@ -231,14 +222,14 @@ module.exports = [
           {
             view_model: {
               primitive: {
-                text: `💬 Suporte: {{IE_1}}falar com ${CREATOR.name}{{/IE_1}}\n\n“${CREATOR.quote}”`,
+                text: `💬 Suporte: {{IE_1}}falar com ${profile.name}{{/IE_1}}\n\n“${profile.quote}”`,
                 inline_entities: [
                   {
                     key: 'IE_1',
                     metadata: {
                       display_name: 'Suporte',
                       is_trusted: true,
-                      url: CREATOR.supportUrl,
+                      url: profile.supportUrl,
                       __typename: 'GenAIInlineLinkItem',
                     },
                   },
@@ -291,12 +282,12 @@ module.exports = [
         } catch (relayErr) {
           // richResponse recusado pelo servidor: entrega em texto, sem perder a info
           logger.warn({ err: relayErr.message }, 'richResponse recusado — enviando em texto');
-          await reply(plainText(botName, query, facts));
+          await reply(plainText(query, facts, profile));
         }
       } catch (error) {
         logger.warn({ err: error.message }, 'falha ao montar o cartão do criador');
         await reply(
-          `⚠️ Não consegui montar o cartão do criador (${error.message}).\n\n${plainText(botName, 'informações do criador', facts)}`
+          `⚠️ Não consegui montar o cartão do criador (${error.message}).\n\n${plainText('informações do criador', facts, profile)}`
         );
       }
     },
