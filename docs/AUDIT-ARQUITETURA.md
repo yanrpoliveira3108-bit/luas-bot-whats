@@ -281,3 +281,56 @@ Fase 10 Qualidade               testes das áreas acima + CI (lint/test/build) +
 Cada fase entra com testes próprios e `npm test` verde antes do commit — o
 projeto já tem 17 suítes (188 verificações) + audit (69) + smoke (27) como rede
 de proteção contra regressão.
+
+---
+
+## 10. Fase 3 — pipeline de mensagens (concluída)
+
+**Problema.** `handleMessage` era uma função de 215 linhas com 10 responsabilidades
+encadeadas por `return`s implícitos: sem nomes para as etapas, sem como testar uma
+delas isoladamente e sem como saber, num erro, em que ponto da cadeia ele ocorreu.
+
+**Solução.** A cadeia foi extraída para `engine/pipeline.js` como `createPipeline(deps)`
+— middlewares próprios, sem framework externo, com as dependências injetadas pelo
+`commandHandler` (evita ciclo de `require`). `handlers/commandHandler.js` manteve
+`buildContext`, `checkGate`, `executeCommand`, `runByName`, `shouldProcessMessage` e
+o cache de metadata; `handleMessage` virou um adaptador de 3 linhas.
+
+**Ordem efetiva preservada** (lida do código, não reordenada):
+
+| # | Etapa | O que faz |
+|---|-------|-----------|
+| 1 | `accept` | eco do bot / status (`shouldProcessMessage`, `isStatusJid`) |
+| 2 | `normalize` | `buildContext` + `perf.add('messages')` + log comunidade/LID |
+| 3 | `gateUser` | bloqueados → **flood** → `enforceMute` |
+| 4 | `register` | viewonce, upserts, contadores, XP, AFK |
+| 5 | `interactive` | botões/listas (`buttonHandler.process`) |
+| 6 | `moderation` | histórico do automod + `applyFilters` (só em grupo) |
+| 7 | `dispatch` | parse por prefixo → comando ou sugestão fuzzy |
+| 8 | `shortcuts` | `prefixo` / `menu` / `0`-`voltar` sem prefixo |
+| 9 | `confirmation` | `!call` / `!poll` pendentes |
+| 10 | `sessionFlow` | sessão de jogo + menu numerado |
+
+`state.stop = true` substitui os `return`s; o `catch` central é o mesmo de antes
+(`logger.error(..., 'erro no processamento de mensagem')`) e agora loga a etapa
+culpada. `perf.timing('pipeline', ms)` foi adicionado no `finally`.
+
+**Única mudança de contrato:** `handleMessage` agora devolve o `state` (antes não
+devolvia nada). Nenhum chamador usava o retorno — `index.js:123` só encadeia
+`.catch`, e os testes ignoram o valor.
+
+**Prova de extração fiel:** a sequência de chamadas do bloco antigo e da pipeline é
+idêntica e na mesma ordem (39 chamadas); as únicas adições são `Date.now` e
+`perf.timing`. Inventário idêntico antes/depois: 332 comandos, 658 gatilhos,
+37 ownerOnly, 53 adminOnly, 62 groupOnly, 332 com cooldown, 0 descartados.
+
+**Testes:** `test/pipeline.test.js` (19 cenários, ligado ao `npm test`) cobrindo
+mensagem comum, comando válido, comando inexistente, ownerOnly negar/permitir,
+adminOnly negar/permitir, groupOnly em privado, cooldown, confirmação (`1` e `2`),
+flood, plugin, hot reload e erro dentro de etapa. As asserções foram validadas por
+mutação: reordenar etapas e remover o `state.stop` da confirmação fazem a suíte
+falhar (2 falhas em cada caso).
+
+**Dívida descoberta (não corrigida nesta fase, para não mudar comportamento):**
+`utils/cooldown.js` registra também a chave `global:*:<comando>`, então o uso de um
+comando por qualquer usuário trava o mesmo comando para todos durante o cooldown.
