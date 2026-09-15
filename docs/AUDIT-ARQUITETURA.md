@@ -419,9 +419,14 @@ falha e nada é retornado. Nenhuma trava em memória é usada para isso.
 
 Testado de verdade: 500 jobs, **dois processos** (`test/db-claim-worker.js` usa o
 mesmo repository) disputando com largada sincronizada e teto de 300 por lado →
-500 claims, 500 ids distintos, 0 `SQLITE_BUSY`, intercalação comprovada
-(250/250). Com o claim trocado pelo anti-padrão SELECT+UPDATE, o teste acusa
-516/526 claims para 500 jobs — ou seja, ele detecta a corrida.
+500 claims, 500 ids distintos, 0 `SQLITE_BUSY`. O teto de 300 (< 500) torna a
+assertiva determinística: nenhum processo consegue drenar a fila sozinho, então os
+dois lados sempre participam — a divisão exata varia a cada rodada (medição
+registrada: 249 no pai / 251 no filho).
+
+O teste foi validado por mutação: com o `claimJob` trocado pelo anti-padrão
+`SELECT` + `UPDATE` separados, a mesma rodada produz **516 claims para 500 jobs**
+(pai 264 + filho 252), ou seja, 16 jobs assumidos duas vezes — e o teste falha.
 
 Transições: `pending → running → completed|failed`; `running → pending` (retry,
 só enquanto `attempts < max_attempts`); `pending|running → cancelled`.
