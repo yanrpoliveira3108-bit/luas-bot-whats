@@ -452,9 +452,11 @@ async function handleMessage(sock, msg) {
       return;
     }
 
-    // confirmação pendente de chamada (!call): um único ponto de interceptação,
-    // sem listener por execução — consome a próxima mensagem do próprio autor
+    // confirmações pendentes (!call, !poll, !pollresult): um único ponto de
+    // interceptação por fluxo, sem listener por execução — consome a próxima
+    // mensagem do próprio autor
     if (await require('../utils/pendingCall').handleMessage(ctx)) return;
+    if (await require('../utils/pendingPoll').handleMessage(ctx)) return;
 
     const gameSession = session.get(ctx.remoteJid, ctx.sender);
     if (gameSession && gameSession.onMessage) {

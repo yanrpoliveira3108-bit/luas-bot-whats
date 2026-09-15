@@ -82,6 +82,23 @@ vez — nada de string decorativa espalhada pelos comandos.
 !menumode cute       idem
 ```
 
+### Enquetes (`!poll` e `!pollresult`)
+
+```
+!poll Qual linguagem você prefere? | Lua | JavaScript | Python
+!poll Qual linguagem você prefere? | Lua | JavaScript --selectableCount=2 --announcement=false
+!pollresult Minha enquete | Lua:1000 | JavaScript:2000 | Python:500
+```
+
+- parâmetros opcionais usam sempre `--chave=valor`, podem vir em qualquer posição
+  e nunca entram no nome nem nas opções;
+- `--selectableCount` só aceita inteiro de 1 até o número de opções (rejeita
+  `0`, `-1`, `1.5`, `+2`, `01`, vazio); votos aceitam inteiro ≥ 0 com o mesmo rigor;
+- a enquete é desenhada numa caixa de **40 colunas** (padding 2, quebra de linha
+  sem cortar palavra e continuação alinhada ao texto — `│` + 2 + `N. `);
+- nada é enviado sem confirmação: estado em `utils/pendingPoll.js`
+  (`pendingPollConfirmations`, chave `senderJid`, 30s).
+
 ### Confirmação de chamada (`!call`)
 
 O `!call` usa `{ call: { name, type } }`, que o Baileys vendored converte em
@@ -121,6 +138,8 @@ O separador também muda por contexto, mesmo dentro de um modo: música usa
 | --- | --- |
 | `!menumode [modo]` | Lista/troca o modo visual dos menus (por grupo). |
 | `!fotobot` | (dono) Troca a foto de perfil **do bot** respondendo a uma imagem — diferente de `!foto`, que muda a do grupo. Limite de 5 MB, erro sem stack. |
+| `!poll <pergunta> \| <opção 1> \| <opção 2> [--selectableCount=N] [--announcement=true\|false]` | Cria uma **enquete** no chat (`pollCreationMessage` / V3 / V2). Pede confirmação antes de enviar. |
+| `!pollresult <nome> \| <opção>:<votos> \| ...` | Envia o **placar** de uma enquete (`pollResultSnapshotMessage`). Pede confirmação antes de enviar. |
 | `!call <numero|@mencao> [voz|video] [nome]` | Envia uma **Call Message** (chamada de voz `type 1` ou vídeo `type 2`, nome padrão `Hay`) para um número ou grupo. **Nunca envia direto**: cria uma pendência e só dispara depois que o mesmo usuário responde `1`/`sim`/`confirmar` (`2`/`não`/`cancelar` aborta). Expira em 30s. |
 | `!fotomenubot [chave]` | (dono) Troca a **imagem de cabeçalho dos menus** (`main`, `admin`, `sticker`, `life`, `download`, `profile`). Valida a imagem, regrava como JPEG, guarda backup em `backup/menu/` e desfaz com `!fotomenubot reset [chave]`. |
 | `!twitter <url>` (alias `!tw`, `!x`) | Baixa o vídeo/foto de um tweet com fluxo em etapas e card de resultado. |
