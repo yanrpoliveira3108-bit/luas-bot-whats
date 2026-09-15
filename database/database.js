@@ -388,6 +388,91 @@ const MIGRATIONS = [
     created_at TEXT DEFAULT ''
   );
   CREATE INDEX IF NOT EXISTS idx_welcome_events_group ON welcome_events(group_id);`,
+
+  /* ------------------------------------------------------------------ *
+   * FASE 4 — moderação, métricas de uso e jobs agendados.               *
+   *                                                                     *
+   * ATENÇÃO: a versão de cada migração é a POSIÇÃO neste array          *
+   * (migrate() usa `i + 1`). Por isso estas entradas são sempre         *
+   * ANEXADAS ao final — inserir no meio renumeraria migrações já        *
+   * aplicadas em bancos existentes. Os números nos comentários das      *
+   * entradas antigas estão defasados; confie na posição, não neles.     *
+   *                                                                     *
+   * Padrões seguidos (os mesmos do resto do arquivo):                   *
+   *   • id INTEGER PRIMARY KEY AUTOINCREMENT para registros/eventos;    *
+   *   • JIDs em TEXT (users.id / groups.id), nunca em formato novo;     *
+   *   • timestamps em TEXT ISO-8601 (new Date().toISOString());         *
+   *   • JSON em TEXT (como groups.settings e rpg_players.achievements); *
+   *   • sem FOREIGN KEY: nenhuma tabela do banco declara FK (o pragma   *
+   *     foreign_keys está ligado, mas não há constraint alguma).        *
+   * ------------------------------------------------------------------ */
+
+  // 35 — casos de moderação (registro unificado com ciclo de vida)
+  // Diferente de `warnings` (eventos de !warn, imutáveis) e `group_logs`
+  // (trilha de auditoria do X9): aqui cada linha é um CASO com status,
+  // metadados e updated_at, agregando warn/mute/kick/ban/unban/etc.
+  `CREATE TABLE IF NOT EXISTS moderation_cases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    moderator_id TEXT NOT NULL DEFAULT '',
+    action TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+    metadata TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT '',
+    closed_at TEXT NOT NULL DEFAULT ''
+  );
+  -- atende: casos de um grupo (prefixo group_id) já ordenados por id
+  CREATE INDEX IF NOT EXISTS idx_mod_cases_group ON moderation_cases(group_id, id);
+  -- atende: casos de um usuário (qualquer grupo) e usuário dentro de um grupo
+  CREATE INDEX IF NOT EXISTS idx_mod_cases_user ON moderation_cases(user_id, group_id, id);`,
+
+  // 36 — uso de comandos (contadores AGREGADOS por dia, não 1 linha por execução)
+  // Decisão documentada em docs/AUDIT-ARQUITETURA.md: o volume de mensagens é
+  // ordens de grandeza maior que o de combinações (comando, usuário, grupo, dia),
+  // então agregar mantém a tabela limitada e as consultas de !analytics baratas.
+  `CREATE TABLE IF NOT EXISTS command_usage (
+    command TEXT NOT NULL,
+    user_id TEXT NOT NULL DEFAULT '',
+    group_id TEXT NOT NULL DEFAULT '',
+    day TEXT NOT NULL,
+    ok INTEGER NOT NULL DEFAULT 1,
+    uses INTEGER NOT NULL DEFAULT 0,
+    total_ms INTEGER NOT NULL DEFAULT 0,
+    last_used_at TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (command, user_id, group_id, day, ok)
+  );
+  -- atende: retenção (DELETE WHERE day < ?) e "uso em determinado período"
+  CREATE INDEX IF NOT EXISTS idx_cmd_usage_day ON command_usage(day);
+  -- atende: "quais comandos este usuário usa"
+  CREATE INDEX IF NOT EXISTS idx_cmd_usage_user ON command_usage(user_id, day);
+  -- atende: "qual grupo usa determinado comando"
+  CREATE INDEX IF NOT EXISTS idx_cmd_usage_group ON command_usage(group_id, command);`,
+
+  // 37 — jobs agendados (base da Fase 6; o scheduler NÃO está incluído aqui)
+  // Estados: pending → running → completed | failed; pending → cancelled.
+  // run_at é TEXT ISO-8601 de propósito: a ordenação léxica coincide com a
+  // cronológica e o índice (status, run_at, id) serve a consulta do worker.
+  `CREATE TABLE IF NOT EXISTS scheduled_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    payload TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'pending'
+      CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
+    run_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT '',
+    started_at TEXT NOT NULL DEFAULT '',
+    finished_at TEXT NOT NULL DEFAULT '',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    last_error TEXT NOT NULL DEFAULT '',
+    worker_id TEXT NOT NULL DEFAULT ''
+  );
+  -- atende: busca do worker (status='pending' AND run_at <= agora, por run_at)
+  CREATE INDEX IF NOT EXISTS idx_sched_jobs_due ON scheduled_jobs(status, run_at, id);`,
 ];
 
 /* ----------------------------- core ------------------------------ */

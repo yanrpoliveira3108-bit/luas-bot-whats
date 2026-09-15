@@ -334,3 +334,136 @@ falhar (2 falhas em cada caso).
 **Dívida descoberta (não corrigida nesta fase, para não mudar comportamento):**
 `utils/cooldown.js` registra também a chave `global:*:<comando>`, então o uso de um
 comando por qualquer usuário trava o mesmo comando para todos durante o cooldown.
+
+---
+
+## 11. Fase 4 — Banco: moderation_cases, command_usage, scheduled_jobs
+
+### Banco analisado (o padrão REAL do repositório)
+
+| Item | Como é |
+|---|---|
+| Banco | SQLite, arquivo único em `CONFIG.paths.databaseFile` |
+| Driver | `better-sqlite3` 13.0.3 (SQLite 3.53.4), API síncrona |
+| Migrações | array `MIGRATIONS` dentro de `database/database.js`; **versão = posição no array** (`i + 1`), registradas em `schema_migrations(version, applied_at)` e aplicadas só se `version > MAX(version)`, cada uma em `db.transaction()` |
+| Rollback | **não existe** (não há `down`). Não foi inventado um sistema paralelo — ver "Limitações" |
+| Tabelas | `CREATE TABLE IF NOT EXISTS` no SQL da migração |
+| Índices | `CREATE INDEX IF NOT EXISTS` na mesma migração da tabela |
+| Transactions | `db.transaction(fn)` do better-sqlite3 (usado em migrate/seed/economy) |
+| Queries | `database.prepare(nome, sql)` — prepared statements com cache por `nome::sql`, sempre parametrizados |
+| Timestamps | TEXT ISO-8601 (`new Date().toISOString()`); exceção histórica: `tigrinho_players.last_spin_at` INTEGER |
+| JSON | TEXT (`groups.settings`, `rpg_players.achievements`, `quiz_questions.options`) |
+| Foreign keys | pragma `foreign_keys = ON`, mas **nenhuma tabela declara FK** |
+| Backup | `database.backup(dest)` / `restore(src)` + rotação em `utils/autoBackup` |
+| Isolamento em teste | `process.env.DATABASE_FILE` + `test/dbtmp.js` (tmp/ do projeto: no Termux `/tmp` não é gravável) |
+
+Nada disso foi trocado, duplicado ou substituído. Nenhum ORM, nenhum pool, nenhum
+segundo gerenciador de banco, nenhum segundo sistema de migração.
+
+### Migrações criadas (anexadas ao FIM do array — a versão é posicional)
+
+| Versão | Conteúdo |
+|---|---|
+| 35 | `moderation_cases` + 2 índices |
+| 36 | `command_usage` + 3 índices |
+| 37 | `scheduled_jobs` + 1 índice |
+
+Cada uma é pequena, focada, determinística e idempotente (`IF NOT EXISTS`), no
+formato exato das 34 anteriores. Upgrade verificado: um banco na versão 34 recebe
+apenas 35/36/37 e preserva tudo que já existia.
+
+### Tabelas
+
+**`moderation_cases`** — caso de moderação com ciclo de vida.
+`id` (PK AUTOINCREMENT = **case_id**: único, persistente, imutável, seguro sob
+concorrência), `group_id`, `user_id`, `moderator_id` ('' = automod/sistema),
+`action` (texto livre: warn/mute/kick/ban/unban/…), `reason`, `status`
+(`open`/`closed`, com CHECK), `metadata` (JSON: `{duration, source, …}`),
+`created_at`, `updated_at`, `closed_at`.
+
+Não substitui `warnings` (eventos imutáveis de `!warn`) nem `group_logs` (trilha
+do X9): as duas continuam sendo escritas pelos fluxos atuais. A unificação da
+escrita é trabalho da Fase 5.
+
+**`command_usage`** — uso de comandos **agregado por dia**.
+PK composta `(command, user_id, group_id, day, ok)` + `uses`, `total_ms`,
+`last_used_at`. `day` é `YYYY-MM-DD` (UTC) e `ok` é 1/0.
+
+**`scheduled_jobs`** — jobs agendados (base da Fase 6; **sem scheduler aqui**).
+`id`, `type`, `payload` (JSON), `status` (CHECK), `run_at`, `created_at`,
+`updated_at`, `started_at`, `finished_at`, `attempts`, `max_attempts`,
+`last_error`, `worker_id`.
+
+### Índices (6 novos; o banco tinha 3)
+
+| Índice | Consulta que atende |
+|---|---|
+| `idx_mod_cases_group (group_id, id)` | casos de um grupo, já ordenados do mais recente |
+| `idx_mod_cases_user (user_id, group_id, id)` | casos de um usuário (qualquer grupo) **e** usuário dentro de um grupo |
+| `idx_cmd_usage_day (day)` | retenção (`DELETE WHERE day < ?`) e uso por período |
+| `idx_cmd_usage_user (user_id, day)` | quais comandos um usuário usa |
+| `idx_cmd_usage_group (group_id, command)` | qual grupo usa determinado comando |
+| `idx_sched_jobs_due (status, run_at, id)` | busca do worker: `status='pending' AND run_at <= agora` |
+
+Caso por ID e "casos recentes" usam o rowid (PK) — sem índice extra de propósito.
+Todos os planos foram conferidos com `EXPLAIN QUERY PLAN` no teste: nenhuma
+consulta crítica faz varredura completa.
+
+### Concorrência (claim de job)
+
+`claimJob(workerId, at)` é **UM ÚNICO statement** `UPDATE … WHERE status='pending'
+AND id = (SELECT … ORDER BY run_at, id LIMIT 1) RETURNING *` — compare-and-set no
+nível do banco, sem `SELECT` seguido de `UPDATE`. Dois workers em processos
+diferentes não ficam com o mesmo job: o segundo vê `status='running'`, a guarda
+falha e nada é retornado. Nenhuma trava em memória é usada para isso.
+
+Testado de verdade: 500 jobs, **dois processos** (`test/db-claim-worker.js` usa o
+mesmo repository) disputando com largada sincronizada e teto de 300 por lado →
+500 claims, 500 ids distintos, 0 `SQLITE_BUSY`, intercalação comprovada
+(250/250). Com o claim trocado pelo anti-padrão SELECT+UPDATE, o teste acusa
+516/526 claims para 500 jobs — ou seja, ele detecta a corrida.
+
+Transições: `pending → running → completed|failed`; `running → pending` (retry,
+só enquanto `attempts < max_attempts`); `pending|running → cancelled`.
+Todas as funções de transição têm guarda de estado no `WHERE` e devolvem `null`
+quando a guarda não bate (corrida perdida é detectável, nunca silenciosa).
+
+### Retenção de `command_usage`
+
+Decisão: **contadores agregados por (comando, usuário, grupo, dia, sucesso)**,
+não uma linha por execução.
+
+- volume: 1 linha por execução cresce com o número de mensagens; o agregado cresce
+  com o número de combinações distintas por dia;
+- as perguntas do futuro `!analytics` são todas de agregação → `SUM()` sobre
+  poucas linhas;
+- retenção: `prune(beforeDay)` é um único `DELETE WHERE day < ?` usando
+  `idx_cmd_usage_day`;
+- o detalhe por execução continua em memória (`utils/activity.js`, 200 entradas)
+  para `!logs`; `utils/perf.js` segue sendo a métrica volátil do processo — não há
+  duplicação.
+
+Quem chama o `prune` é a Fase 6 (scheduler) ou o dono manualmente. `scheduled_jobs`
+tem o equivalente `pruneFinished(before)` para jobs terminados.
+
+### Limitações documentadas
+
+- **Sem rollback**: `schema_migrations` não guarda `down`. Como as migrações são
+  aditivas e `IF NOT EXISTS`, o caminho seguro de reversão é o backup existente
+  (`database.backup`/`restore` + rotação). Não foi criado um sistema paralelo.
+- **Sem FK**: mantido o padrão do banco (zero FK declaradas). Relacionamentos são
+  por JID em TEXT; integridade é responsabilidade da camada de acesso.
+- `database.stats()` **não** foi alterado: incluir as tabelas novas mudaria a saída
+  de `!database`/`!statsbot` (fora do escopo desta fase).
+
+### Problemas encontrados durante a auditoria (classificados, não corrigidos)
+
+| # | Achado | Classificação |
+|---|---|---|
+| 1 | Comentários de versão duplicados no array `MIGRATIONS` (dois "20", "21", "22", "23"): a versão real é a posição. Erro de documentação que induz a inserir migração no meio do array e renumerar bancos existentes | MELHORIA FUTURA (comentário já adicionado nas entradas da Fase 4) |
+| 2 | `pragma foreign_keys = ON` sem nenhuma FK declarada — pragma sem efeito | MELHORIA FUTURA |
+| 3 | Tabelas antigas sem índice em colunas de consulta: `warnings`, `transactions`, `economy_logs`, `group_logs`, `plantations`, `animals`, `life_market` (3 índices no banco inteiro antes da Fase 4) | MELHORIA FUTURA (Fase 7/10) — mexer em tabelas existentes é mudança de schema fora do escopo |
+| 4 | `tigrinho_players.last_spin_at` é INTEGER enquanto todo o resto é TEXT ISO | FORA DO ESCOPO (as tabelas novas seguiram o padrão dominante ISO) |
+| 5 | Sem rollback de migração | DOCUMENTADO acima |
+
+Nenhum deles foi "corrigido por achar bonito": só o necessário para a Fase 4 entrou.
