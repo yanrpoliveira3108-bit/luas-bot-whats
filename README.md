@@ -82,6 +82,23 @@ vez — nada de string decorativa espalhada pelos comandos.
 !menumode cute       idem
 ```
 
+### Cartão do criador (`!criador`)
+
+```
+!criador
+!criador quem criou a Lua?
+```
+
+Usa a estrutura `botForwardedMessage → richResponseMessage` com `unifiedResponse.data`
+em base64, que existe no proto desta biblioteca (`WAProto/E2E/E2E.proto`:
+`botForwardedMessage = 104`, `richResponseMessage = 97`, `MessageContextInfo.botMetadata = 7`)
+e é enviado por `socket.relayMessage`. O `contextInfo` (stanzaId/participant/quotedMessage)
+vem de `utils/consts.js → seloNubank()`, que usa o id da mensagem real para a citação
+ser resolvida no aparelho de quem recebe.
+
+Personalize no bloco `CREATOR` no topo do arquivo: nome, sobre, Instagram, TikTok,
+link de suporte (padrão: `wa.me` do `OWNER_NUMBER` do `.env`) e as imagens.
+
 ### Enquetes (`!poll` e `!pollresult`)
 
 ```
@@ -138,6 +155,7 @@ O separador também muda por contexto, mesmo dentro de um modo: música usa
 | --- | --- |
 | `!menumode [modo]` | Lista/troca o modo visual dos menus (por grupo). |
 | `!fotobot` | (dono) Troca a foto de perfil **do bot** respondendo a uma imagem — diferente de `!foto`, que muda a do grupo. Limite de 5 MB, erro sem stack. |
+| `!criador [pergunta]` | Quem criou o Lua Bot: cartão **richResponse/GenAI** via `relayMessage` (imagem, dados reais do bot, redes sociais, suporte, data/hora). Se o servidor recusar o cartão, entrega as mesmas informações em texto. Dados editáveis no topo de `commands/general/criador.js`. |
 | `!poll <pergunta> \| <opção 1> \| <opção 2> [--selectableCount=N] [--announcement=true\|false]` | Cria uma **enquete** no chat (`pollCreationMessage` / V3 / V2). Pede confirmação antes de enviar. |
 | `!pollresult <nome> \| <opção>:<votos> \| ...` | Envia o **placar** de uma enquete (`pollResultSnapshotMessage`). Pede confirmação antes de enviar. |
 | `!call <numero|@mencao> [voz|video] [nome]` | Envia uma **Call Message** (chamada de voz `type 1` ou vídeo `type 2`, nome padrão `Hay`) para um número ou grupo. **Nunca envia direto**: cria uma pendência e só dispara depois que o mesmo usuário responde `1`/`sim`/`confirmar` (`2`/`não`/`cancelar` aborta). Expira em 30s. |

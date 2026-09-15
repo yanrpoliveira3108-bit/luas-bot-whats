@@ -16,7 +16,7 @@ function ownerVcard() {
 module.exports = [
   {
     name: 'owner',
-    commands: ['owner', 'dono', 'criador'],
+    commands: ['owner', 'dono'], // 'criador' agora é o cartão rico: commands/general/criador.js
     category: 'general',
     description: 'Mostra o contato do dono do bot.',
     usage: '!owner',
