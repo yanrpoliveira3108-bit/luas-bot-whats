@@ -472,3 +472,105 @@ tem o equivalente `pruneFinished(before)` para jobs terminados.
 | 5 | Sem rollback de migração | DOCUMENTADO acima |
 
 Nenhum deles foi "corrigido por achar bonito": só o necessário para a Fase 4 entrou.
+
+---
+
+## 12. Fase 5 — Services: separar regra de negócio dos comandos
+
+### Arquitetura
+
+```
+WhatsApp Message → Pipeline (engine/pipeline.js)
+                 → Command  (args, validação de interface, formatação)
+                 → Service  (regra de negócio, locks, erros de domínio)
+                 → Repository (SQL parametrizado)
+                 → SQLite
+```
+
+Nenhum service conhece WhatsApp: não há `sock.*`, `ctx.reply`, `message.key` nem
+formatação de moeda dentro de `services/`. Os services devolvem dados e lançam
+`Error` com `.code` — **o mesmo mecanismo que já existia** em
+`plugins/life/engine.js` (`err(code, message)`), não classes novas.
+
+### Services criados
+
+| Arquivo | Regras que assumiu | De onde vieram |
+|---|---|---|
+| `services/economyService.js` | validar valor (inteiro positivo), destino, auto-transferência; serializar por usuário (`utils/keyedMutex`); traduzir falha do banco em erro de domínio; lançar no histórico financeiro; vender item | `commands/rpg/economy.js`, `commands/life/economy.js`, `commands/life/gather.js` |
+| `services/moderationService.js` | normalizar motivo/ação, validar grupo/usuário/ação, **regra de advertências** (contagem → ação configurada), registrar/consultar/fechar casos | `handlers/groupHandler.applyWarningFlow` + `database/moderationCases.js` (Fase 4, até então sem chamador) |
+| `services/rpgService.js` | XP por mensagem (intervalo de 30 s + 1 a 3 XP) e leitura de progressão | `handlers/commandHandler.grantXp` (regra morava na infraestrutura) |
+
+`services/` é plano, no mesmo padrão de `database/*.js` e `utils/*.js`. Nenhuma
+camada extra (sem Facade/Manager/Coordinator/Factory).
+
+### Por que NÃO existe `lifeService.js`
+
+`plugins/life/engine.js` **já é** a camada de serviço de Lua Life: 799 linhas,
+27 operações de domínio (`work`, `mine`, `fish`, `buyHouse`, `openBusiness`,
+`createOffer`, `buyOffer`, `giftItem`, `dailyClaim`, `lottery`, …), usada por 10
+arquivos de comando, com erros codificados (`NO_ENERGY`, …) e as regras de
+energia/progressão concentradas nele (a regra de energia aparece só lá, em 3
+pontos — não está duplicada nos comandos). Criar um `lifeService` que apenas
+repassa o engine adicionaria um salto sem regra nova. O mesmo vale para as regras
+de gameplay do RPG. **Decisão baseada no código real**, conforme pedido.
+
+As curvas de nível continuam nos repositórios e são **sistemas diferentes**, não
+duplicação: XP global `sqrt(xp/60)+1` (`database/users.js`) e XP de RPG
+`sqrt(xp/40)+1` (`database/rpg.js`). Não foram unificadas.
+
+### Comandos/handlers migrados
+
+`!depositar`, `!sacar`, `!transferir` (rpg/economy.js) · `!pagar`
+(life/economy.js) · `!venderpeixes` (life/gather.js) · `!advertir` + fluxo de
+kick (handlers/groupHandler.applyWarningFlow) · XP por mensagem
+(handlers/commandHandler) · `!regar`/fertilizante (SQL → `database/rpg.js`).
+
+**Comportamento externo preservado** — verificado por teste que executa o comando
+real e compara a resposta: `🏦 Depositado: …`, `💸 Saldo insuficiente.`,
+`🏧 Sacado: …`, `💸 Transferido … para @…` (com menção), `🤨 Não dá para
+transferir para você mesmo.`, `⚠️ *Advertência aplicada* / ▸ Total / ▸ Ação`,
+`👢 usuário removido`, `💰 Vendeu N peixe(s) por …`.
+
+### Ação ≠ registro (moderação)
+
+O service **não executa** a ação de WhatsApp. `applyWarning()` grava o aviso,
+conta, resolve a ação configurada e registra o caso; devolve `{count, action,
+caseId}`. Quem tem o `sock` executa o kick e depois chama `recordAction()` com
+`metadata.source = 'warnings'`. Não há atomicidade entre chamar a API do WhatsApp
+e gravar no banco — e não foi simulada: a ordem real é ação → registro.
+
+### O que continua nos comandos (não migrado)
+
+8 arquivos de comando ainda usam `withLock` diretamente (cassino, cripto,
+investimento, fazenda, empregos, admin/gather de Life) e `!vender`/`!comprar`
+continuam calculando preço no comando. São candidatos naturais da próxima
+passada; a Fase 5 não tentou converter os 332 comandos.
+
+### Achados classificados (não corrigidos nesta fase)
+
+| # | Achado | Classificação |
+|---|---|---|
+| 1 | **`!pagar` nunca funcionou como documentado.** `commands/life/economy.js` lê o valor em `ctx.args[mentionedJid.length ? 0 : 1]`; com menção, `args[0]` é o texto `"@fulano"`, então `parseInt` dá NaN e o comando só devolve o aviso de uso. `!transferir` usa `args[1]` e funciona. Reproduzido pela pipeline real: saldo do destino permanece 0. `!presente` tem o mesmo padrão de índice para o item. | **CRÍTICO** (funcional) — corrigir muda o comportamento, e a seção 24 proíbe mudar UX durante a refatoração. O teste `regressão: !pagar …` **trava o comportamento atual** e falhará quando for corrigido |
+| 2 | `closeCase(id, motivo)` substitui o motivo original do caso (o motivo da ação se perde). O wrapper do service só envia o motivo quando ele foi informado | MELHORIA FUTURA (mexeria no contrato testado da Fase 4) |
+| 3 | Preço de venda inconsistente: `!venderpeixes`/`!vender` pagam `sell_price`, enquanto `!precos` exibe o preço ajustado pelo mercado (`plugins/life/market.computeSellPrice`) | FORA DO ESCOPO (mudaria o balanceamento) |
+| 4 | `utils/keyedMutex` serializa **por processo** (o próprio arquivo documenta). Com mais de um processo, a proteção de economia depende só das transactions do SQLite | DOCUMENTADO (o bot roda em instância única — `utils/singleInstance`) |
+
+### Retenção/memória
+
+O mapa de throttle de XP (`lastXp`) foi podado com a mesma estratégia da Fase 2
+(C2 — `pruneSpamState`): só acima de 5 000 entradas, removendo as vencidas há
+mais de 5 min. Não muda comportamento visível (o intervalo é de 30 s).
+
+### Testes
+
+`test/services.test.js` — 33 verificações, no `npm test`: EconomyService (saldo,
+depósito, saque, transferência, saldo insuficiente, valor inválido,
+auto-transferência, histórico nos dois lados, grant/deduct, venda, **concorrência
+com duas transferências simultâneas**), ModerationService (casos, normalização,
+validação, consultas por grupo/usuário/grupo+usuário, thresholds, kick no 3º
+aviso, fechamento), RpgService (throttle de 30 s, faixa 1-3, progressão, poda do
+mapa), repository (waterPlantation/fertilizePlantation) e **regressão dos 8
+comandos migrados**.
+
+Validado por mutação: remover a guarda `SELF_TRANSFER` e fazer `closeCase`
+sobrescrever o motivo derrubam 2 verificações cada.

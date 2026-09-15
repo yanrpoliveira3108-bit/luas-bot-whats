@@ -113,7 +113,7 @@ module.exports = [
         const newReady = new Date(new Date(plant.ready_at).getTime() - 0.25 * (new Date(plant.ready_at).getTime() - Date.now())).toISOString();
         await withLock(ctx.sender, () => {
           economy.removeItem(ctx.sender, id, 1);
-          require('../../database/database').prepare('fert_plant', `UPDATE plantations SET ready_at = ? WHERE id = ?`).run(newReady, plant.id);
+          rpg.fertilizePlantation(plant.id, newReady);
         });
         return ctx.reply('💩 Fertilizante aplicado! O tempo de crescimento foi reduzido.');
       }

@@ -126,7 +126,7 @@ module.exports = [
           if (Date.now() - lastWater < 3600 * 1000) continue;
           const remaining = new Date(p.ready_at).getTime() - Date.now();
           const newReady = new Date(Date.now() + remaining * 0.85).toISOString();
-          require('../../database/database').prepare('water_ready', `UPDATE plantations SET ready_at = ?, watered_at = ? WHERE id = ?`).run(newReady, new Date().toISOString(), p.id);
+          rpg.waterPlantation(p.id, newReady);
           watered++;
         }
       });

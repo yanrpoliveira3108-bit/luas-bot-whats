@@ -21,6 +21,7 @@ const users = require('../database/users');
 const groups = require('../database/groups');
 const permissions = require('../utils/permissions');
 const cooldown = require('../utils/cooldown');
+const rpgService = require('../services/rpgService');
 const errorHandler = require('./errorHandler');
 const buttonHandler = require('./buttonHandler');
 const groupHandler = require('./groupHandler');
@@ -50,8 +51,6 @@ const { createPipeline } = require('../engine/pipeline');
 
 /* --------------------------- metadados ------------------------------- */
 
-const XP_MIN_INTERVAL = 30 * 1000;
-const lastXp = new Map();
 const afkNotified = new Map();
 
 async function getGroupMetadata(sock, jid) {
@@ -285,12 +284,12 @@ async function handleMessage(sock, msg) {
   return pipeline.run(sock, msg);
 }
 
+/**
+ * XP por mensagem. A REGRA (intervalo mínimo + quantidade) está em
+ * services/rpgService.js desde a Fase 5; aqui fica só a chamada.
+ */
 function grantXp(sender) {
-  const now = Date.now();
-  const last = lastXp.get(sender) || 0;
-  if (now - last < XP_MIN_INTERVAL) return;
-  lastXp.set(sender, now);
-  users.addXp(sender, 1 + Math.floor(Math.random() * 3));
+  rpgService.grantMessageXp(sender);
 }
 
 async function notifyAfk(sock, ctx) {

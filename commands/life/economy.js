@@ -6,14 +6,13 @@
 'use strict';
 
 const life = require('../../database/life');
-const economy = require('../../database/economy');
 const rpg = require('../../database/rpg');
 const engine = require('../../plugins/life/engine');
 const market = require('../../plugins/life/market');
 const networth = require('../../plugins/life/networth');
 const { formatMoney } = require('../../utils/formatter');
 const { displayName } = require('../../engine/interactionEngine');
-const { withLock } = require('../../utils/keyedMutex');
+const economyService = require('../../services/economyService');
 
 module.exports = [
   {
@@ -192,7 +191,7 @@ module.exports = [
       if (!target || !amount || amount <= 0) return ctx.reply('⚠️ Use: !pagar @usuario <valor>');
       if (target === ctx.sender) return ctx.reply('🤨 Não dá para pagar a si mesmo.');
       try {
-        await withLock(ctx.sender, () => economy.transfer(ctx.sender, target, amount));
+        await economyService.transfer(ctx.sender, target, amount);
         await ctx.reply(`💸 Você pagou ${formatMoney(amount)} para @${target.split('@')[0]}.`, { mentions: [target] });
       } catch (_) {
         await ctx.reply('💸 Saldo insuficiente para pagar.');
