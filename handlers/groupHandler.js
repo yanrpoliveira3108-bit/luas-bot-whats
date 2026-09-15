@@ -26,6 +26,29 @@ const toxicFilter = require('../utils/toxicFilter');
 const spamState = new Map(); // userJid -> { count, windowStart, lastText }
 const FLOOD_WINDOW_MS = 8000;
 const FLOOD_MAX = 8;
+/**
+ * A janela do flood é de segundos, mas quem sumia do grupo deixava a entrada na
+ * Map para sempre — em bot com muitos grupos isso cresce sem limite. A poda roda
+ * só quando o mapa passa do teto, então não custa nada no caminho da mensagem.
+ */
+const SPAM_STATE_MAX = 500;
+const SPAM_STATE_TTL_MS = 5 * 60 * 1000;
+
+function pruneSpamState(now = Date.now(), max = SPAM_STATE_MAX) {
+  if (spamState.size <= max) return 0;
+  let removed = 0;
+  for (const [key, st] of spamState) {
+    if (now - st.windowStart > SPAM_STATE_TTL_MS) {
+      spamState.delete(key);
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
+function spamStateSize() {
+  return spamState.size;
+}
 
 function checkSpamFlood(ctx) {
   const antiManager = require('../utils/antiManager');
@@ -34,6 +57,7 @@ function checkSpamFlood(ctx) {
   if (!isSpamEnabled && !isFloodEnabled) return { action: null };
 
   const now = Date.now();
+  pruneSpamState(now);
   const key = ctx.sender;
   let st = spamState.get(key);
   if (!st || now - st.windowStart > FLOOD_WINDOW_MS) {
@@ -465,4 +489,8 @@ module.exports = {
   mutedList,
   enforceMute,
   applyWarningFlow,
+  pruneSpamState,
+  spamStateSize,
+  /** uso interno/testes: referência da Map para semear estado */
+  __spamState: spamState,
 };

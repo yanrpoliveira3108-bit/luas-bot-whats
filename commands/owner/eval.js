@@ -1,6 +1,12 @@
 'use strict';
 
+const vm = require('vm');
 const CONFIG = require('../../config');
+const { withTimeout } = require('../../utils/resilience');
+
+/** Um loop síncrono não pode ser interrompido depois de entregue ao event loop. */
+const EVAL_SYNC_TIMEOUT_MS = 5000;
+const EVAL_TOTAL_TIMEOUT_MS = 15000;
 const { confirmAction } = require('../_shared/confirm');
 const logger = require('../../utils/logger').child('eval');
 
@@ -27,8 +33,12 @@ module.exports = [
         try {
           // sandbox mínimo, restrito ao dono e com acesso explícito
           const sandbox = { require, console, process, CONFIG, ctx: c };
-          const fn = new Function(...Object.keys(sandbox), `return (${code})`);
-          let result = await fn(...Object.values(sandbox));
+          // vm com timeout: while(true) do dono deixa de travar o bot inteiro
+          let result = vm.runInNewContext(`(${code})`, sandbox, {
+            timeout: EVAL_SYNC_TIMEOUT_MS,
+            filename: 'lua-eval',
+          });
+          result = await withTimeout(Promise.resolve(result), EVAL_TOTAL_TIMEOUT_MS, 'eval');
           if (typeof result !== 'string') {
             result = require('util').inspect(result, { depth: 1, maxStringLength: 500 });
           }

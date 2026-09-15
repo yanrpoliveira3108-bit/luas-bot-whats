@@ -69,6 +69,25 @@ class PluginRegistry {
       }
     }
 
+    // dois arquivos com o MESMO name: o segundo substituía o primeiro em silêncio
+    // (o !tigrinho existia em commands/games e commands/rpg ao mesmo tempo).
+    // Agora o anterior é removido por completo — sem gatilhos órfãos apontando
+    // para um comando morto — e o caso fica registrado para o audit enxergar.
+    const previous = this.commands.get(name);
+    if (previous && previous !== cmd) {
+      logger.warn(
+        { name, plugin: pluginName },
+        'comando com o mesmo name já registrado — o anterior foi substituído'
+      );
+      this.skipped.push({
+        name,
+        trigger: name,
+        plugin: pluginName,
+        reason: 'name duplicado em dois arquivos (o anterior foi substituído)',
+      });
+      this.unregisterCommand(name);
+    }
+
     this.commands.set(name, cmd);
     for (const t of triggers) this.triggers.set(t, cmd);
 
