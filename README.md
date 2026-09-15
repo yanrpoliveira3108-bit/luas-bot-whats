@@ -82,6 +82,24 @@ vez — nada de string decorativa espalhada pelos comandos.
 !menumode cute       idem
 ```
 
+### Confirmação de chamada (`!call`)
+
+O `!call` usa `{ call: { name, type } }`, que o Baileys vendored converte em
+`scheduledCallCreationMessage` (`type 1` → `VOICE`, `type 2` → `VIDEO` — verificado
+contra o proto da lib). Nenhuma chamada sai sem confirmação explícita:
+
+1. `!call 5511999999999` → o bot guarda a solicitação em
+   `utils/pendingCall.js` (`pendingCallConfirmations`, chaveada por **senderJid**)
+   e mostra o cartão de confirmação;
+2. a próxima mensagem do **mesmo autor** é consumida por um único ponto de
+   interceptação em `handlers/commandHandler.js` (sem listener por execução);
+3. `1`/`sim`/`s`/`confirmar` envia • `2`/`não`/`n`/`cancelar`/`cancel` aborta •
+   qualquer outra resposta re-pergunta;
+4. depois de 30s o estado é removido e uma confirmação tardia não envia nada.
+
+A chave é quem pediu, nunca o destino: o `1` de outro usuário não autoriza a
+chamada criada por você.
+
 **O modo vale nos dois tipos de menu.** Na navegação por lista/botões o WhatsApp
 não tem campo de descrição no fluxo nativo com imagem, então a decoração vai na
 legenda da imagem (título na fonte do modo + separador por contexto) e no rodapé;
@@ -103,6 +121,7 @@ O separador também muda por contexto, mesmo dentro de um modo: música usa
 | --- | --- |
 | `!menumode [modo]` | Lista/troca o modo visual dos menus (por grupo). |
 | `!fotobot` | (dono) Troca a foto de perfil **do bot** respondendo a uma imagem — diferente de `!foto`, que muda a do grupo. Limite de 5 MB, erro sem stack. |
+| `!call <numero|@mencao> [voz|video] [nome]` | Envia uma **Call Message** (chamada de voz `type 1` ou vídeo `type 2`, nome padrão `Hay`) para um número ou grupo. **Nunca envia direto**: cria uma pendência e só dispara depois que o mesmo usuário responde `1`/`sim`/`confirmar` (`2`/`não`/`cancelar` aborta). Expira em 30s. |
 | `!fotomenubot [chave]` | (dono) Troca a **imagem de cabeçalho dos menus** (`main`, `admin`, `sticker`, `life`, `download`, `profile`). Valida a imagem, regrava como JPEG, guarda backup em `backup/menu/` e desfaz com `!fotomenubot reset [chave]`. |
 | `!twitter <url>` (alias `!tw`, `!x`) | Baixa o vídeo/foto de um tweet com fluxo em etapas e card de resultado. |
 | `!fontes [estilo] <texto>` | Mostra/aplica as 18 fontes Unicode. |
