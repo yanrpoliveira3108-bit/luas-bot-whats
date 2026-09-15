@@ -8,21 +8,64 @@ function enc(jid) {
   return jid.replace(/@/g, ':').replace(/\./g, '-');
 }
 
+/**
+ * Lista os pedidos de entrada pendentes.
+ *
+ * REGRESSÃO CORRIGIDA: o Baileys devolve um ARRAY de attrs
+ * (`participants.map(v => v.attrs)` em vendor/.../Socket/groups.js), mas aqui se
+ * lia `res.participants` — sempre undefined, então o bot respondia "nenhum
+ * pedido pendente" com a fila cheia. Aceitamos as duas formas por segurança.
+ */
 async function listPending(ctx) {
   const sock = ctx.socket;
   if (typeof sock.groupRequestParticipantsList !== 'function') {
     return null;
   }
-  const res = await sock.groupRequestParticipantsList(ctx.remoteJid);
-  return (res && res.participants) || [];
+  let res;
+  try {
+    res = await sock.groupRequestParticipantsList(ctx.remoteJid);
+  } catch (err) {
+    logger.warn({ err: err.message }, 'falha ao consultar pedidos de entrada');
+    const e = new Error(
+      'Não consegui consultar os pedidos. Verifique se o grupo exige aprovação de membros e se eu sou admin.'
+    );
+    e.code = 'REQUESTS_QUERY_FAILED';
+    e.cause = err;
+    throw e;
+  }
+  const list = Array.isArray(res)
+    ? res
+    : res && Array.isArray(res.participants)
+      ? res.participants
+      : [];
+  return list
+    .filter((p) => p && p.jid)
+    .map((p) => ({ jid: String(p.jid), requestTime: p.request_time || p.requestTime || null }));
+}
+
+/**
+ * Aplica approve/reject e devolve o resultado REAL por participante:
+ * o Baileys retorna [{ status, jid }] onde status é '200' ou o código de erro.
+ */
+async function updateRequests(ctx, jids, action) {
+  const res = await ctx.socket.groupRequestParticipantsUpdate(ctx.remoteJid, jids, action);
+  const list = Array.isArray(res) ? res : [];
+  const okJids = [];
+  const failed = [];
+  for (const r of list) {
+    if (!r || !r.jid) continue;
+    if (String(r.status || '200') === '200') okJids.push(String(r.jid));
+    else failed.push({ jid: String(r.jid), status: String(r.status) });
+  }
+  return { ok: okJids, failed, total: jids.length };
 }
 
 async function approveOne(ctx, jid) {
-  await ctx.socket.groupRequestParticipantsUpdate(ctx.remoteJid, [jid], 'approve');
+  return updateRequests(ctx, [jid], 'approve');
 }
 
 async function rejectOne(ctx, jid) {
-  await ctx.socket.groupRequestParticipantsUpdate(ctx.remoteJid, [jid], 'reject');
+  return updateRequests(ctx, [jid], 'reject');
 }
 
 module.exports = [
@@ -130,8 +173,13 @@ module.exports = [
       if (pending === null) return ctx.reply('ℹ️ Recurso indisponível nesta versão.');
       if (!pending.length) return ctx.reply('✅ Nenhum pedido pendente.');
       const jids = pending.map((p) => p.jid);
-      await ctx.socket.groupRequestParticipantsUpdate(ctx.remoteJid, jids, 'approve');
-      await ctx.reply(`✅ ${jids.length} pedidos aprovados.`);
+      const result = await updateRequests(ctx, jids, 'approve');
+      const lines = [`✅ ${result.ok.length} de ${result.total} pedidos aprovados.`];
+      if (result.failed.length) {
+        lines.push(`⚠️ ${result.failed.length} falharam: ${result.failed.map((f) => `${f.jid.split('@')[0]} (${f.status})`).join(', ')}`);
+        lines.push('Motivo comum: o pedido já tinha sido respondido ou o grupo mudou a regra de entrada.');
+      }
+      await ctx.reply(lines.join('\n'));
     },
   },
   {
@@ -148,8 +196,12 @@ module.exports = [
       if (pending === null) return ctx.reply('ℹ️ Recurso indisponível nesta versão.');
       if (!pending.length) return ctx.reply('✅ Nenhum pedido pendente.');
       const jids = pending.map((p) => p.jid);
-      await ctx.socket.groupRequestParticipantsUpdate(ctx.remoteJid, jids, 'reject');
-      await ctx.reply(`❌ ${jids.length} pedidos rejeitados.`);
+      const result = await updateRequests(ctx, jids, 'reject');
+      const lines = [`❌ ${result.ok.length} de ${result.total} pedidos rejeitados.`];
+      if (result.failed.length) {
+        lines.push(`⚠️ ${result.failed.length} falharam: ${result.failed.map((f) => `${f.jid.split('@')[0]} (${f.status})`).join(', ')}`);
+      }
+      await ctx.reply(lines.join('\n'));
     },
   },
 ];
