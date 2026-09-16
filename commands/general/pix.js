@@ -16,6 +16,7 @@
 const commandHandler = require('../../handlers/commandHandler');
 const selective = require('../../utils/selective');
 const CONFIG = require('../../config');
+const settings = require('../../database/settings');
 const logger = require('../../utils/logger').child('pix');
 
 const USAGE = (prefix) =>
@@ -125,7 +126,8 @@ module.exports = [
       // comuns via relayMessage(selectiveParticipants). Em QUALQUER falha — ou
       // com o recurso desligado (padrão) — cai no envio normal acima, que já
       // carrega as mentions. Nunca há envio individual por participante.
-      const selectiveOn = !!(CONFIG.pix && CONFIG.pix.selective);
+      // override em runtime (!pixfiltro) > padrão do .env (PIX_SELECTIVE)
+      const selectiveOn = settings.getBool('pix:selective', !!(CONFIG.pix && CONFIG.pix.selective));
       logger.debug({ grupo: ctx.isGroup ? ctx.remoteJid : null, seletivo: selectiveOn ? 'SIM' : 'NAO', membros: memberJids.length }, '[PIX] mecanismo seletivo avaliado');
       if (ctx.isGroup && memberJids.length && selectiveOn && typeof ctx.socket.relayMessage === 'function') {
         try {

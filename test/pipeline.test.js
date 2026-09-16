@@ -303,7 +303,8 @@ function check(label, fn) {
       return set.size;
     };
     const antes = { cmds: registry.count(), triggers: contarTriggers(), skipped: registry.skippedCommands().length };
-    assert.strictEqual(antes.cmds, 332, 'comandos antes do reload: ' + antes.cmds);
+    // 333 = 332 + !pixfiltro (comando de ligar/desligar o filtro seletivo)
+    assert.strictEqual(antes.cmds, 333, 'comandos antes do reload: ' + antes.cmds);
     assert.strictEqual(antes.skipped, 0, 'registros descartados: ' + antes.skipped);
 
     const sockAntes = fakeSock();

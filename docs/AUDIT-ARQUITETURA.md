@@ -737,3 +737,10 @@ limitação acima.
 Por isso o seletivo é **opt-in** (`PIX_SELECTIVE=false` por padrão, preserva o envio
 normal) e, mesmo ligado, qualquer falha cai no envio normal com mentions (nunca quebra
 o PIX, nunca envia mensagem individual por participante).
+
+### 15.3 Controle em runtime: `!pixfiltro` (owner-only)
+Comando `!pixfiltro [on|off]` (alias `!filtro`) alterna o filtro seletivo sem editar
+o `.env`. O estado fica em `settings` (`pix:selective`) e tem **precedência** sobre o
+padrão do `.env` (`PIX_SELECTIVE`); `!pix` lê `settings.getBool('pix:selective',
+CONFIG.pix.selective)`. Sem argumento, mostra o status (com o aviso de que o seletivo
+não torna a mensagem invisível). `commands/owner/pixfiltro.js`, descoberto pelo loader.
