@@ -6,6 +6,7 @@ const rpg = require('../../database/rpg');
 const economy = require('../../database/economy');
 const { formatDate, formatMoney } = require('../../utils/formatter');
 const { displayName } = require('../../engine/interactionEngine');
+const cards = require('../../utils/cards');
 
 module.exports = [
   {
@@ -24,6 +25,25 @@ module.exports = [
       const rp = rpg.getPlayer(target);
       const eco = economy.get(target);
       const member = ctx.isGroup ? groups.memberStats(ctx.remoteJid, target) : null;
+
+      // Card primeiro (imagem). Se o render falhar, cai no texto abaixo —
+      // o comando nunca deixa de responder nem muda o que informa.
+      const card = await cards.renderProfileCard({
+        sock: ctx.socket,
+        jid: target,
+        name: displayName(target),
+        number: target.split('@')[0],
+        level: u.level,
+        xp: u.xp,
+        xpNext: next,
+        reputation: u.reputation,
+        messages: u.messages,
+        rpg: `nv ${rp.level} (${rp.profession || 'sem profissão'})`,
+        wallet: formatMoney(eco.wallet),
+        bank: formatMoney(eco.bank),
+        about: u.about || undefined,
+      });
+      if (await cards.sendCard(ctx, card, `👤 *${displayName(target)}*`)) return;
 
       const lines = [
         `👤 *${displayName(target)}*`,

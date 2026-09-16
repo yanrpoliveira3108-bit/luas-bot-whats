@@ -662,3 +662,48 @@ o código usa.
 - **`utils/keyedMutex`**: serializa por processo (documentado no próprio arquivo)
   e as operações de economia usam `db.transaction()` do better-sqlite3 — a
   combinação é adequada para instância única.
+
+---
+
+## 14. Sistema reutilizável de templates de imagem (cards)
+
+Sem geração por IA: os dados estruturados passam por um renderer compartilhado e
+viram um Buffer JPEG enviado ao WhatsApp. **Nenhuma dependência nova** — só o Jimp
+que o projeto já usa. Nenhum arquivo temporário: tudo em Buffer.
+
+### 14.1 Arquitetura (integração, não paralelo)
+
+- `utils/imageKit.js` — primitivos de desenho **movidos** de
+  `plugins/welcome/renderer.js` (blend, scrims, fillCircle, punchHole, fit,
+  clean, loadFont) + novos (`circleAvatar`, `progressBar`, `verticalGradient`,
+  `text`). O renderer de welcome agora importa daqui; a saída dele é **byte-
+  idêntica** à de antes (mesmo SHA-256), provando que a movimentação não mudou
+  nada visual.
+- `utils/cards/base.js` — canvas/tema, semáforo de render (2 simultâneos) e
+  avatar. O fundo é um gradiente regenerado por render (4–26 ms), logo **não há
+  cache de background** para vazar. O avatar **reusa** `plugins/welcome/
+  profile.getPhoto()` (cache TTL 10 min + poda em 300 — não foi criado um 2º).
+- `utils/cards/{profile,rank,level}.js` + `index.js` — as três cards e a API
+  `renderProfileCard/renderRankCard/renderLevelCard` + `sendCard` (envia ou
+  devolve false para o fallback em texto).
+- Cache de **fontes** com teto 8 (lazy, LRU): `Jimp.loadFont` custava 43–58 ms e
+  o welcome pedia até 7 por card. Aquecido: 0,006 ms. Também acelera o welcome.
+
+### 14.2 Comandos integrados (imagem primeiro, texto como fallback)
+
+`!perfil`, `!rank`, `!level` chamam o renderer e enviam a imagem; se o render ou o
+envio falhar, mandam o texto original — o comando nunca deixa de responder e não
+muda o que informa. Nenhum outro comando foi alterado.
+
+### 14.3 Números reais (960×540, JPEG q90)
+
+| card | 1º render | 2º render | tamanho |
+|---|---|---|---|
+| profile | 321 ms | 160 ms | ~163 KB |
+| rank | 227 ms | 173 ms | ~113 KB |
+| level | 114 ms | 114 ms | ~113 KB |
+
+Memória externa após os renders: 3,9 → 16,2 MB (fontes + alguns bitmaps, **tudo
+limitado**). Semáforo medido: pico de concorrência nunca passou de 2. Startup com
+as cards: 430 ms (igual à faixa anterior de 410–448 ms — as cards não pesam no
+boot porque só renderizam sob demanda).
