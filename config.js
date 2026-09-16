@@ -202,6 +202,14 @@ const CONFIG = {
     photoTtlMs: envInt('WELCOME_PHOTO_TTL', 10 * 60 * 1000),
   },
 
+  pix: {
+    // Entrega seletiva (transporte) do PIX em grupos, via mecanismo REAL do
+    // vendor (relayMessage + selectiveParticipants). PADRÃO OFF para preservar
+    // o envio normal atual; ative com PIX_SELECTIVE=true. Mesmo ativo, qualquer
+    // falha cai no envio normal com mentions — nunca quebra o PIX.
+    selective: envBool('PIX_SELECTIVE', false),
+  },
+
   paths: {
     root: ROOT,
     sessionDir: path.resolve(ROOT, envStr('SESSION_DIR', './session')),

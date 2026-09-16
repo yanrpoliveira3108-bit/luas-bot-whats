@@ -707,3 +707,33 @@ Memória externa após os renders: 3,9 → 16,2 MB (fontes + alguns bitmaps, **t
 limitado**). Semáforo medido: pico de concorrência nunca passou de 2. Startup com
 as cards: 430 ms (igual à faixa anterior de 410–448 ms — as cards não pesam no
 boot porque só renderizam sob demanda).
+
+---
+
+## 15. PIX em grupo: mentions + entrega seletiva (transporte)
+
+### 15.1 Camada 1 — mentions (hidetag), SEM @nomes no texto
+Em grupo, o `!pix` anexa `mentions` = JIDs dos **membros comuns** (sem
+admin/superadmin/bot/duplicados) ao envio ÚNICO para o JID do grupo. O texto da
+nota NÃO recebe "@nomes". `utils/selective.regularMemberJids()` reusa `isAdmin` e
+`normalizeUserJid` (fonte única). Privado não consulta metadata.
+
+### 15.2 Camada 2 — entrega seletiva REAL (opt-in: PIX_SELECTIVE=true)
+Investigação do vendor (`vendor/boruto-vk7-baileys/lib/Socket/messages-send.js`):
+`relayMessage(jid, msg, { selectiveParticipants })` **realmente** restringe a
+resolução de devices (`getUSyncDevices`) ao subconjunto (linhas 869-870), limitando
+a distribuição da Sender Key (SKDM) e o `<enc skmsg>` aos selecionados. Não é
+simulação: `utils/selective.sendSelectivePaymentMessage()` usa `generateWAMessage`
++ `relayMessage(selectiveParticipants)`.
+
+**Limitação honesta (não é invisibilidade garantida):** a Sender Key de um grupo é
+uma só por (grupo, remetente) e é reutilizada. Restringir a distribuição isola a
+mensagem apenas enquanto o excluído NÃO tem a chave; qualquer envio anterior/posterior
+(normal, retry, novo device, histórico) entrega a chave atual e permite decifrar
+daquele ponto em diante. Portanto: o mecanismo existe e foi integrado, mas **não se
+declare "mensagem invisível para admins"** — é direcionamento de transporte com a
+limitação acima.
+
+Por isso o seletivo é **opt-in** (`PIX_SELECTIVE=false` por padrão, preserva o envio
+normal) e, mesmo ligado, qualquer falha cai no envio normal com mentions (nunca quebra
+o PIX, nunca envia mensagem individual por participante).

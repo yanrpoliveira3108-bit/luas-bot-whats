@@ -15,6 +15,7 @@
 
 const commandHandler = require('../../handlers/commandHandler');
 const selective = require('../../utils/selective');
+const CONFIG = require('../../config');
 const logger = require('../../utils/logger').child('pix');
 
 const USAGE = (prefix) =>
@@ -118,6 +119,23 @@ module.exports = [
 
       const memberJids = await groupMemberMentions(ctx);
       if (memberJids.length) payPayload.mentions = memberJids;
+
+      // Camada 2 — entrega seletiva REAL (transporte), somente se habilitada e
+      // suportada: o vendor restringe a distribuição da mensagem aos membros
+      // comuns via relayMessage(selectiveParticipants). Em QUALQUER falha — ou
+      // com o recurso desligado (padrão) — cai no envio normal acima, que já
+      // carrega as mentions. Nunca há envio individual por participante.
+      const selectiveOn = !!(CONFIG.pix && CONFIG.pix.selective);
+      logger.debug({ grupo: ctx.isGroup ? ctx.remoteJid : null, seletivo: selectiveOn ? 'SIM' : 'NAO', membros: memberJids.length }, '[PIX] mecanismo seletivo avaliado');
+      if (ctx.isGroup && memberJids.length && selectiveOn && typeof ctx.socket.relayMessage === 'function') {
+        try {
+          await selective.sendSelectivePaymentMessage(ctx.socket, ctx.remoteJid, payPayload.payment, { mode: 'custom', recipients: memberJids });
+          logger.info({ grupo: ctx.remoteJid, destinatarios: memberJids.length }, '[PIX] envio seletivo realizado (transporte)');
+          return;
+        } catch (err) {
+          logger.warn({ err: (err && err.message) || String(err) }, '[PIX] seletivo falhou — usando envio normal com mentions');
+        }
+      }
 
       await ctx.socket.sendMessage(ctx.remoteJid, payPayload);
     },
