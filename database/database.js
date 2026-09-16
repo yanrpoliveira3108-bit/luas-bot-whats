@@ -473,6 +473,28 @@ const MIGRATIONS = [
   );
   -- atende: busca do worker (status='pending' AND run_at <= agora, por run_at)
   CREATE INDEX IF NOT EXISTS idx_sched_jobs_due ON scheduled_jobs(status, run_at, id);`,
+
+  // 38 — índices nas tabelas de ALTO VOLUME que não tinham nenhum.
+  // Cada índice abaixo corresponde a uma consulta real do código (ver
+  // docs/AUDIT-ARQUITETURA.md, seção 13): nada aqui é especulativo, e o custo de
+  // escrita foi considerado (nenhuma dessas tabelas é de inserção por mensagem).
+  `-- extrato/histórico por usuário: economy.history() e economyService.ledger()
+  --   SELECT * FROM transactions WHERE user_id = ? ORDER BY id DESC LIMIT ?
+  CREATE INDEX IF NOT EXISTS idx_tx_user ON transactions(user_id, id);
+  -- trilha de moderação/X9 por grupo: groupHandler e !x9
+  --   SELECT * FROM group_logs WHERE group_id = ? AND type IN (...) ORDER BY id DESC
+  CREATE INDEX IF NOT EXISTS idx_group_logs_group ON group_logs(group_id, id);
+  -- lido e contado a CADA !advertir: groups.countWarnings/getWarnings
+  --   SELECT ... FROM warnings WHERE group_id = ? AND user_id = ?
+  CREATE INDEX IF NOT EXISTS idx_warnings_group_user ON warnings(group_id, user_id);
+  -- fazenda: plantações ativas do usuário (painel, regar, colher)
+  CREATE INDEX IF NOT EXISTS idx_plantations_user ON plantations(user_id, harvested);
+  -- fazenda: animais vivos do usuário
+  CREATE INDEX IF NOT EXISTS idx_animals_user ON animals(user_id, sold);
+  -- !mercado lista as ofertas ativas em toda execução
+  CREATE INDEX IF NOT EXISTS idx_life_market_status ON life_market(status, id);
+  -- contagens por ação em !stats/economia (a tabela cresce a cada ação do Life)
+  CREATE INDEX IF NOT EXISTS idx_economy_logs_action ON economy_logs(action);`,
 ];
 
 /* ----------------------------- core ------------------------------ */

@@ -51,7 +51,35 @@ const { createPipeline } = require('../engine/pipeline');
 
 /* --------------------------- metadados ------------------------------- */
 
+/**
+ * Última notificação de AFK por (chat|usuário). Sem limite isto crescia para
+ * sempre — um par por usuário mencionado em qualquer grupo, nunca removido.
+ * A poda segue o mesmo padrão da Fase 2 (C2 — pruneSpamState): só acima do
+ * teto, removendo entradas vencidas (a janela de supressão é de 60 s, então
+ * remover o que tem mais de 5 min não muda nenhum comportamento).
+ */
 const afkNotified = new Map();
+const AFK_NOTIFIED_MAX = 1000;
+const AFK_NOTIFIED_STALE_MS = 5 * 60 * 1000;
+
+function pruneAfkNotified(now) {
+  if (afkNotified.size <= AFK_NOTIFIED_MAX) return 0;
+  let removed = 0;
+  for (const [key, at] of afkNotified) {
+    if (now - at > AFK_NOTIFIED_STALE_MS) {
+      afkNotified.delete(key);
+      removed += 1;
+    }
+  }
+  // Uma rajada de entradas NOVAS não é removida pelo critério de validade —
+  // sem isto o teto não valeria nada. O Map preserva a ordem de inserção,
+  // então descartamos as mais antigas até voltar ao limite.
+  while (afkNotified.size > AFK_NOTIFIED_MAX) {
+    afkNotified.delete(afkNotified.keys().next().value);
+    removed += 1;
+  }
+  return removed;
+}
 
 async function getGroupMetadata(sock, jid) {
   const cached = cache.get('meta:' + jid);
@@ -300,7 +328,9 @@ async function notifyAfk(sock, ctx) {
     const lastKey = `${ctx.remoteJid}|${jid}`;
     const last = afkNotified.get(lastKey) || 0;
     if (Date.now() - last < 60 * 1000) continue;
-    afkNotified.set(lastKey, Date.now());
+    const now = Date.now();
+    afkNotified.set(lastKey, now);
+    pruneAfkNotified(now);
     const reason = u.afk_reason ? `\n📝 Motivo: ${u.afk_reason}` : '';
     await sock.sendMessage(ctx.remoteJid, { text: `💤 ${u.name || jid.split('@')[0]} está AFK.${reason}` }, { quoted: ctx.message });
   }
@@ -334,6 +364,9 @@ const pipeline = createPipeline({
 
 module.exports = {
   pipeline,
+  notifyAfk,
+  /** tamanho da tabela de AFK notificado (teste de vazamento). */
+  afkNotifiedSize: () => afkNotified.size,
   handleMessage,
   buildContext,
   executeCommand,

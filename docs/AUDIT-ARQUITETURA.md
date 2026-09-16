@@ -574,3 +574,91 @@ comandos migrados**.
 
 Validado por mutação: remover a guarda `SELF_TRANSFER` e fazer `closeCase`
 sobrescrever o motivo derrubam 2 verificações cada.
+
+---
+
+## 13. Auditoria de performance e memória (pós-Fase 5)
+
+Auditoria do repositório real antes de alterar qualquer coisa. Três problemas
+reais corrigidos; o resto do que foi examinado e **não** precisou de mudança está
+listado no fim (para não virar retrabalho).
+
+### 13.1 Cache de artes de welcome/goodbye retinha ~30 MB (CORRIGIDO)
+
+`plugins/welcome/templates.js` guardava a arte-base **decodificada** de cada
+template num `Map` sem limite. Medido:
+
+| | antes | depois (LRU 2) |
+|---|---|---|
+| entradas após percorrer os 8 templates | 8 + avatar | **2** + avatar |
+| memória externa (buffers) retida | 2,23 → **33,45 MB** (+31,22) | 2,23 → **15,87 MB** (+13,64) |
+| caminho quente (template repetido) | 0,7 ms | **0,8 ms** (igual) |
+| decodificar do PNG quando frio | — | 52,7 ms |
+
+Cada bitmap 1280×720 RGBA são 3,52 MB; o PNG no disco tem 2,04 MB. Como
+`database/welcome.nextTemplate()` **rotaciona ou sorteia** o template, todos os
+8 acabavam cacheados — o crescimento não era teórico. O teto é 2 (o caso comum é
+o grupo repetir o mesmo template) e o avatar ganhou slot próprio para nunca ser
+expulso.
+
+### 13.2 `afkNotified` crescia para sempre (CORRIGIDO)
+
+`handlers/commandHandler.js` registrava `${chat}|${usuário}` a cada aviso de AFK e
+**nunca removia**. Poda no mesmo padrão da Fase 2 (C2): acima de 1 000 entradas,
+remove as vencidas (>5 min) e, se ainda estiver acima do teto, descarta as mais
+antigas. A segunda parte é essencial: uma rajada de entradas *novas* não é
+removida pelo critério de validade, e sem ela o teto não valeria nada — foi
+exatamente o que o teste pegou na primeira versão da correção. O mesmo defeito
+latente existia no `lastXp` do `services/rpgService.js` (Fase 5) e foi corrigido.
+
+### 13.3 Migração 38 — índices nas tabelas de alto volume (CORRIGIDO)
+
+Sete tabelas muito consultadas **não tinham nenhum índice** (`PRAGMA index_list`
+vazio em todas): `transactions`, `group_logs`, `warnings`, `plantations`,
+`animals`, `life_market`, `economy_logs`. Cada índice novo corresponde a uma
+consulta real do código:
+
+| Índice | Consulta atendida | Medido (50 mil linhas) |
+|---|---|---|
+| `idx_tx_user (user_id, id)` | `economy.history()` / `economyService.ledger()` | 0,164 → **0,011 ms** (~15×) |
+| `idx_economy_logs_action (action)` | contagens por ação (`WHERE action = ?`) | 1,996 → **0,591 ms** (3,4×) |
+| `idx_group_logs_group (group_id, id)` | trilha de moderação/X9 por grupo | SCAN → SEARCH |
+| `idx_warnings_group_user (group_id, user_id)` | lido/contado a cada `!advertir` | SCAN → SEARCH |
+| `idx_plantations_user (user_id, harvested)` | fazenda: plantações ativas | SCAN → SEARCH |
+| `idx_animals_user (user_id, sold)` | fazenda: animais vivos | SCAN → SEARCH |
+| `idx_life_market_status (status, id)` | `!mercado` lista as ofertas ativas | SCAN → SEARCH |
+
+As 7 consultas saíram de `SCAN <tabela>` para `SEARCH … USING INDEX` no
+`EXPLAIN QUERY PLAN` (medido antes/depois). Custo da migração num banco já
+populado: **16 ms** (`idx_tx_user`) e **9 ms** (`idx_economy_logs_action`) sobre
+50 mil linhas — upgrade barato.
+
+**Honestidade sobre um caso em que o índice NÃO ajuda:** para
+`SELECT * FROM economy_logs WHERE action = ? ORDER BY id DESC LIMIT 20` com
+muitas linhas casando, o índice ficou marginalmente **mais lento** (0,023 vs
+0,019 ms), porque o SQLite já anda pelo rowid ao contrário e para cedo. O índice
+se justifica pelas **contagens** (`COUNT(*) WHERE action = ?`), que é a forma que
+o código usa.
+
+### 13.4 Examinado e sem problema (não mexer)
+
+- **Conexão/reconexão** (`connection/connect.js`): `connect()` tem trava
+  `connecting` contra dupla conexão, chama `disposeSocket()` antes de criar o
+  socket novo, e `disposeSocket()` remove **todos** os listeners do `ev` antigo
+  antes de fechar o ws (com comentário explicando que o `close` antigo não pode
+  disparar reconexão). `onStatus()` devolve função de unsubscribe. Os listeners
+  ficam no emitter de cada socket, então não se acumulam entre reconexões.
+- **IA**: usada apenas pelos 6 comandos de `commands/ai/*` (chat, code, memory,
+  summarize, translate, status). Menus, cards, banners e rankings **não** chamam
+  IA — nada a reduzir aqui.
+- **Geração de imagem por IA**: não existe no projeto. As artes de
+  welcome/goodbye são PNGs em `assets/` com fallback procedural (Jimp).
+- **Coleções globais**: 34 no total; as 25 com limite estão corretas
+  (`flood`, `keyedMutex`, `antiManager`, `session`, `downloadQueue`,
+  `spamState`, `progress`, `viewonce`, `tmpCleaner`, `activity`, …). Os `Set`
+  apontados como "sem limite" são constantes (`CONFIRM_WORDS`,
+  `PERMANENT_CODES`, …) e `dividers.cursors`/`nav.builders` são indexados por
+  catálogos finitos.
+- **`utils/keyedMutex`**: serializa por processo (documentado no próprio arquivo)
+  e as operações de economia usam `db.transaction()` do better-sqlite3 — a
+  combinação é adequada para instância única.

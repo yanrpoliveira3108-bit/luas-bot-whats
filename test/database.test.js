@@ -3,7 +3,7 @@
  *
  * Cobre:
  *   1) migrações: versões registradas, sem duplicatas, idempotência, upgrade
- *      incremental (banco na versão 34 → aplica só 35/36/37)
+ *      incremental (banco na versão 34 → aplica só 35/36/37/38)
  *   2) moderation_cases: CRUD, consultas por grupo/usuário/grupo+usuário,
  *      ids únicos, timestamps, metadata, constraints
  *   3) command_usage: registro, agregação, integridade do upsert, retenção
@@ -91,13 +91,14 @@ D().open();
 
   /* ---------------------------------------------------- 1. migrações */
 
-  await check('migrações: 37 versões registradas, sem duplicatas', () => {
+  await check('migrações: 38 versões registradas, sem duplicatas', () => {
     const row = q().prepare('SELECT MAX(version) AS max, COUNT(*) AS c, COUNT(DISTINCT version) AS d FROM schema_migrations').get();
-    assert.strictEqual(row.max, 37, 'versão máxima: ' + row.max);
-    assert.strictEqual(row.c, 37, 'linhas em schema_migrations: ' + row.c);
-    assert.strictEqual(row.d, 37, 'há versões duplicadas');
+    assert.strictEqual(row.max, 38, 'versão máxima: ' + row.max);
+    assert.strictEqual(row.c, 38, 'linhas em schema_migrations: ' + row.c);
+    assert.strictEqual(row.d, 38, 'há versões duplicadas');
     const novas = q().prepare('SELECT version FROM schema_migrations WHERE version >= 35 ORDER BY version').all().map((r) => r.version);
-    assert.deepStrictEqual(novas, [35, 36, 37], 'migrações da Fase 4: ' + novas.join(','));
+    // 35/36/37 = Fase 4 (tabelas novas); 38 = índices das tabelas de alto volume
+    assert.deepStrictEqual(novas, [35, 36, 37, 38], 'migrações após a v34: ' + novas.join(','));
     for (const r of q().prepare('SELECT version, applied_at FROM schema_migrations WHERE version >= 35').all()) {
       assert.match(r.applied_at, /^\d{4}-\d{2}-\d{2}T/, 'applied_at não é ISO: ' + r.applied_at);
     }
@@ -181,12 +182,12 @@ D().open();
     assert.strictEqual(maxAntes, 34, 'a simulação deveria deixar o banco na versão 34');
 
     usaBanco(copia);
-    assert.strictEqual(q().prepare('SELECT MAX(version) AS v FROM schema_migrations').get().v, 37, 'não subiu para 37');
+    assert.strictEqual(q().prepare('SELECT MAX(version) AS v FROM schema_migrations').get().v, 38, 'não subiu para 38');
     const recriadas = q().prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('moderation_cases','command_usage','scheduled_jobs')"
     ).all().length;
     assert.strictEqual(recriadas, 3, 'tabelas não foram recriadas no upgrade');
-    assert.strictEqual(q().prepare('SELECT COUNT(*) AS c FROM schema_migrations').get().c, 37, 'não deveria duplicar versões');
+    assert.strictEqual(q().prepare('SELECT COUNT(*) AS c FROM schema_migrations').get().c, 38, 'não deveria duplicar versões');
     assert.ok(q().prepare('SELECT COUNT(*) AS c FROM users').get().c >= 0, 'tabelas antigas devem continuar acessíveis');
 
     usaBanco(DB_FILE);
@@ -598,14 +599,14 @@ D().open();
     assert.strictEqual(row.wallet, 60, 'carteira: ' + row.wallet);
     assert.strictEqual(row.bank, 40, 'banco: ' + row.bank);
     assert.ok(typeof D().stats().users === 'number', 'database.stats() quebrou');
-    assert.strictEqual(q().prepare('SELECT COUNT(*) AS c FROM schema_migrations').get().c, 37);
+    assert.strictEqual(q().prepare('SELECT COUNT(*) AS c FROM schema_migrations').get().c, 38);
   });
 
   /* ----------------------------------------------------------- resumo */
   const falhas = results.filter(([, ok]) => !ok);
   const tabelas = q().prepare("SELECT COUNT(*) AS c FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").get().c;
   console.log(`\n=== DATABASE TEST: ${results.length - falhas.length} passou, ${falhas.length} falhou `
-    + `(${tabelas} tabelas, 37 migrações) ===`);
+    + `(${tabelas} tabelas, 38 migrações) ===`);
   if (falhas.length) {
     for (const [label, , err] of falhas) console.log('  FALHA: ' + label + ' — ' + err);
     process.exitCode = 1;

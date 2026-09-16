@@ -47,6 +47,11 @@ function prune(now) {
       removed += 1;
     }
   }
+  // rajada de entradas novas: descarta as mais antigas para o teto valer sempre
+  while (lastXp.size > XP_MAP_MAX) {
+    lastXp.delete(lastXp.keys().next().value);
+    removed += 1;
+  }
   return removed;
 }
 
