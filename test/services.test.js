@@ -425,18 +425,149 @@ async function expectCode(code, fn) {
     assert.strictEqual(economyService.balance(b).wallet, 300);
   });
 
-  // BUG PRÉ-EXISTENTE (não introduzido pela Fase 5, não corrigido aqui porque
-  // mudaria o comportamento): !pagar lê o valor em ctx.args[0] quando há menção,
-  // mas args[0] é o texto da menção ("@fulano"), então parseInt dá NaN e o
-  // comando só devolve o aviso de uso. !transferir usa args[1] e funciona.
-  // Este teste TRAVA o comportamento atual: se alguém corrigir o índice, ele
-  // falha e o teste deve ser atualizado junto.
-  await check('regressão: !pagar mantém o comportamento atual (bug pré-existente de índice)', async () => {
+  /* ------------------------------------------------------------------ *
+   * !pagar / !presente — parsing de args com menção                     *
+   *                                                                    *
+   * BUG CORRIGIDO: o parser (utils/messages.splitCommand) só corta por    *
+   * espaços, então "!pagar @fulano 150" gera args ['@fulano','150'] e     *
+   * mentionedJid vem do contextInfo, por outro caminho. O comando lia o    *
+   * valor em args[0] justamente quando havia menção — ou seja, lia         *
+   * "@fulano" — e parseInt devolvia NaN: o comando NUNCA pagava, só        *
+   * devolvia o aviso de uso. A correção remove os tokens de menção das     *
+   * args antes da leitura (utils/messages.dropMentionArgs) e valida o      *
+   * valor como inteiro positivo (toPositiveInt) para "1.5" não virar 1.    *
+   * Este teste protege contra a volta do bug.                            *
+   * ------------------------------------------------------------------ */
+  const USO_PAGAR = '⚠️ Use: !pagar @usuario <valor>';
+
+  await check('!pagar: menção + valor paga de verdade (regressão do bug de índice)', async () => {
     const a = userJid(); const b = userJid();
     economy.setWallet(a, 1000);
-    const texto = await runCommand('pagar', fakeCtx(a, ['@alvo', '150'], { mentions: [b] }));
-    assert.strictEqual(texto, '⚠️ Use: !pagar @usuario <valor>');
-    assert.strictEqual(economyService.balance(b).wallet, 0, 'o valor não deveria ter sido pago');
+    const ctx = fakeCtx(a, ['@' + b.split('@')[0], '150'], { mentions: [b] });
+    const texto = await runCommand('pagar', ctx);
+    assert.match(texto, /^💸 Você pagou /, 'não pagou: ' + texto);
+    assert.strictEqual(economyService.balance(b).wallet, 150, 'o alvo não recebeu');
+    assert.strictEqual(economyService.balance(a).wallet, 850, 'saldo do pagador errado');
+    assert.deepStrictEqual(ctx.replies[0].extra, { mentions: [b] }, 'a menção sumiu da resposta');
+  });
+
+  await check('!pagar: confirma destinatário e valor na resposta', async () => {
+    const a = userJid(); const b = userJid();
+    economy.setWallet(a, 500);
+    const texto = await runCommand('pagar', fakeCtx(a, ['@' + b.split('@')[0], '75'], { mentions: [b] }));
+    assert.ok(texto.includes('@' + b.split('@')[0]), 'o destinatário não aparece: ' + texto);
+    assert.ok(texto.includes('75'), 'o valor não aparece: ' + texto);
+    assert.strictEqual(economyService.balance(b).wallet, 75);
+  });
+
+  await check('!pagar: valor antes da menção também funciona', async () => {
+    const a = userJid(); const b = userJid();
+    economy.setWallet(a, 500);
+    const texto = await runCommand('pagar', fakeCtx(a, ['60', '@' + b.split('@')[0]], { mentions: [b] }));
+    assert.match(texto, /^💸 Você pagou /, 'não pagou: ' + texto);
+    assert.strictEqual(economyService.balance(b).wallet, 60);
+  });
+
+  await check('!pagar: argumentos extras são ignorados', async () => {
+    const a = userJid(); const b = userJid();
+    economy.setWallet(a, 500);
+    const texto = await runCommand('pagar', fakeCtx(a, ['@' + b.split('@')[0], '40', 'obrigado', 'amigo'], { mentions: [b] }));
+    assert.match(texto, /^💸 Você pagou /, 'não pagou: ' + texto);
+    assert.strictEqual(economyService.balance(b).wallet, 40, 'pagou o valor errado');
+  });
+
+  await check('!pagar: múltiplas menções pagam à primeira', async () => {
+    const a = userJid(); const b = userJid(); const c = userJid();
+    economy.setWallet(a, 500);
+    const args = ['@' + b.split('@')[0], '@' + c.split('@')[0], '30'];
+    const texto = await runCommand('pagar', fakeCtx(a, args, { mentions: [b, c] }));
+    assert.match(texto, /^💸 Você pagou /, 'não pagou: ' + texto);
+    assert.strictEqual(economyService.balance(b).wallet, 30, 'a primeira menção não recebeu');
+    assert.strictEqual(economyService.balance(c).wallet, 0, 'a segunda menção recebeu sem dever');
+  });
+
+  await check('!pagar: sem menção devolve o aviso de uso (não é forma suportada)', async () => {
+    const a = userJid();
+    economy.setWallet(a, 500);
+    const texto = await runCommand('pagar', fakeCtx(a, ['150']));
+    assert.strictEqual(texto, USO_PAGAR);
+    assert.strictEqual(economyService.balance(a).wallet, 500);
+  });
+
+  await check('!pagar: valor ausente devolve o aviso de uso', async () => {
+    const a = userJid(); const b = userJid();
+    economy.setWallet(a, 500);
+    const texto = await runCommand('pagar', fakeCtx(a, ['@' + b.split('@')[0]], { mentions: [b] }));
+    assert.strictEqual(texto, USO_PAGAR);
+    assert.strictEqual(economyService.balance(b).wallet, 0);
+  });
+
+  await check('!pagar: valor inválido (abc / 1.5 / -5 / 0) não paga nada', async () => {
+    const a = userJid(); const b = userJid();
+    economy.setWallet(a, 500);
+    for (const ruim of ['abc', '1.5', '-5', '0', '1e3']) {
+      const texto = await runCommand('pagar', fakeCtx(a, ['@' + b.split('@')[0], ruim], { mentions: [b] }));
+      assert.strictEqual(texto, USO_PAGAR, `valor "${ruim}" não foi rejeitado: ${texto}`);
+    }
+    assert.strictEqual(economyService.balance(a).wallet, 500, 'saldo mudou com valor inválido');
+    assert.strictEqual(economyService.balance(b).wallet, 0);
+  });
+
+  await check('!pagar: saldo insuficiente mantém a mensagem antiga', async () => {
+    const a = userJid(); const b = userJid();
+    economy.setWallet(a, 10);
+    const texto = await runCommand('pagar', fakeCtx(a, ['@' + b.split('@')[0], '9999'], { mentions: [b] }));
+    assert.strictEqual(texto, '💸 Saldo insuficiente para pagar.');
+    assert.strictEqual(economyService.balance(a).wallet, 10, 'o saldo foi debitado mesmo assim');
+  });
+
+  await check('!pagar: pagar a si mesmo mantém o aviso antigo', async () => {
+    const a = userJid();
+    economy.setWallet(a, 500);
+    const texto = await runCommand('pagar', fakeCtx(a, ['@' + a.split('@')[0], '10'], { mentions: [a] }));
+    assert.strictEqual(texto, '🤨 Não dá para pagar a si mesmo.');
+    assert.strictEqual(economyService.balance(a).wallet, 500);
+  });
+
+  await check('!presente: menção + item + quantidade presenteia (mesma classe de bug)', async () => {
+    const a = userJid(); const b = userJid();
+    economy.addItem(a, 'fertilizante', 5);
+    const args = ['@' + b.split('@')[0], 'fertilizante', '3'];
+    const texto = await runCommand('presente', fakeCtx(a, args, { mentions: [b] }));
+    assert.match(texto, /^🎁 Você presenteou /, 'não presenteou: ' + texto);
+    assert.strictEqual(economy.getItem(b, 'fertilizante').quantity, 3);
+    assert.strictEqual(economy.getItem(a, 'fertilizante').quantity, 2);
+  });
+
+  await check('!presente: sem quantidade assume 1', async () => {
+    const a = userJid(); const b = userJid();
+    economy.addItem(a, 'fertilizante', 5);
+    const texto = await runCommand('presente', fakeCtx(a, ['@' + b.split('@')[0], 'fertilizante'], { mentions: [b] }));
+    assert.match(texto, /^🎁 Você presenteou /, 'não presenteou: ' + texto);
+    assert.strictEqual(economy.getItem(b, 'fertilizante').quantity, 1);
+  });
+
+  await check('!presente: quantidade inválida vira aviso de uso (antes caía em 1)', async () => {
+    const a = userJid(); const b = userJid();
+    economy.addItem(a, 'fertilizante', 5);
+    const texto = await runCommand('presente', fakeCtx(a, ['@' + b.split('@')[0], 'fertilizante', 'muito'], { mentions: [b] }));
+    assert.strictEqual(texto, '⚠️ Use: !presente @usuario <item> [qtd]');
+    assert.strictEqual(economy.getItem(a, 'fertilizante').quantity, 5, 'presenteou mesmo com qtd inválida');
+  });
+
+  await check('!presente: sem item devolve o aviso de uso', async () => {
+    const a = userJid(); const b = userJid();
+    const texto = await runCommand('presente', fakeCtx(a, ['@' + b.split('@')[0]], { mentions: [b] }));
+    assert.strictEqual(texto, '⚠️ Use: !presente @usuario <item> [qtd]');
+  });
+
+  await check('!transferir: continua funcionando depois da troca para o helper', async () => {
+    const a = userJid(); const b = userJid();
+    economy.setWallet(a, 800);
+    const ctx = fakeCtx(a, ['@' + b.split('@')[0], '120'], { mentions: [b] });
+    const texto = await runCommand('transferir', ctx);
+    assert.match(texto, /^💸 Transferido .* para @/, 'resposta mudou: ' + texto);
+    assert.strictEqual(economyService.balance(b).wallet, 120);
   });
 
   await check('regressão: !transferir para si mesmo mantém o aviso antigo', async () => {

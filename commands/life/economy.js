@@ -13,6 +13,7 @@ const networth = require('../../plugins/life/networth');
 const { formatMoney } = require('../../utils/formatter');
 const { displayName } = require('../../engine/interactionEngine');
 const economyService = require('../../services/economyService');
+const { dropMentionArgs, toPositiveInt } = require('../../utils/messages');
 
 module.exports = [
   {
@@ -166,9 +167,13 @@ module.exports = [
     cooldown: 3000,
     execute: async (ctx) => {
       const target = ctx.mentionedJid[0];
-      const itemId = String(ctx.args[ctx.mentionedJid.length ? 0 : 1] || '').toLowerCase();
-      const qty = parseInt(ctx.args[ctx.mentionedJid.length ? 1 : 2], 10) || 1;
-      if (!target || !itemId) return ctx.reply('⚠️ Use: !presente @usuario <item> [qtd]');
+      // a menção também está dentro de ctx.args: sem remover, o valor lido
+      // era o texto "@fulano" (parseInt -> NaN) e o comando nunca funcionava
+      const args = dropMentionArgs(ctx.args, ctx.mentionedJid);
+      const itemId = String(args[0] || '').toLowerCase();
+      // qtd é opcional (padrão 1), mas se veio algo precisa ser inteiro positivo
+      const qty = args[1] === undefined ? 1 : toPositiveInt(args[1]);
+      if (!target || !itemId || !qty) return ctx.reply('⚠️ Use: !presente @usuario <item> [qtd]');
       if (target === ctx.sender) return ctx.reply('🤨 Você não pode presentear a si mesmo.');
       try {
         const r = await engine.giftItem(ctx.sender, target, itemId, qty);
@@ -187,8 +192,12 @@ module.exports = [
     cooldown: 5000,
     execute: async (ctx) => {
       const target = ctx.mentionedJid[0];
-      const amount = parseInt(ctx.args[ctx.mentionedJid.length ? 0 : 1], 10);
-      if (!target || !amount || amount <= 0) return ctx.reply('⚠️ Use: !pagar @usuario <valor>');
+      // a menção também está dentro de ctx.args: sem remover, o valor lido
+      // era o texto "@fulano" (parseInt -> NaN) e o comando nunca funcionava
+      const args = dropMentionArgs(ctx.args, ctx.mentionedJid);
+      // toPositiveInt (e não parseInt) para "1.5"/"abc" não virarem um pagamento
+      const amount = toPositiveInt(args[0]);
+      if (!target || !amount) return ctx.reply('⚠️ Use: !pagar @usuario <valor>');
       if (target === ctx.sender) return ctx.reply('🤨 Não dá para pagar a si mesmo.');
       try {
         await economyService.transfer(ctx.sender, target, amount);

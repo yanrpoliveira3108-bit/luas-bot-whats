@@ -202,6 +202,55 @@ function isStatusJid(jid) {
   return String(jid || '').endsWith('@broadcast') || String(jid || '').endsWith('@status');
 }
 
+/**
+ * Devolve as args SEM os tokens de menção.
+ *
+ * O parser (`splitCommand`) só corta por espaços: "!pagar @fulano 100" gera
+ * `args = ['@fulano', '100']`, enquanto `mentionedJid` vem do `contextInfo` da
+ * mensagem, por outro caminho. Ler o valor em `args[0]` quando há menção
+ * significa ler "@fulano" — e `parseInt('@fulano')` é NaN. Esse foi o bug real
+ * de !pagar/!presente (e dos comandos de economia do Life).
+ *
+ * Remover o token (em vez de só pular uma posição) é robusto: vale para
+ * "!pagar @fulano 100" e para "!pagar 100 @fulano". Sem menção, nada muda.
+ *
+ * Regra: havendo ao menos uma menção, todo token que começa com "@" é tratado
+ * como menção. Nos comandos que usam isto o que sobra é valor/quantidade/item,
+ * e nenhum deles começa com "@" — então nada útil é perdido, e funciona tanto
+ * com o texto real do WhatsApp (@<número>) quanto com um apelido digitado.
+ *
+ * @param {string[]} args        args do contexto (já sem o comando)
+ * @param {string[]} mentionedJid JIDs mencionados
+ * @returns {string[]} novo array — nunca muta o original
+ */
+function dropMentionArgs(args, mentionedJid) {
+  const list = Array.isArray(args) ? args : [];
+  const jids = Array.isArray(mentionedJid) ? mentionedJid : [];
+  if (!jids.length) return list.slice();
+  // toda menção começa com "@" (o texto real do WhatsApp é "@<número>"; um
+  // apelido digitado também). Como o que sobra é valor/quantidade/item — nada
+  // disso começa com "@" — filtrar por prefixo cobre os casos sem heurística.
+  return list.filter((a) => !String(a).trim().startsWith('@'));
+}
+
+/**
+ * Inteiro POSITIVO a partir de uma arg textual.
+ *
+ * `parseInt('1.5')` devolve 1 — truncamento silencioso que fazia !pagar cobrar
+ * um valor diferente do digitado. Aqui só passa número inteiro sem sinal:
+ * '150' → 150; '1.5', 'abc', '-5', '1e3', '' → null (o chamador decide o aviso).
+ *
+ * @param {unknown} raw
+ * @returns {number|null}
+ */
+function toPositiveInt(raw) {
+  if (raw === null || raw === undefined) return null;
+  const text = String(raw).trim();
+  if (!/^\d+$/.test(text)) return null;
+  const n = Number(text);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
 /** Normaliza "55119... @s.whatsapp.net" -> JID completo. */
 function toJid(input) {
   if (!input) return null;
@@ -225,6 +274,8 @@ module.exports = {
   isViewOnce,
   getInteractivePayload,
   splitCommand,
+  dropMentionArgs,
+  toPositiveInt,
   isGroupJid,
   isStatusJid,
   toJid,

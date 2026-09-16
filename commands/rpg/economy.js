@@ -3,6 +3,7 @@
 const economy = require('../../database/economy');
 const economyService = require('../../services/economyService');
 const { formatMoney } = require('../../utils/formatter');
+const { dropMentionArgs } = require('../../utils/messages');
 
 function parseAmount(ctx, index = 0) {
   const arg = (ctx.args[index] || '').toLowerCase();
@@ -84,7 +85,10 @@ module.exports = [
     cooldown: 5000,
     execute: async (ctx) => {
       const target = ctx.mentionedJid[0];
-      const amount = parseInt(ctx.args[ctx.mentionedJid.length ? 1 : 0], 10);
+      // a menção também está dentro de ctx.args: sem remover, o valor lido
+      // era o texto "@fulano" (parseInt -> NaN) e o comando nunca funcionava
+      const args = dropMentionArgs(ctx.args, ctx.mentionedJid);
+      const amount = parseInt(args[0], 10);
       if (!target || !amount || amount <= 0) return ctx.reply('⚠️ Use: !transferir @usuario <valor>');
       if (target === ctx.sender) return ctx.reply('🤨 Não dá para transferir para você mesmo.');
       try {
