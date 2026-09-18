@@ -100,6 +100,24 @@ function getQuotedKey(m) {
   };
 }
 
+/**
+ * JID do AUTOR da mensagem citada (a mensagem respondida), canonizado p/ PN.
+ *
+ * Permite que comandos de alvo usem "responder à mensagem" em vez de digitar
+ * @número. Em grupos LID, `contextInfo.participant` pode vir como @lid; o PN
+ * fica em `participantAlt` — preferimos o PN (o bot é chaveado por PN).
+ *
+ * @returns {string} JID do autor citado, ou '' se a mensagem não é uma resposta.
+ */
+function getQuotedSender(m) {
+  const ctx = findContextInfo(m && m.message);
+  if (!ctx) return '';
+  const p = String(ctx.participant || '');
+  const alt = String(ctx.participantAlt || '');
+  if (p.endsWith('@lid') && alt && !alt.endsWith('@lid')) return alt;
+  return p;
+}
+
 /** Texto da mensagem citada. */
 function getQuotedText(m) {
   const q = getQuoted(m);
@@ -266,6 +284,7 @@ module.exports = {
   extractText,
   getQuoted,
   getQuotedKey,
+  getQuotedSender,
   getQuotedText,
   getMentionedJids,
   detectMediaType,

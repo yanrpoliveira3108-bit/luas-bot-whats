@@ -15,8 +15,14 @@ async function getParticipants(ctx) {
 }
 
 /** Resolve o usuário-alvo (menção > argumento numérico). */
+/**
+ * Resolve o usuário-alvo na ordem: menção explícita → mensagem respondida
+ * (quotedSender) → argumento numérico. Assim comandos de alvo aceitam
+ * "responder à mensagem" em vez de digitar @número.
+ */
 function resolveTarget(ctx) {
   if (ctx.mentionedJid && ctx.mentionedJid.length) return ctx.mentionedJid[0];
+  if (ctx.quotedSender) return ctx.quotedSender;
   const raw = (ctx.args[0] || '').trim();
   if (raw) return toJid(raw);
   return null;
