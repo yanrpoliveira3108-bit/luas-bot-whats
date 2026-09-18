@@ -131,6 +131,8 @@ const CONFIG = {
     antiFlood: envBool('ANTI_FLOOD', true),
     // Cache em memória (metadados, fotos, configs).
     cache: envBool('LUA_CACHE', true),
+    // Reagir a cada comando com o emoji temático do comando/categoria.
+    commandReactions: envBool('LUA_COMMAND_REACTIONS', true),
     // Log de debug extra (não expõe credenciais).
     debug: envBool('DEBUG', false),
     // Tagline exibida de forma discreta em menus/painéis.

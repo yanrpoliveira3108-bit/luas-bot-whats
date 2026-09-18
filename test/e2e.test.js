@@ -83,7 +83,9 @@ async function main() {
     const rows = (params.sections || []).flatMap((sec) => sec.rows || []);
     assert.ok(rows.length >= 3, 'linhas suficientes');
     assert.ok(rows.some((r) => r.id === 'lua_nav_lua_main_menu_admin'), 'categoria admin presente');
-    assert.strictEqual(sent.length, 1, 'exatamente uma mensagem (sem foto separada)');
+    // reações (react) não são mensagens de conteúdo — o menu deve enviar 1 só.
+    const contentMsgs = sent.filter((s) => !(s.content && s.content.react));
+    assert.strictEqual(contentMsgs.length, 1, 'exatamente uma mensagem de conteúdo (sem foto separada)');
     ok('2: !menu com lista nativa + imagem');
   } catch (e) { fail('2: !menu lista', e); }
 

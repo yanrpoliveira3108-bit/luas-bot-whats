@@ -32,6 +32,7 @@ const session = require('../utils/session');
 const numberFallback = require('../utils/numberFallback');
 const interactive = require('../utils/interactive');
 const perf = require('../utils/perf');
+const { commandEmoji } = require('../utils/commandEmoji');
 const {
   extractText,
   getQuoted,
@@ -277,6 +278,12 @@ async function executeCommand(ctx, cmd, args) {
       name: (u && u.name) || null,
     });
   } catch (_) {}
+  // Reage à mensagem do comando com o emoji temático (diverso por comando/
+  // categoria). Fire-and-forget: não atrasa o comando e falha em silêncio.
+  if (CONFIG.ui.commandReactions && typeof ctx.react === 'function') {
+    const emoji = commandEmoji(cmd);
+    ctx.react(emoji && emoji !== '▸' ? emoji : '✅');
+  }
   try {
     await cmd.execute(ctx);
     perf.timing('command', Date.now() - t0);
