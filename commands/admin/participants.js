@@ -137,7 +137,9 @@ module.exports = [
     execute: async (ctx) => {
       const parts = await getParticipants(ctx);
       const mentions = parts.map((p) => p.id).filter((id) => id !== ctx.socket.user.id);
-      const text = ctx.args.join(' ') || '📢';
+      // Responder a uma mensagem + !hidetag reenvia o texto dela marcando todos.
+      // Prioridade: argumento explícito > texto da mensagem respondida > 📢.
+      const text = ctx.args.join(' ') || ctx.quotedText || '📢';
       await ctx.socket.sendMessage(ctx.remoteJid, { text, mentions });
     },
   },

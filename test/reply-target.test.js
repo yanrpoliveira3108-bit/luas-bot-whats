@@ -131,6 +131,37 @@ async function main() {
     ok('5: REGRESSÃO LID — responder em grupo LID silencia o PN (não o @lid)');
   } catch (e) { fail('5', e); }
 
+  /* 6) hidetag: responder à mensagem reenvia o TEXTO dela marcando todos. */
+  try {
+    const G3 = '120363000033@g.us';
+    const C = '5533333333333@s.whatsapp.net';
+    const sent = [];
+    const sock3 = {
+      user: { id: BOT },
+      groupMetadata: async () => ({ id: G3, participants: [
+        { id: A, admin: 'admin' }, { id: BOT, admin: 'admin' },
+        { id: B, admin: null }, { id: C, admin: null },
+      ] }),
+      sendMessage: async (jid, c) => { sent.push(c || {}); return { key: { id: 'k' } }; },
+      sendPresenceUpdate: async () => {},
+    };
+    const handler = require('../handlers/commandHandler');
+    const cooldown = require('../utils/cooldown');
+    cooldown.reset('user', A, 'hidetag'); cooldown.reset('global', '*', 'hidetag');
+    const msg = {
+      key: { remoteJid: G3, fromMe: false, id: 'MR3', participant: A, participantAlt: A },
+      message: { extendedTextMessage: { text: '!hidetag', contextInfo: { stanzaId: 'S3', participant: B, quotedMessage: { conversation: 'oi' } } } },
+      pushName: 'Alice',
+    };
+    await handler.handleMessage(sock3, msg);
+    const last = sent[sent.length - 1] || {};
+    assert.strictEqual(last.text, 'oi', 'reenvia o texto da mensagem respondida: ' + last.text);
+    assert.ok(Array.isArray(last.mentions) && last.mentions.includes(B) && last.mentions.includes(C),
+      'marca todos os membros: ' + JSON.stringify(last.mentions));
+    assert.ok(!last.mentions.includes(BOT), 'não marca o próprio bot');
+    ok('6: !hidetag respondendo à mensagem reenvia o texto e marca todos');
+  } catch (e) { fail('6', e); }
+
   require('../database/database').close();
   if (failures) { console.error(`\n❌ REPLY-TARGET TEST: ${failures} falha(s)`); process.exit(1); }
   console.log('\n=== REPLY-TARGET TEST: TUDO OK ===');
