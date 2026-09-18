@@ -136,6 +136,15 @@ async function buildContext(sock, msg) {
     quotedKey.participant = permissions.toPn(quotedKey.participant, participants);
   }
 
+  // Autor da mensagem respondida, canonizado p/ PN (igual a sender/mentionedJid):
+  // em grupos LID o citado chega como @lid e o bot é chaveado por PN.
+  let quotedSender = getQuotedSender(msg);
+  if (quotedSender.endsWith('@lid') && participants.length) {
+    const pn = permissions.toPn(quotedSender, participants);
+    if (pn && !pn.endsWith('@lid')) quotedSender = pn;
+    else logger.warn({ quotedSender, chat: remoteJid }, 'não consegui resolver LID → PN do autor citado');
+  }
+
   let isAdmin = false;
   let isBotAdmin = false;
   if (isGroup) {
@@ -167,7 +176,7 @@ async function buildContext(sock, msg) {
     text,
     quoted,
     quotedKey,
-    quotedSender: getQuotedSender(msg),
+    quotedSender,
     quotedText: getQuotedText(msg),
     mentionedJid,
     mediaType: detectMediaType(msg),

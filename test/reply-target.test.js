@@ -97,6 +97,40 @@ async function main() {
     ok('4: !promover respondendo à mensagem promove o citado (sem @número)');
   } catch (e) { fail('4', e); }
 
+  /* 5) REGRESSÃO LID: responder em grupo LID → alvo vira PN (não o @lid).
+     Reproduz o bug real: o citado chega como @lid; sem conversão o mute era
+     gravado no LID e a fiscalização (que checa o PN) não apagava a mensagem. */
+  try {
+    const groupHandler = require('../handlers/groupHandler');
+    const G2 = '120363000032@g.us';
+    const B_LID = '26032367243482@lid';            // como chega o autor citado
+    const B_PN = '554188652967@s.whatsapp.net';    // PN real (o bot é chaveado assim)
+    const sent = [];
+    const sock2 = {
+      user: { id: BOT },
+      groupMetadata: async () => ({ id: G2, participants: [
+        { id: A, lid: '111000111@lid', admin: 'admin' },
+        { id: BOT, admin: 'admin' },
+        { id: B_PN, lid: B_LID, admin: null },      // participante traz lid + id(PN)
+      ] }),
+      sendMessage: async (jid, c) => { sent.push(c && c.text || ''); return { key: { id: 'k' } }; },
+      sendPresenceUpdate: async () => {},
+    };
+    const handler = require('../handlers/commandHandler');
+    const cooldown = require('../utils/cooldown');
+    cooldown.reset('user', A, 'mute'); cooldown.reset('global', '*', 'mute');
+    const msg = {
+      key: { remoteJid: G2, fromMe: false, id: 'MR2', participant: A, participantAlt: A },
+      message: { extendedTextMessage: { text: '!mute', contextInfo: { stanzaId: 'S2', participant: B_LID, quotedMessage: { conversation: 'Olk' } } } },
+      pushName: 'Alice',
+    };
+    await handler.handleMessage(sock2, msg);
+    assert.strictEqual(groupHandler.isMuted(G2, B_PN), true, 'mute gravado no PN (fiscalização bate)');
+    assert.strictEqual(groupHandler.isMuted(G2, B_LID), false, 'mute NÃO gravado no LID');
+    assert.ok(sent.join(' ').includes('@' + B_PN.split('@')[0]), 'confirmação mostra o PN: ' + sent.join(' '));
+    ok('5: REGRESSÃO LID — responder em grupo LID silencia o PN (não o @lid)');
+  } catch (e) { fail('5', e); }
+
   require('../database/database').close();
   if (failures) { console.error(`\n❌ REPLY-TARGET TEST: ${failures} falha(s)`); process.exit(1); }
   console.log('\n=== REPLY-TARGET TEST: TUDO OK ===');
