@@ -21,6 +21,7 @@ step() { echo -e "${BLUE}▶${NC} $1"; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 ROOT="$SCRIPT_DIR"
+ALL_BRANCHES_REFSPEC='+refs/heads/*:refs/remotes/origin/*'
 
 DELETE_SOURCE=0
 FORCE=0
@@ -93,15 +94,38 @@ restore_data() {
   if [ -d "$src/logs" ]; then mkdir -p logs; cp -a "$src/logs"/. logs/ 2>/dev/null || true; fi
 }
 
+# Allowlist ESTRITA do --delete-source (briefing 30): só estes alvos podem ser
+# removidos. Nada de glob amplo sobre a raiz (já apagou tmp/.lock e arquivos do
+# usuário no passado). Adicionar alvo aqui = decisão explícita e documentada.
+DELETE_SOURCE_TARGETS=(
+  'tmp/*.log'
+  'player-scripts'
+  '.gyp'
+  'cards'
+)
+
 clean_temp_source() {
   step "Limpando arquivos temporários seguros (--delete-source)..."
-  if [ -d tmp ]; then find tmp -type f ! -name ".gitkeep" -delete 2>/dev/null || true; ok "tmp/ limpo"; fi
-  for f in ./*.log; do [ -f "$f" ] && rm -f "$f" && echo "  removido: $f"; done
-  for f in ./*-player-script.js ./1788*.js; do [ -f "$f" ] && rm -f "$f" && echo "  removido: $f"; done
-  if [ -d .gyp ]; then rm -rf .gyp; ok ".gyp/ removido"; fi
-  for f in ./card-*.jpg ./card-*.png ./welcome-preview.jpg ./welcome-preview.png ./tigrinho-preview.html ./preview-*.jpg ./preview-*.png; do [ -f "$f" ] && rm -f "$f" && echo "  removido: $f"; done
-  if [ -d backup ]; then find backup -type d -name "pre-update-*" -mtime +30 -exec rm -rf {} + 2>/dev/null || true; ok "backups antigos limpos"; fi
-  echo ""; echo "🛡️  Protegidos: .env, session/, database/, backup/, logs/, assets/, .git/"
+  local alvo f removidos=0
+  for alvo in "${DELETE_SOURCE_TARGETS[@]}"; do
+    case "$alvo" in
+      tmp/*.log)
+        shopt -s nullglob
+        for f in tmp/*.log; do
+          rm -f -- "$f" && echo "  removido: $f" && removidos=$((removidos + 1))
+        done
+        shopt -u nullglob
+        ;;
+      *)
+        if [ -e "$alvo" ]; then
+          rm -rf -- "$alvo" && echo "  removido: $alvo/" && removidos=$((removidos + 1))
+        fi
+        ;;
+    esac
+  done
+  if [ "$removidos" -eq 0 ]; then info "Nada para limpar (allowlist: ${DELETE_SOURCE_TARGETS[*]})"; fi
+  echo ""
+  echo "🛡️  Protegidos: .env, session/, database/, backup/, logs/, assets/, .git/, tmp/ (exceto *.log)"
 }
 
 if [ -n "$ARCHIVE" ]; then
@@ -143,43 +167,86 @@ else
   IS_ARENA=0
   if echo "$CURRENT_BRANCH" | grep -q "^arena/"; then IS_ARENA=1; info "Branch arena detectada (dev)"; fi
 
-  if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
-    ARENA_REMOTE=$(git branch -r | grep "origin/arena/" | head -n 1 | sed 's/.*origin\///' | xargs || true)
-    if [ -n "$ARENA_REMOTE" ]; then
-      info "Branch arena remota encontrada: $ARENA_REMOTE"
-      info "Para últimas melhorias: git checkout $ARENA_REMOTE && ./update.sh"
-      echo ""
-    fi
-  fi
-
   HAS_LOCAL_CHANGES=0
   if ! git diff --quiet || ! git diff --cached --quiet; then HAS_LOCAL_CHANGES=1; fi
+
+  # arquivos não rastreados não bloqueiam (podem ser dados do usuário), mas
+  # precisam ser mostrados: eles sobrevivem ao update e às vezes explicam um
+  # comportamento estranho depois dele.
+  UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null | head -n 10 || true)
+  if [ -n "$UNTRACKED" ]; then
+    UNTRACKED_TOTAL=$(git ls-files --others --exclude-standard 2>/dev/null | grep -c . || true)
+    warn "Arquivos não rastreados presentes (${UNTRACKED_TOTAL:-0}) — serão preservados:"
+    echo "$UNTRACKED" | sed 's/^/    /'
+  fi
 
   if [ "$HAS_LOCAL_CHANGES" -eq 1 ]; then
     if [ "$FORCE" -eq 1 ]; then
       warn "Alterações locais detectadas — --force ativo, fazendo stash automático"
-      git stash push -m "auto-stash before update $(date +%Y%m%d-%H%M%S)" || true
-      ok "Alterações guardadas em stash"
+      STASH_NAME="lua-update-auto-$(date +%Y%m%d-%H%M%S)"
+      if git stash push -m "$STASH_NAME" >/dev/null 2>&1; then
+        ok "Alterações guardadas em stash: $STASH_NAME"
+        info "Para recuperar: git stash list  →  git stash apply stash@{0}"
+      else
+        warn "git stash não guardou nada (nada para guardar?)"
+      fi
     else
       err "Existem alterações locais em arquivos versionados."
-      echo ""; git status --porcelain | head -n 50; echo ""
-      err "Opções: ./update.sh --force | git stash && ./update.sh && git stash pop"
+      echo ""; git status --porcelain | head -n 50 || true; echo ""
+      # uma opção por linha: com "|" na mesma linha o usuário cola tudo como
+      # pipeline e o git stash engole a saída do update.sh (aconteceu de verdade)
+      err "Escolha UMA opção (copie só uma linha):"
+      err "  1) ./update.sh --force"
+      err "     → guarda suas alterações em stash (lua-update-auto-...) e atualiza"
+      err "  2) git stash"
+      err "     ./update.sh"
+      err "     git stash pop"
+      err "  3) git checkout -- <arquivo>   (descartar a alteração local)"
       exit 1
     fi
   fi
 
   step "Buscando atualizações (git fetch)..."
-  # Corrige clones single-branch (apenas main) — busca todas as branches
-  if ! git fetch origin --prune 2>/dev/null; then
-    if ! git fetch origin "+refs/heads/*:refs/remotes/origin/*" --prune 2>/dev/null; then
-      err "Falha no git fetch. Verifique internet"
-      exit 1
-    fi
+  # Clone single-branch (git clone --single-branch / --branch) grava UM unico
+  # refspec em remote.origin.fetch. Nesse caso "git fetch origin" termina com
+  # sucesso trazendo so aquela branch — entao o fetch "completo" precisa ser
+  # feito sempre, e nao apenas quando o primeiro falha. Ampliamos o refspec do
+  # remote para todas as branches antes de buscar.
+  if ! git config --get-all remote.origin.fetch 2>/dev/null | grep -qxF "$ALL_BRANCHES_REFSPEC"; then
+    info "Clone single-branch detectado — habilitando busca de todas as branches"
+    git remote set-branches origin '*' >/dev/null 2>&1 \
+      || git config --replace-all remote.origin.fetch "$ALL_BRANCHES_REFSPEC" \
+      || true
   fi
+  FETCH_OK=0
+  if git fetch origin --prune 2>/dev/null; then FETCH_OK=1; fi
+  # sempre garante TODAS as branches (arena/* inclusive): com refspec de
+  # single-branch o fetch acima "dá certo" sem trazer nada novo.
+  if git fetch origin "$ALL_BRANCHES_REFSPEC" --prune 2>/dev/null; then FETCH_OK=1; fi
+  if [ "$FETCH_OK" -eq 0 ]; then err "Falha no git fetch. Verifique internet"; exit 1; fi
   if ! git rev-parse --verify "origin/$CURRENT_BRANCH" >/dev/null 2>&1; then
     git fetch origin "$CURRENT_BRANCH":"refs/remotes/origin/$CURRENT_BRANCH" 2>/dev/null || true
   fi
-  ok "Fetch concluído"
+  REMOTE_BRANCHES=$(git branch -r 2>/dev/null | grep -v -- '->' | grep -c 'origin/' || true)
+  ok "Fetch concluído (${REMOTE_BRANCHES:-0} branch(es) remota(s))"
+
+  if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
+    # Pode existir mais de uma arena/*: escolha pela data do commit, nunca pela
+    # ordem alfabética — a alfabética apontava para a branch MAIS ANTIGA.
+    ARENA_REMOTE=$(git for-each-ref --sort=-committerdate refs/remotes/origin/arena/ \
+      --format='%(refname:short)' 2>/dev/null | head -n 1 | sed 's|^origin/||' | xargs || true)
+    if [ -z "$ARENA_REMOTE" ]; then
+      ARENA_REMOTE=$(git branch -r | grep "origin/arena/" | head -n 1 | sed 's|.*origin/||' | xargs || true)
+    fi
+    if [ -n "$ARENA_REMOTE" ]; then
+      ARENA_COUNT=$(git for-each-ref refs/remotes/origin/arena/ --format='%(refname:short)' 2>/dev/null | grep -c . || true)
+      ARENA_SHA=$(git log -1 --format=%h "origin/$ARENA_REMOTE" 2>/dev/null || echo '?')
+      info "Branch arena remota mais recente: $ARENA_REMOTE ($ARENA_SHA)"
+      if [ "${ARENA_COUNT:-0}" -gt 1 ]; then info "Há ${ARENA_COUNT} branches arena/* — usando a do commit mais novo"; fi
+      info "Para últimas melhorias: git checkout $ARENA_REMOTE && ./update.sh"
+      echo ""
+    fi
+  fi
 
   UPSTREAM=""
   if [ "$IS_ARENA" -eq 1 ]; then
@@ -200,7 +267,7 @@ else
 
   if [ "$LOCAL_COMMIT" = "$REMOTE_COMMIT" ]; then
     ok "Já está atualizado (local = remoto: ${LOCAL_COMMIT:0:7})"
-    if [ "$FORCE" -eq 1 ] && git stash list | grep -q "auto-stash before update"; then
+    if [ "$FORCE" -eq 1 ] && git stash list | grep -qE "lua-update-auto-|auto-stash before update"; then
       info "Restaurando stash..."
       git stash pop || warn "Conflito ao restaurar stash — resolva manualmente: git stash pop"
     fi
@@ -212,7 +279,7 @@ else
     RESET_DONE=0
     if [ "$BEHIND" = "0" ] && [ "$AHEAD" != "0" ] && [ "$AHEAD" != "?" ]; then
       warn "Seu branch local está $AHEAD commit(s) à frente de $UPSTREAM (commits locais)"
-      echo ""; echo "Commits locais:"; git log --oneline "$UPSTREAM"..HEAD | head -n 20; echo ""
+      echo ""; echo "Commits locais:"; git log --oneline "$UPSTREAM"..HEAD | head -n 20 || true; echo ""
       if [ "$FORCE" -eq 1 ]; then
         warn "--force ativo: fazendo reset --hard para $UPSTREAM para alinhar com GitHub"
         if [ -t 0 ]; then
@@ -232,7 +299,10 @@ else
           exit 1
         fi
       else
-        err "Resolva divergência: git reset --hard $UPSTREAM (APAGA locais) | git push origin $CURRENT_BRANCH | ./update.sh --force"
+        err "Escolha UMA opção (copie só uma linha):"
+        err "  1) git push origin $CURRENT_BRANCH    (publica seus commits)"
+        err "  2) ./update.sh --force                (stash + reset com confirmação)"
+        err "  3) git reset --hard $UPSTREAM         (APAGA os commits locais)"
         exit 1
       fi
     fi
@@ -275,13 +345,15 @@ else
       AFTER_SHA=$(git rev-parse HEAD)
       if [ "$BEFORE_SHA" != "$AFTER_SHA" ]; then
         ok "Atualizado: ${BEFORE_SHA:0:7} → ${AFTER_SHA:0:7}"
-        echo ""; echo "📦 Alterações:"; git log --oneline "$BEFORE_SHA".."$AFTER_SHA" | head -n 20
-        echo ""; echo "📄 Arquivos alterados:"; git diff --name-status "$BEFORE_SHA".."$AFTER_SHA" | head -n 50
+        # "|| true": com pipefail, o SIGPIPE do head em listas longas (exit 141)
+        # abortaria o script no meio da atualização.
+        echo ""; echo "📦 Alterações:"; git log --oneline "$BEFORE_SHA".."$AFTER_SHA" | head -n 20 || true
+        echo ""; echo "📄 Arquivos alterados:"; git diff --name-status "$BEFORE_SHA".."$AFTER_SHA" | head -n 50 || true
       else
         ok "Já estava atualizado após pull (sem novos commits)"
       fi
 
-      if [ "$FORCE" -eq 1 ] && git stash list | grep -q "auto-stash before update"; then
+      if [ "$FORCE" -eq 1 ] && git stash list | grep -qE "lua-update-auto-|auto-stash before update"; then
         echo ""; info "Restaurando stash..."
         if ! git stash pop; then
           warn "Conflito ao restaurar stash — resolva manualmente: git stash list / git stash pop"
@@ -305,16 +377,38 @@ else info ".env mantido"; fi
 
 NEED_INSTALL=0
 if [ -n "${BEFORE_SHA:-}" ] && [ -n "${AFTER_SHA:-}" ]; then
-  if git diff --name-only "$BEFORE_SHA".."$AFTER_SHA" | grep -qE "package\\.json|package-lock\\.json|vendor/"; then NEED_INSTALL=1; info "package.json mudou — precisa npm install"; fi
+  # aspas simples: o padrao chega ao grep exatamente como escrito (sem a
+  # armadilha do escape duplo dentro de aspas duplas)
+  if git diff --name-only "$BEFORE_SHA".."$AFTER_SHA" | grep -qE 'package\.json|package-lock\.json|vendor/'; then NEED_INSTALL=1; info "package.json mudou — precisa npm install"; fi
 else
   if [ ! -d node_modules ] || [ ! -f node_modules/dotenv/package.json ]; then NEED_INSTALL=1; fi
 fi
 
-if [ -f package.json ] && grep -qE '\"better-sqlite3\": *\"\\^11\\.' package.json; then
-  sed -i -E 's/\"better-sqlite3\": *\"\\^11\\.[0-9.]+\"/\"better-sqlite3\": \"^13.0.3\"/' package.json
-  sed -i -E 's/\"node\": *\">=20(\\.0\\.0)?\"/\"node\": \">=22.0.0\"/' package.json
-  info "package.json atualizado: better-sqlite3 → ^13.0.3"
+# Aspas simples SEM \" escapado: as barras invertidas antes de " chegavam ao
+# grep (aviso "stray \ before \"" em algumas builds) e o \\^ exigia uma barra
+# invertida literal antes do ^11 — o padrão nunca casava e a migração nunca
+# rodava em hosts antigos.
+if [ -f package.json ] && grep -qE '"better-sqlite3": *"\^11\.' package.json; then
+  sed -i -E 's/"better-sqlite3": *"\^11\.[0-9.]+"/"better-sqlite3": "^13.0.3"/' package.json
+  sed -i -E 's/"node": *">=20(\.0\.0)?"/"node": ">=22.0.0"/' package.json
+  info "package.json atualizado: better-sqlite3 → ^13.0.3, node → >=22"
   NEED_INSTALL=1
+fi
+
+# package.json difere do que está instalado? Acontece em checkout de branch
+# (o pull não roda, então a comparação BEFORE..AFTER nunca dispara) e deixava o
+# node_modules antigo — ex.: better-sqlite3 ^11 instalado com código que pede ^13.
+# node_modules symlink é setup de dev/teste: não mexe.
+PKG_HASH=""
+if command -v sha1sum >/dev/null 2>&1; then PKG_HASH=$(sha1sum package.json 2>/dev/null | cut -d' ' -f1)
+elif command -v shasum >/dev/null 2>&1; then PKG_HASH=$(shasum package.json 2>/dev/null | cut -d' ' -f1)
+elif command -v md5sum >/dev/null 2>&1; then PKG_HASH=$(md5sum package.json 2>/dev/null | cut -d' ' -f1); fi
+PKG_HASH_FILE="node_modules/.lua-package-json.hash"
+if [ -n "$PKG_HASH" ] && [ -d node_modules ] && [ ! -L node_modules ]; then
+  if [ ! -f "$PKG_HASH_FILE" ] || [ "$(cat "$PKG_HASH_FILE" 2>/dev/null || true)" != "$PKG_HASH" ]; then
+    NEED_INSTALL=1
+    info "package.json difere do último npm install — reinstalando dependências"
+  fi
 fi
 
 if [ "$NEED_INSTALL" -eq 1 ]; then
@@ -322,6 +416,10 @@ if [ "$NEED_INSTALL" -eq 1 ]; then
   INSTALL_FLAGS="--legacy-peer-deps --no-audit --no-fund"
   if [ "$(uname -o 2>/dev/null)" = "Android" ] || [ -n "${TERMUX_VERSION:-}" ]; then INSTALL_FLAGS="$INSTALL_FLAGS --ignore-scripts"; info "Termux: ignore-scripts"; fi
   if ! npm install $INSTALL_FLAGS; then err "npm install falhou"; exit 1; fi
+  if [ -n "$PKG_HASH" ]; then
+    mkdir -p node_modules 2>/dev/null || true
+    printf '%s' "$PKG_HASH" > "$PKG_HASH_FILE" 2>/dev/null || true
+  fi
   ok "Dependências instaladas"
 else ok "Dependências já atualizadas"; fi
 

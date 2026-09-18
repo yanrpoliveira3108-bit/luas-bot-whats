@@ -374,7 +374,30 @@ function ensureDirs() {
   }
 }
 
-const baseCache = new Map(); // templateId -> Jimp (base, nunca mutado)
+/**
+ * Cache das artes-base decodificadas.
+ *
+ * Cada bitmap 1280x720 RGBA ocupa 3,52 MB em RAM (medido), e os templates
+ * rotacionam/aleatorizam (database/welcome.nextTemplate) — ou seja, sem limite
+ * o processo acaba retendo os 8 templates + avatar = ~29 MB de bitmaps
+ * (o RSS medido subiu 78 MB -> 170 MB ao carregar todos). Por isso o cache e
+ * LRU com teto pequeno: o caso comum (o grupo repete o mesmo template) continua
+ * servido em ~0,7 ms, e o pior caso fica em BASE_CACHE_MAX artes.
+ */
+const BASE_CACHE_MAX = 2;
+const baseCache = new Map(); // templateId -> Jimp (LRU: mais recente no fim)
+
+/** Avatar tem slot proprio: e um unico asset e nao pode ser expulso pelos templates. */
+let avatarBase = null;
+
+function cacheBase(templateId, img) {
+  if (baseCache.has(templateId)) baseCache.delete(templateId);
+  baseCache.set(templateId, img);
+  while (baseCache.size > BASE_CACHE_MAX) {
+    baseCache.delete(baseCache.keys().next().value); // remove o mais antigo
+  }
+  return img;
+}
 
 /** Redimensiona com "cover" (preenche 1280×720, cortando o excesso). */
 function cover(img, w, h) {
@@ -403,7 +426,7 @@ async function load(templateId) {
       img = generateBackground(templateId);
       await img.writeAsync(file);
     }
-    baseCache.set(templateId, img);
+    cacheBase(templateId, img);
   }
   return img.clone();
 }
@@ -412,7 +435,7 @@ async function load(templateId) {
 async function ensureAvatar() {
   ensureDirs();
   const file = avatarFile();
-  let img = baseCache.get('__avatar__');
+  let img = avatarBase;
   if (!img) {
     try {
       img = await Jimp.read(file);
@@ -420,7 +443,7 @@ async function ensureAvatar() {
       img = generateAvatar();
       await img.writeAsync(file);
     }
-    baseCache.set('__avatar__', img);
+    avatarBase = img;
   }
   return img.getBufferAsync(Jimp.MIME_PNG);
 }
@@ -440,4 +463,17 @@ async function pregenerateAll() {
   }
 }
 
-module.exports = { load, ensureAvatar, pregenerateAll, generateBackground, generateAvatar };
+/** Tamanho do cache de bases e do teto (para testes de memoria). */
+function baseCacheSize() {
+  return baseCache.size;
+}
+
+module.exports = {
+  load,
+  ensureAvatar,
+  pregenerateAll,
+  generateBackground,
+  generateAvatar,
+  baseCacheSize,
+  BASE_CACHE_MAX,
+};

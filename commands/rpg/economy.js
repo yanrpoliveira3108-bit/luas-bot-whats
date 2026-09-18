@@ -1,8 +1,9 @@
 'use strict';
 
 const economy = require('../../database/economy');
-const { withLock } = require('../../utils/keyedMutex');
+const economyService = require('../../services/economyService');
 const { formatMoney } = require('../../utils/formatter');
+const { dropMentionArgs } = require('../../utils/messages');
 
 function parseAmount(ctx, index = 0) {
   const arg = (ctx.args[index] || '').toLowerCase();
@@ -48,7 +49,7 @@ module.exports = [
       const amount = parseAmount(ctx);
       if (!amount) return ctx.reply('⚠️ Use: !depositar <valor> ou !depositar tudo');
       try {
-        await withLock(ctx.sender, () => economy.deposit(ctx.sender, amount));
+        await economyService.deposit(ctx.sender, amount);
         await ctx.reply(`🏦 Depositado: ${formatMoney(amount)}.`);
       } catch (_) {
         await ctx.reply('💸 Saldo insuficiente.');
@@ -68,7 +69,7 @@ module.exports = [
       const amount = arg === 'tudo' || arg === 'all' ? eco.bank : parseInt(ctx.args[0], 10);
       if (!amount || amount <= 0) return ctx.reply('⚠️ Use: !sacar <valor> ou !sacar tudo');
       try {
-        await withLock(ctx.sender, () => economy.withdraw(ctx.sender, amount));
+        await economyService.withdraw(ctx.sender, amount);
         await ctx.reply(`🏧 Sacado: ${formatMoney(amount)}.`);
       } catch (_) {
         await ctx.reply('💸 Saldo do banco insuficiente.');
@@ -84,11 +85,14 @@ module.exports = [
     cooldown: 5000,
     execute: async (ctx) => {
       const target = ctx.mentionedJid[0];
-      const amount = parseInt(ctx.args[ctx.mentionedJid.length ? 1 : 0], 10);
+      // a menção também está dentro de ctx.args: sem remover, o valor lido
+      // era o texto "@fulano" (parseInt -> NaN) e o comando nunca funcionava
+      const args = dropMentionArgs(ctx.args, ctx.mentionedJid);
+      const amount = parseInt(args[0], 10);
       if (!target || !amount || amount <= 0) return ctx.reply('⚠️ Use: !transferir @usuario <valor>');
       if (target === ctx.sender) return ctx.reply('🤨 Não dá para transferir para você mesmo.');
       try {
-        await withLock(ctx.sender, () => economy.transfer(ctx.sender, target, amount));
+        await economyService.transfer(ctx.sender, target, amount);
         await ctx.reply(`💸 Transferido ${formatMoney(amount)} para @${target.split('@')[0]}.`, { mentions: [target] });
       } catch (_) {
         await ctx.reply('💸 Saldo insuficiente para transferir.');

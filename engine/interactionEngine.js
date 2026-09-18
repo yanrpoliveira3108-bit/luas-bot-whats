@@ -22,10 +22,15 @@ function displayName(jid) {
   return '@' + String(jid).split('@')[0];
 }
 
-/** Resolve o alvo da interação (mencionado ou o próprio autor). */
+/**
+ * Resolve o alvo da interação: mencionado → mensagem respondida → o próprio
+ * autor. Assim "!beijo" funciona respondendo à mensagem da pessoa, sem @número.
+ */
 function resolveTarget(ctx) {
   const mentioned = (ctx.mentionedJid || []).filter((j) => j !== ctx.sender && j !== ctx.socket.user.id);
   if (mentioned.length > 0) return mentioned[0];
+  const quoted = ctx.quotedSender;
+  if (quoted && quoted !== ctx.sender && quoted !== (ctx.socket && ctx.socket.user.id)) return quoted;
   return ctx.sender;
 }
 

@@ -62,6 +62,9 @@ async function handle(ctx, err, command) {
   );
 
   if (!ctx || typeof ctx.reply !== 'function') return;
+  // silent: o caller já respondeu (ex.: fluxo em etapas com card de erro) —
+  // aqui só registramos o detalhe completo no log.
+  if (command && command.silent) return;
 
   try {
     const friendly = FRIENDLY[code];

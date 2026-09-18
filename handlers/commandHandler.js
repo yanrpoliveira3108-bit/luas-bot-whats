@@ -1,12 +1,15 @@
 /**
- * handlers/commandHandler.js — pipeline central de mensagens e comandos.
+ * handlers/commandHandler.js — contexto, gates e execução de comandos.
  *
- * 1. registra usuário/grupo + contadores + XP
- * 2. responde botões/listas
- * 3. sessões de jogos e menus numerados (fallback)
- * 4. resolve comando por prefixo + trigger, aplica permissões e cooldown
- * 5. executa com tratamento de erro (nunca derruba o bot)
- * 6. sugestão inteligente quando comando não existe (fuzzy + botões)
+ * A CADEIA de processamento (ordem das etapas) está em engine/pipeline.js;
+ * este arquivo fornece as peças que a cadeia usa:
+ *   • buildContext — ctx único da mensagem (chat, usuário, permissões, mídia)
+ *   • checkGate    — permissões do comando (owner/admin/grupo/privado/registro)
+ *   • executeCommand — gate + cooldown + atividade + execução + erro
+ *   • runByName    — dispatch por nome (usado pelos botões de sugestão)
+ *   • shouldProcessMessage — eco do bot/status
+ *   • getGroupMetadata/invalidateGroupMeta — metadata com cache TTL
+ * Nada aqui mudou de comportamento na Fase 3: só saiu de dentro do handleMessage.
  */
 
 'use strict';
@@ -18,6 +21,7 @@ const users = require('../database/users');
 const groups = require('../database/groups');
 const permissions = require('../utils/permissions');
 const cooldown = require('../utils/cooldown');
+const rpgService = require('../services/rpgService');
 const errorHandler = require('./errorHandler');
 const buttonHandler = require('./buttonHandler');
 const groupHandler = require('./groupHandler');
@@ -32,6 +36,7 @@ const {
   extractText,
   getQuoted,
   getQuotedKey,
+  getQuotedSender,
   getQuotedText,
   getMentionedJids,
   detectMediaType,
@@ -43,12 +48,39 @@ const {
 } = require('../utils/messages');
 
 const { registry } = require('../engine/plugins');
+const { createPipeline } = require('../engine/pipeline');
 
 /* --------------------------- metadados ------------------------------- */
 
-const XP_MIN_INTERVAL = 30 * 1000;
-const lastXp = new Map();
+/**
+ * Última notificação de AFK por (chat|usuário). Sem limite isto crescia para
+ * sempre — um par por usuário mencionado em qualquer grupo, nunca removido.
+ * A poda segue o mesmo padrão da Fase 2 (C2 — pruneSpamState): só acima do
+ * teto, removendo entradas vencidas (a janela de supressão é de 60 s, então
+ * remover o que tem mais de 5 min não muda nenhum comportamento).
+ */
 const afkNotified = new Map();
+const AFK_NOTIFIED_MAX = 1000;
+const AFK_NOTIFIED_STALE_MS = 5 * 60 * 1000;
+
+function pruneAfkNotified(now) {
+  if (afkNotified.size <= AFK_NOTIFIED_MAX) return 0;
+  let removed = 0;
+  for (const [key, at] of afkNotified) {
+    if (now - at > AFK_NOTIFIED_STALE_MS) {
+      afkNotified.delete(key);
+      removed += 1;
+    }
+  }
+  // Uma rajada de entradas NOVAS não é removida pelo critério de validade —
+  // sem isto o teto não valeria nada. O Map preserva a ordem de inserção,
+  // então descartamos as mais antigas até voltar ao limite.
+  while (afkNotified.size > AFK_NOTIFIED_MAX) {
+    afkNotified.delete(afkNotified.keys().next().value);
+    removed += 1;
+  }
+  return removed;
+}
 
 async function getGroupMetadata(sock, jid) {
   const cached = cache.get('meta:' + jid);
@@ -104,6 +136,15 @@ async function buildContext(sock, msg) {
     quotedKey.participant = permissions.toPn(quotedKey.participant, participants);
   }
 
+  // Autor da mensagem respondida, canonizado p/ PN (igual a sender/mentionedJid):
+  // em grupos LID o citado chega como @lid e o bot é chaveado por PN.
+  let quotedSender = getQuotedSender(msg);
+  if (quotedSender.endsWith('@lid') && participants.length) {
+    const pn = permissions.toPn(quotedSender, participants);
+    if (pn && !pn.endsWith('@lid')) quotedSender = pn;
+    else logger.warn({ quotedSender, chat: remoteJid }, 'não consegui resolver LID → PN do autor citado');
+  }
+
   let isAdmin = false;
   let isBotAdmin = false;
   if (isGroup) {
@@ -135,6 +176,7 @@ async function buildContext(sock, msg) {
     text,
     quoted,
     quotedKey,
+    quotedSender,
     quotedText: getQuotedText(msg),
     mentionedJid,
     mediaType: detectMediaType(msg),
@@ -267,209 +309,26 @@ function shouldProcessMessage(msg) {
   return false;
 }
 
+/**
+ * Ponto de entrada das mensagens.
+ *
+ * A cadeia em si (accept → normalize → gateUser → register → interactive →
+ * moderation → dispatch → shortcuts → confirmation → sessionFlow) mora em
+ * engine/pipeline.js desde a Fase 3. Aqui fica só o adaptador: as etapas
+ * continuam recebendo exatamente as mesmas dependências e a ordem é a mesma de
+ * antes — flood continua antes do parse e as confirmações continuam valendo
+ * apenas para mensagens que NÃO são comando.
+ */
 async function handleMessage(sock, msg) {
-  try {
-    if (!shouldProcessMessage(msg)) return;
-    if (isStatusJid(msg.key.remoteJid)) return;
-
-    const ctx = await buildContext(sock, msg);
-    if (!ctx.sender) return;
-
-    perf.add('messages');
-
-    const lidAddressed = ctx.isGroup && (
-      String(msg.key.participant || '').endsWith('@lid') ||
-      String(msg.key.participantAlt || '').endsWith('@lid')
-    );
-    if (ctx.isCommunity || lidAddressed) {
-      logger.info(
-        {
-          chat: ctx.remoteJid,
-          sender: ctx.sender,
-          participant: msg.key.participant,
-          participantAlt: msg.key.participantAlt,
-          community: !!ctx.isCommunity,
-          lid: !!lidAddressed,
-        },
-        '[COMMUNITY] mensagem recebida de comunidade/grupo LID'
-      );
-    }
-
-    const blocked = require('../database/blocked');
-    if (blocked.isBlocked(ctx.sender)) return;
-
-    if (CONFIG.ui.antiFlood && !ctx.isOwner && !ctx.isAdmin) {
-      const flood = require('../utils/flood');
-      if (flood.hit(ctx.sender)) return;
-    }
-
-    if (ctx.isGroup) {
-      const muted = await groupHandler.enforceMute(sock, ctx);
-      if (muted.blocked) return;
-    }
-
-    require('../utils/viewonce').capture(msg);
-
-    users.upsert(ctx.sender, msg.pushName || '');
-    if (ctx.isGroup) {
-      groups.ensure(ctx.remoteJid, '');
-      groups.incMemberMessages(ctx.remoteJid, ctx.sender);
-    }
-    users.incMessages(ctx.sender);
-    grantXp(ctx.sender);
-
-    const u = users.get(ctx.sender);
-    if (u && u.afk) {
-      users.clearAfk(ctx.sender);
-    }
-
-    await notifyAfk(sock, ctx);
-
-    if (await buttonHandler.process(ctx)) return;
-
-    if (ctx.isGroup) {
-      try {
-        const antiManager = require('../utils/antiManager');
-        antiManager.addToHistory(ctx.remoteJid, ctx.sender, ctx.message.key);
-      } catch (_) {}
-    }
-
-    if (ctx.isGroup) {
-      const filtered = await groupHandler.applyFilters(sock, ctx);
-      if (filtered.deleted) return;
-    }
-
-    const prefix = settings.effectivePrefix();
-    const parsed = splitCommand(ctx.text, prefix);
-
-    if (parsed) {
-      const cmd = registry.resolveTrigger(parsed.command);
-      if (!cmd) {
-        try {
-          const fuzzy = require('../utils/fuzzySearch');
-          const allCmds = registry.all();
-          const similar = fuzzy.findSimilarCommands(parsed.command, allCmds, 3);
-
-          if (similar.length > 0) {
-            const best = similar[0];
-            const others = similar.slice(1);
-
-            let msgTxt = `❌ *Comando não existe:* ${prefix}${parsed.command}\n\n`;
-            msgTxt += `💡 *Você quis dizer:*\n`;
-            msgTxt += `▸ *${prefix}${best.trigger}* — ${best.cmd.description || ''}\n`;
-            for (const o of others) {
-              msgTxt += `▸ *${prefix}${o.trigger}* — ${o.cmd.description || ''}\n`;
-            }
-            msgTxt += `\n📌 Use *${prefix}help ${best.cmd.name}* para ver como usar`;
-
-            try {
-              const buttons = similar.map((s) => ({
-                id: `suggest_${s.cmd.name}`,
-                text: `${prefix}${s.trigger}`,
-                run: (cc) => runByName(cc, s.cmd.name, parsed.args),
-              }));
-              buttons.push({
-                id: `help_${best.cmd.name}`,
-                text: `❓ Ajuda ${best.cmd.name}`,
-                run: (cc) => runByName(cc, 'help', [best.cmd.name]),
-              });
-
-              for (const b of buttons) {
-                buttonHandler.register(`lua:${b.id}`, b.run);
-              }
-
-              const sent = await interactive.sendButtons(sock, ctx.remoteJid, {
-                text: msgTxt,
-                footer: `${CONFIG.bot.name} • ${prefix}menu para todos os comandos`,
-                buttons: buttons.slice(0, 4).map((b) => ({ id: `lua:${b.id}`, text: b.text })),
-                quoted: ctx.message,
-              });
-
-              if (!sent) {
-                await ctx.reply(msgTxt);
-              }
-            } catch (_) {
-              await ctx.reply(msgTxt);
-            }
-
-            logger.info({ query: parsed.command, suggestion: best.trigger }, 'comando não encontrado — sugestão enviada');
-            return;
-          } else {
-            try {
-              buttonHandler.register('lua:open_menu', (cc) => require('../utils/buttons').sendMainMenu(cc));
-              await interactive.sendButtons(sock, ctx.remoteJid, {
-                text: `❌ Comando *${prefix}${parsed.command}* não existe.\n\n💡 Digite *${prefix}menu* para ver todos os comandos ou *${prefix}menu <termo>* para buscar.\nEx: ${prefix}menu sticker, ${prefix}menu download`,
-                footer: `${CONFIG.bot.name} • ${registry.count()} comandos disponíveis`,
-                buttons: [
-                  { id: 'lua:open_menu', text: '📋 Abrir menu' },
-                  { id: 'lua:help_menu', text: '❓ Ajuda' },
-                ],
-                quoted: ctx.message,
-              });
-              buttonHandler.register('lua:help_menu', (cc) => cc.reply(`💡 Use *${prefix}help <comando>* para ver detalhes de qualquer comando.\nEx: ${prefix}help play, ${prefix}help sticker, ${prefix}help anti`));
-            } catch (_) {
-              await ctx.reply(`❌ Comando *${prefix}${parsed.command}* não existe. Digite *${prefix}menu* para ver os comandos.`);
-            }
-            return;
-          }
-        } catch (err) {
-          logger.warn({ err: err.message }, 'falha ao sugerir comando similar');
-          return;
-        }
-      }
-      logger.info(
-        { tag: 'COMMAND', sender: ctx.sender, fromMe: !!(msg.key && msg.key.fromMe) },
-        `[LUA][COMMAND] Comando recebido: ${parsed.raw.split('\n')[0].slice(0, 80)}`
-      );
-      await executeCommand(ctx, cmd, parsed.args);
-      return;
-    }
-
-    const bare = (ctx.text || '').trim().toLowerCase();
-    if (bare === 'prefixo' || bare === 'prefix') {
-      await ctx.reply(`🔤 Prefixo atual: *${prefix}*\n\n💡 Use *${prefix}menu* para ver os comandos.`);
-      return;
-    }
-
-    if (bare === 'menu' || bare === 'menuprincipal') {
-      await require('../utils/buttons').sendMainMenu(ctx);
-      return;
-    }
-    if ((bare === '0' || bare === 'voltar') && numberFallback.getNumberMenu(ctx.remoteJid)) {
-      await require('../utils/buttons').sendMainMenu(ctx);
-      return;
-    }
-
-    const gameSession = session.get(ctx.remoteJid, ctx.sender);
-    if (gameSession && gameSession.onMessage) {
-      try {
-        await gameSession.onMessage(ctx);
-      } catch (err) {
-        await errorHandler.handle(ctx, err, { name: `session:${gameSession.type}` });
-      }
-      return;
-    }
-
-    const item = numberFallback.match(ctx.remoteJid, ctx.text);
-    if (item && typeof item.run === 'function') {
-      try {
-        await item.run(ctx);
-      } catch (err) {
-        await errorHandler.handle(ctx, err, { name: 'menu-fallback' });
-      }
-      return;
-    }
-  } catch (err) {
-    logger.error({ err: err.message, stack: err.stack }, 'erro no processamento de mensagem');
-  }
+  return pipeline.run(sock, msg);
 }
 
+/**
+ * XP por mensagem. A REGRA (intervalo mínimo + quantidade) está em
+ * services/rpgService.js desde a Fase 5; aqui fica só a chamada.
+ */
 function grantXp(sender) {
-  const now = Date.now();
-  const last = lastXp.get(sender) || 0;
-  if (now - last < XP_MIN_INTERVAL) return;
-  lastXp.set(sender, now);
-  users.addXp(sender, 1 + Math.floor(Math.random() * 3));
+  rpgService.grantMessageXp(sender);
 }
 
 async function notifyAfk(sock, ctx) {
@@ -480,13 +339,45 @@ async function notifyAfk(sock, ctx) {
     const lastKey = `${ctx.remoteJid}|${jid}`;
     const last = afkNotified.get(lastKey) || 0;
     if (Date.now() - last < 60 * 1000) continue;
-    afkNotified.set(lastKey, Date.now());
+    const now = Date.now();
+    afkNotified.set(lastKey, now);
+    pruneAfkNotified(now);
     const reason = u.afk_reason ? `\n📝 Motivo: ${u.afk_reason}` : '';
     await sock.sendMessage(ctx.remoteJid, { text: `💤 ${u.name || jid.split('@')[0]} está AFK.${reason}` }, { quoted: ctx.message });
   }
 }
 
+/* --------------------------- pipeline (Fase 3) -------------------------- */
+
+const pipeline = createPipeline({
+  CONFIG,
+  logger,
+  perf,
+  settings,
+  users,
+  groups,
+  session,
+  numberFallback,
+  interactive,
+  registry,
+  buttonHandler,
+  groupHandler,
+  errorHandler,
+  isStatusJid,
+  splitCommand,
+  shouldProcessMessage,
+  buildContext,
+  executeCommand,
+  runByName,
+  grantXp,
+  notifyAfk,
+});
+
 module.exports = {
+  pipeline,
+  notifyAfk,
+  /** tamanho da tabela de AFK notificado (teste de vazamento). */
+  afkNotifiedSize: () => afkNotified.size,
   handleMessage,
   buildContext,
   executeCommand,

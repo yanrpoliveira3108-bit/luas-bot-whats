@@ -5,7 +5,7 @@ const mediaUtil = require('../../utils/media');
 module.exports = [
   {
     name: 'foto',
-    commands: ['foto', 'fotogrupo', 'setfoto'],
+    commands: ['foto', 'fotogrupo', 'setfoto', 'setpp'],
     category: 'admin',
     adminOnly: true,
     groupOnly: true,

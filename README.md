@@ -42,6 +42,206 @@ Lua é um bot WhatsApp completo com:
 
 ---
 
+## 🎨 Lua Bot 2.0 — camada visual e de resiliência
+
+A partir da 2.0 toda a identidade visual e a robustez de I/O ficam em módulos
+centrais. Nenhum comando monta template na mão nem faz chamada externa sem
+timeout.
+
+| Módulo | Responsabilidade |
+| --- | --- |
+| `utils/fonts.js` | Fontes Unicode (18 estilos: bold, italic, script, fraktur, double, mono, smallCaps...). `fonts.safe()` estiliza **sem tocar** em comandos, URLs, jids, IDs e caminhos. |
+| `utils/dividers.js` | 56 separadores em 13 categorias (`floral`, `dark`, `minimal`, `music`, `cute`, `royal`, `warning`, `box`, `wave`, `heavy`, `anime`, `cyber`, `classic`). `divider('music')`, `divider.random()`, `divider.box(titulo)`. |
+| `utils/icons.js` | Ícones semânticos (`success`, `error`, `warning`, `loading`, `music`, `admin`...) + tema visual por categoria. |
+| `utils/menuRenderer.js` | Renderizador **central** de menus: `header`, `section`, `row`, `footer`, `statusBlock`, `page`, `mainMenu`. Lê o modo visual do chat e decide fonte + família de separadores. Comandos executáveis saem sempre em texto puro. |
+| `utils/uiKit.js` | Componentes: `header`, `footer`, `card`, `progress`, `list`, `button`, `divider` e mensagens `error/success/loading/permission/notFound/info`. Também `truncate`, `safeText` e `paginate` (limites do WhatsApp). |
+| `utils/progress.js` | Mensagem de progresso reutilizável: `state()`, `update({percent})`, `complete()`, `fail()`. **Uma mensagem por operação** (nada de edições concorrentes), throttle de 700 ms e TTL com coleta automática. |
+| `utils/stateMachine.js` | `SEARCHING → FOUND → DOWNLOADING → CONVERTING → UPLOADING → DONE`, com `ERROR` acessível de qualquer etapa. Transição inválida lança `INVALID_TRANSITION`. |
+| `utils/resilience.js` | `withTimeout()` (com `AbortSignal`) e `retry()` com backoff exponencial — **sem retry** para erro permanente (auth, 404, input inválido, permissão). |
+| `utils/commandCache.js` | Índice invertido (nome, alias, categoria, descrição, keywords) para `!menu <termo>` / `!help <termo>`; lookup de trigger continua O(1) pelo registry. |
+| `utils/tmpCleaner.js` | Ciclo `create → use → cleanup` (`withTempFile` com `try/finally`) + varredura de órfãos no boot e a cada 10 min. |
+
+### Modos de menu (`!menumode`)
+
+O visual dos menus é trocável em runtime e **vale por grupo** (no PV, vale
+global). Cada modo muda a fonte dos títulos e a família de separadores de uma
+vez — nada de string decorativa espalhada pelos comandos.
+
+| Modo | Fonte | Separadores |
+| --- | --- | --- |
+| `default` | boldScript | royal |
+| `dark` | fraktur | dark |
+| `cute` | script | cute |
+| `minimal` | sans | minimal |
+| `royal` | boldItalic | floral |
+| `cyber` | mono | cyber |
+
+```
+!menumode            lista os modos com prévia de cada um
+!menumode dark       aplica no grupo atual
+!menumode cute       idem
+```
+
+### Identidade editável por comando
+
+```
+!setcriador                          → lista os campos e o valor atual
+!setcriador name Ana                 → nome do criador
+!setcriador developer Ana Dev        → desenvolvedor
+!setcriador about dev do Lua|Node.js → itens separados por |
+!setcriador supportUrl https://wa.me/5511999999999
+!setcriador photoUrl https://exemplo.com/eu.jpg
+!setcriador reset name               → volta ao padrão do arquivo
+!selo random                         → sorteia o selo a cada cartão
+!selo seguranca                      → fixa um selo
+```
+
+Os valores ficam na tabela `settings` (chave `creator.<campo>`) e são lidos por
+`utils/creatorProfile.js`, que é a fonte única de `!criador`, `!owner` e do selo.
+Os padrões continuam no topo de `utils/creatorProfile.js` para quem preferir
+editar o arquivo. `!setcriador supportUrl https://wa.me/<numero>` também define o
+número do contato que o `!owner` envia.
+
+### Cartão do criador (`!criador`)
+
+```
+!criador
+!criador quem criou a Lua?
+```
+
+Usa a estrutura `botForwardedMessage → richResponseMessage` com `unifiedResponse.data`
+em base64, que existe no proto desta biblioteca (`WAProto/E2E/E2E.proto`:
+`botForwardedMessage = 104`, `richResponseMessage = 97`, `MessageContextInfo.botMetadata = 7`)
+e é enviado por `socket.relayMessage`. O `contextInfo` (stanzaId/participant/quotedMessage)
+vem de `utils/consts.js → seloNubank()`, que usa o id da mensagem real para a citação
+ser resolvida no aparelho de quem recebe.
+
+Personalize no bloco `CREATOR` no topo do arquivo: nome, sobre, Instagram, TikTok,
+link de suporte (padrão: `wa.me` do `OWNER_NUMBER` do `.env`) e as imagens.
+
+### Enquetes (`!poll` e `!pollresult`)
+
+```
+!poll Qual linguagem você prefere? | Lua | JavaScript | Python
+!poll Qual linguagem você prefere? | Lua | JavaScript --selectableCount=2 --announcement=false
+!pollresult Minha enquete | Lua:1000 | JavaScript:2000 | Python:500
+```
+
+- parâmetros opcionais usam sempre `--chave=valor`, podem vir em qualquer posição
+  e nunca entram no nome nem nas opções;
+- `--selectableCount` só aceita inteiro de 1 até o número de opções (rejeita
+  `0`, `-1`, `1.5`, `+2`, `01`, vazio); votos aceitam inteiro ≥ 0 com o mesmo rigor;
+- a enquete é desenhada numa caixa de **40 colunas** (padding 2, quebra de linha
+  sem cortar palavra e continuação alinhada ao texto — `│` + 2 + `N. `);
+- nada é enviado sem confirmação: estado em `utils/pendingPoll.js`
+  (`pendingPollConfirmations`, chave `senderJid`, 30s).
+
+### Confirmação de chamada (`!call`)
+
+O `!call` usa `{ call: { name, type } }`, que o Baileys vendored converte em
+`scheduledCallCreationMessage` (`type 1` → `VOICE`, `type 2` → `VIDEO` — verificado
+contra o proto da lib). Nenhuma chamada sai sem confirmação explícita:
+
+1. `!call 5511999999999` → o bot guarda a solicitação em
+   `utils/pendingCall.js` (`pendingCallConfirmations`, chaveada por **senderJid**)
+   e mostra o cartão de confirmação;
+2. a próxima mensagem do **mesmo autor** é consumida por um único ponto de
+   interceptação em `handlers/commandHandler.js` (sem listener por execução);
+3. `1`/`sim`/`s`/`confirmar` envia • `2`/`não`/`n`/`cancelar`/`cancel` aborta •
+   qualquer outra resposta re-pergunta;
+4. depois de 30s o estado é removido e uma confirmação tardia não envia nada.
+
+A chave é quem pediu, nunca o destino: o `1` de outro usuário não autoriza a
+chamada criada por você.
+
+**O modo vale nos dois tipos de menu.** Na navegação por lista/botões o WhatsApp
+não tem campo de descrição no fluxo nativo com imagem, então a decoração vai na
+legenda da imagem (título na fonte do modo + separador por contexto) e no rodapé;
+o título da lista e a seção "Navegação" também usam a fonte — mas só quando cabem
+inteiros no limite de 24 unidades do WhatsApp (`menuRenderer.styleFit` corta por
+code point e prefere o texto puro a uma palavra pela metade). Rótulos de linha
+ficam sempre puros: são clicáveis e muitas vezes contêm o comando real.
+
+O separador também muda por contexto, mesmo dentro de um modo: música usa
+`music`, download usa `wave`, sticker usa `cute`, admin usa `heavy`, erro usa
+`warning`.
+
+> **Regra:** a fonte é só decoração. `!play música do ano` continua
+> `!play música do ano` — copiável e executável.
+
+### Novos comandos da camada 2.0
+
+| Comando | O que faz |
+| --- | --- |
+| `!menumode [modo]` | Lista/troca o modo visual dos menus (por grupo). |
+| `!fotobot` | (dono) Troca a foto de perfil **do bot** respondendo a uma imagem — diferente de `!foto`, que muda a do grupo. Limite de 5 MB, erro sem stack. |
+| `!setcriador <campo> <valor>` | (dono) Edita a identidade que aparece no `!criador` e no `!owner`: `name`, `developer`, `about`, `quote`, `instagram`, `instagramUrl`, `tiktok`, `tiktokUrl`, `supportUrl`, `photoUrl`, `botPhotoUrl`. Fica no banco — sobrevive a restart e a update. `!setcriador reset [campo]` volta ao padrão. |
+| `!selo [nome\|random]` | (dono) Escolhe o selo (citação) do cartão `!criador`: `lua`, `sistema`, `seguranca`, `suporte`, `premium`, `anuncio`, `dev` — ou `random` para sortear a cada envio. |
+| `!criador [pergunta]` | Quem criou o Lua Bot: cartão **richResponse/GenAI** via `relayMessage` (imagem, dados reais do bot, redes sociais, suporte, data/hora). Se o servidor recusar o cartão, entrega as mesmas informações em texto. Dados editáveis no topo de `commands/general/criador.js`. |
+| `!poll <pergunta> \| <opção 1> \| <opção 2> [--selectableCount=N] [--announcement=true\|false]` | Cria uma **enquete** no chat (`pollCreationMessage` / V3 / V2). Pede confirmação antes de enviar. |
+| `!pollresult <nome> \| <opção>:<votos> \| ...` | Envia o **placar** de uma enquete (`pollResultSnapshotMessage`). Pede confirmação antes de enviar. |
+| `!call <numero|@mencao> [voz|video] [nome]` | Envia uma **Call Message** (chamada de voz `type 1` ou vídeo `type 2`, nome padrão `Hay`) para um número ou grupo. **Nunca envia direto**: cria uma pendência e só dispara depois que o mesmo usuário responde `1`/`sim`/`confirmar` (`2`/`não`/`cancelar` aborta). Expira em 30s. |
+| `!fotomenubot [chave]` | (dono) Troca a **imagem de cabeçalho dos menus** (`main`, `admin`, `sticker`, `life`, `download`, `profile`). Valida a imagem, regrava como JPEG, guarda backup em `backup/menu/` e desfaz com `!fotomenubot reset [chave]`. |
+| `!twitter <url>` (alias `!tw`, `!x`) | Baixa o vídeo/foto de um tweet com fluxo em etapas e card de resultado. |
+| `!fontes [estilo] <texto>` | Mostra/aplica as 18 fontes Unicode. |
+| `!dividers [categoria]` | Lista os separadores por categoria. |
+| `!timestamp [seg\|ms\|iso]` | Converte timestamp Unix (s, ms, ISO, horário em America/Sao_Paulo). |
+
+### Fluxo de mídia em etapas (`!play`, `!ytmp3`, `!ytmp4`, `!twitter`)
+
+```
+╔════════╗
+║ 🎵 𝓟𝓛𝓐𝓨 ║      Estado: BUSCANDO
+╚════════╝
+```
+
+O bot **não inventa porcentagem**: sem progresso real ele mostra a etapa
+(`BUSCANDO`, `ENCONTRADO`, `BAIXANDO`, `ENVIANDO`, `CONCLUÍDO`). Ao terminar,
+exibe card com título, canal, duração, formato, tamanho e tempo de
+processamento — apenas os dados que realmente existem.
+
+```
+╭─〔 🎵 𝐏𝐋𝐀𝐘 𝐑𝐄𝐀𝐃𝐘 〕
+│
+│ 🎵 *Título:* Imagine Dragons - Believer
+│ ℹ️ *Artista/Canal:* ImagineDragonsVEVO
+│ ⏱️ *Duração:* 3m 34s
+│ ⬇️ *Formato:* MP3
+│ ✨ *Tamanho:* 4.1 MB
+│
+╰──────────────────────────
+```
+
+### Identidade visual
+
+- `!fontes` lista os 18 estilos; `!fontes <estilo> <texto>` aplica no seu texto.
+- `!dividers [categoria]` mostra os separadores por categoria.
+- `!tema <preset>` troca o tema de cores (persistido no banco).
+
+Texto decorativo pode ser estilizado; **comandos executáveis nunca são** — `!fontes mono use !play` devolve `𝚞𝚜𝚎 !play`, com o comando copiável.
+
+### Metadados de comando (2.0)
+
+Além de `name`, `commands`, `category`, `description`, `usage`, `cooldown`,
+`ownerOnly`, `adminOnly`, `groupOnly`, `privateOnly` e `hidden`, os comandos
+aceitam `examples` (array) e `tags` (array, indexado pela busca do menu):
+
+```js
+module.exports = [
+  {
+    name: 'play',
+    commands: ['play'],
+    category: 'downloads',
+    description: 'Busca músicas/vídeos no YouTube e mostra opções para baixar.',
+    usage: '!play <nome da música>',
+    examples: ['!play imagine dragons - believer'],
+    tags: ['música', 'audio', 'youtube'],
+    cooldown: 8000,
+    execute: async (ctx) => { /* ... */ },
+  },
+];
+```
+
 ## Estrutura
 
 ```
@@ -613,6 +813,47 @@ O projeto é otimizado para Termux:
 pkg update && pkg upgrade
 pkg install nodejs-lts python make clang ffmpeg yt-dlp git unzip
 ```
+
+### Instalação completa no Termux (copia e cola)
+
+```bash
+pkg update -y && pkg upgrade -y
+pkg install -y nodejs-lts python make clang ffmpeg yt-dlp git unzip
+git clone https://github.com/yanrpoliveira3108-bit/luas-bot-whats.git ~/lua
+cd ~/lua && chmod +x update.sh start.sh
+cp .env.example .env          # só na primeira vez
+nano .env                     # OWNER_NUMBER=5511999999999 e BOT_PREFIX=!
+./update.sh                   # deps + compila better-sqlite3 + audit + smoke
+./start.sh                    # escaneia o QR na tela
+```
+
+**Ordem importa:** crie o `.env` **antes** do `./update.sh`. A etapa final do
+update roda a auditoria, e ela falha com `Dono configurado via .env — 0 dono(s)`
+se o `.env` ainda não existir.
+
+> **Enquanto o PR do Lua Bot 2.0 não for mergado na `main`**, troque a linha do
+> clone por:
+> ```bash
+> git clone -b arena/01a0a187-luas-bot-whats https://github.com/yanrpoliveira3108-bit/luas-bot-whats.git ~/lua
+> ```
+> A `main` ainda não tem as correções de botões, do SIGPIPE do `start.sh` nem do
+> fetch single-branch.
+
+No Termux o `npm install` usa `--ignore-scripts` (não há binário Android de
+`sharp`/`wrtc`) e o `update.sh` compila o `better-sqlite3` do código-fonte — por
+isso `python`, `make` e `clang` são obrigatórios. Leva alguns minutos na
+primeira vez. Se faltar algo, o script diz exatamente qual pacote instalar.
+
+**Atualizações seguintes** (preserva `.env`, `session/`, `database/`, `backup/`,
+`logs/`, `assets/`):
+
+```bash
+cd ~/lua && ./update.sh
+```
+
+Use `BOT_PREFIX` no `.env`, **nunca** `PREFIX`: no Termux `PREFIX` já existe
+(`/data/data/com.termux/files/usr`) e o `dotenv` não sobrescreve variáveis
+existentes — usar `PREFIX` quebra todos os comandos.
 
 ---
 

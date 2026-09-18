@@ -330,8 +330,11 @@ async function handleOpen(ctx, prefix) {
 
 module.exports = [
   {
-    name: 'tigrinho',
-    commands: ['tigrinho'],
+    // antes este arquivo declarava name/commands iguais aos de
+    // commands/rpg/tigrinho.js: o loader substituía um pelo outro em silêncio e
+    // este aqui nunca era executado. Agora é um comando próprio e alcançável.
+    name: 'tigrearcade',
+    commands: ['tigrearcade', 'tigrinhoarcade', 'arcadetigrinho'],
     category: 'games',
     description: '🐯 Caça-níquel arcade de fichas virtuais.',
     usage: '!tigrinho [jogar|fichas|historico|ranking|ajuda]',

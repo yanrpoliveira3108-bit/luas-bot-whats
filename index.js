@@ -97,6 +97,25 @@ const { cleanupTmp } = require('./utils/download');
 const autoBackup = require('./utils/autoBackup');
 autoBackup.startAutoBackup();
 
+// temporários órfãos (download/conversão interrompidos) + GC de estados de
+// progresso/menus: nada pode ficar para sempre em tmp/ ou em memória
+const tmpCleaner = require('./utils/tmpCleaner');
+const progressMod = require('./utils/progress');
+tmpCleaner
+  .sweepOrphans()
+  .then((r) => {
+    if (r.removed) logger.info({ removed: r.removed, freedKB: Math.round(r.freedBytes / 1024) }, 'temporários órfãos limpos no boot');
+  })
+  .catch((err) => logger.warn({ err: err.message }, 'falha na limpeza de temporários'));
+setInterval(() => {
+  try {
+    progressMod.sweep();
+    tmpCleaner.sweepActive();
+  } catch (_) {
+    /* limpeza nunca derruba o bot */
+  }
+}, 10 * 60 * 1000).unref();
+
 /* ------------------------- roteamento de eventos ------------------------ */
 
 connection.onMessage((sock, messages) => {

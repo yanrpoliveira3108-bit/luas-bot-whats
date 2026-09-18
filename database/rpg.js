@@ -127,6 +127,25 @@ function getPlantation(id) {
   return prepare('get_plant', `SELECT * FROM plantations WHERE id = ?`).get(id) || null;
 }
 
+/**
+ * Rega a plantação: grava a nova maturação e o horário da rega.
+ * (Fase 5: o SQL estava inline em commands/rpg/farm.js.)
+ */
+function waterPlantation(id, readyAt) {
+  return prepare(
+    'water_ready',
+    `UPDATE plantations SET ready_at = ?, watered_at = ? WHERE id = ?`
+  ).run(readyAt, now(), id);
+}
+
+/**
+ * Fertiliza a plantação: grava a nova maturação.
+ * (Fase 5: o SQL estava inline em commands/rpg/shop.js.)
+ */
+function fertilizePlantation(id, readyAt) {
+  return prepare('fert_plant', `UPDATE plantations SET ready_at = ? WHERE id = ?`).run(readyAt, id);
+}
+
 function setPlantationWatered(id) {
   return prepare('water_plant', `UPDATE plantations SET watered_at = ? WHERE id = ?`).run(now(), id);
 }
@@ -204,6 +223,8 @@ module.exports = {
   addPlantation,
   getPlantations,
   getPlantation,
+  waterPlantation,
+  fertilizePlantation,
   setPlantationWatered,
   setPlantationHarvested,
   countAnimals,

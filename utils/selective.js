@@ -239,11 +239,42 @@ function attachToSocket(sock) {
   return sock;
 }
 
+/**
+ * JIDs dos MEMBROS COMUNS de um grupo.
+ *
+ * Exclui administradores/superadministradores, os JIDs em `excludeJids`
+ * (tipicamente o próprio bot) e entradas inválidas ou duplicadas. Reusa
+ * `isAdmin` e `normalizeUserJid` — uma única fonte de verdade para "admin" e
+ * para comparação de JIDs (sem inventar formatos novos).
+ *
+ * @param {{participants?: Array<{id?:string, admin?:string|null}>}} groupMeta
+ * @param {string|string[]} [excludeJids] JIDs a remover (ex.: o bot)
+ * @returns {string[]} apenas membros comuns, únicos e válidos
+ */
+function regularMemberJids(groupMeta, excludeJids = []) {
+  const participants =
+    groupMeta && Array.isArray(groupMeta.participants) ? groupMeta.participants : [];
+  const list = Array.isArray(excludeJids) ? excludeJids : [excludeJids];
+  const excluded = new Set(list.map((j) => normalizeUserJid(j)).filter(Boolean));
+  const out = [];
+  const seen = new Set();
+  for (const p of participants) {
+    if (!p || typeof p.id !== 'string' || !p.id) continue; // sem id / null / vazio
+    if (isAdmin(p)) continue; // admin | superadmin
+    const canon = normalizeUserJid(p.id);
+    if (!canon || excluded.has(canon) || seen.has(canon)) continue;
+    seen.add(canon);
+    out.push(canon);
+  }
+  return out;
+}
+
 module.exports = {
   VALID_MODES,
   normalizeUserJid,
   isAdmin,
   resolveSelectiveRecipients,
+  regularMemberJids,
   sendSelective,
   sendSelectivePaymentMessage,
   sendSelectiveTextMessage,

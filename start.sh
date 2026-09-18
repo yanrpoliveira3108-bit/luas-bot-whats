@@ -130,9 +130,13 @@ chmod +x start.sh update.sh install.sh scripts/*.sh 2>/dev/null || true
 # (apenas aviso, não bloqueia)
 if [ -f .env.example ] && [ -f .env ]; then
   # conta chaves no example que não estão no .env
+  # "|| true" é obrigatório aqui: com set -euo pipefail, o "head -n 5" fecha o
+  # pipe antes do while terminar de escrever → SIGPIPE (exit 141) derrubava o
+  # start.sh ANTES de iniciar o bot em toda instalação limpa (.env novo tem
+  # muito mais chaves faltando do que 5).
   MISSING_KEYS=$(grep -E "^[A-Z_]+=" .env.example | cut -d= -f1 | while read -r key; do
     grep -qE "^$key=" .env || echo "$key"
-  done | head -n 5)
+  done | head -n 5 || true)
   if [ -n "$MISSING_KEYS" ]; then
     info "Novas chaves no .env.example que não estão no seu .env: $MISSING_KEYS"
     info "Considere atualizar seu .env com base no .env.example"

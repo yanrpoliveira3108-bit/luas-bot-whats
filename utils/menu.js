@@ -16,6 +16,7 @@ const commandHandler = require('../handlers/commandHandler');
 const { commandEmoji } = require('./commandEmoji');
 const interactive = require('./interactive');
 const numberFallback = require('./numberFallback');
+const menuRenderer = require('./menuRenderer');
 
 /**
  * Envia um menu.
@@ -48,7 +49,13 @@ async function sendMenu(ctx, opts = {}) {
     }
   }
 
-  const text = opts.text || opts.title || CONFIG.bot.name;
+  const rawText = opts.text || opts.title || CONFIG.bot.name;
+  // listas interativas têm limite curto de texto: decora sem estourar
+  const text = [
+    menuRenderer.header({ title: opts.title || CONFIG.bot.name, jid: ctx.remoteJid }),
+    '',
+    String(rawText),
+  ].join('\n').slice(0, 900);
   const ok = await interactive.sendList(ctx.socket, ctx.remoteJid, {
     title: opts.title || CONFIG.bot.name,
     text,
@@ -60,7 +67,15 @@ async function sendMenu(ctx, opts = {}) {
 
   if (!ok) {
     const lines = items.map((it, i) => `${i + 1}. ${it.title}`).join('\n');
-    const body = `*${opts.title || CONFIG.bot.name}*\n${opts.text ? '\n' + opts.text + '\n' : ''}\n\n${lines}\n\n_Responda com o número da opção._`;
+    const body = [
+      menuRenderer.header({ title: opts.title || CONFIG.bot.name, jid: ctx.remoteJid }),
+      opts.text ? `\n${opts.text}\n` : '',
+      menuRenderer.dividerLine(null, ctx.remoteJid),
+      '',
+      lines,
+      '',
+      menuRenderer.footer({ jid: ctx.remoteJid, hints: ['Responda com o número da opção'] }),
+    ].join('\n');
     await ctx.reply(body);
     numberFallback.setNumberMenu(
       ctx.remoteJid,

@@ -15,6 +15,7 @@ const market = require('../../plugins/life/market');
 const settings = require('../../database/settings');
 const { formatMoney } = require('../../utils/formatter');
 const { withLock } = require('../../utils/keyedMutex');
+const { dropMentionArgs } = require('../../utils/messages');
 
 module.exports = [
   {
@@ -53,7 +54,10 @@ module.exports = [
     cooldown: 1000,
     execute: async (ctx) => {
       const target = ctx.mentionedJid[0];
-      const amount = parseInt(ctx.args[ctx.mentionedJid.length ? 0 : 1], 10);
+      // a menção também está dentro de ctx.args: sem remover, o valor lido
+      // era o texto "@fulano" (parseInt -> NaN) e o comando nunca funcionava
+      const args = dropMentionArgs(ctx.args, ctx.mentionedJid);
+      const amount = parseInt(args[0], 10);
       if (!target || !Number.isFinite(amount)) return ctx.reply('⚠️ Use: !givecoin @usuario <valor> (negativo remove)');
       await withLock(target, () => {
         economy.addWallet(target, amount);
@@ -72,7 +76,10 @@ module.exports = [
     cooldown: 1000,
     execute: async (ctx) => {
       const target = ctx.mentionedJid[0];
-      const amount = parseInt(ctx.args[ctx.mentionedJid.length ? 0 : 1], 10);
+      // a menção também está dentro de ctx.args: sem remover, o valor lido
+      // era o texto "@fulano" (parseInt -> NaN) e o comando nunca funcionava
+      const args = dropMentionArgs(ctx.args, ctx.mentionedJid);
+      const amount = parseInt(args[0], 10);
       if (!target || !Number.isFinite(amount)) return ctx.reply('⚠️ Use: !setmoney @usuario <valor>');
       await withLock(target, () => {
         economy.setWallet(target, Math.max(0, amount));
@@ -91,8 +98,11 @@ module.exports = [
     cooldown: 1000,
     execute: async (ctx) => {
       const target = ctx.mentionedJid[0];
-      const itemId = String(ctx.args[ctx.mentionedJid.length ? 0 : 1] || '').toLowerCase();
-      const qty = parseInt(ctx.args[ctx.mentionedJid.length ? 1 : 2], 10) || 1;
+      // a menção também está dentro de ctx.args: sem remover, o valor lido
+      // era o texto "@fulano" (parseInt -> NaN) e o comando nunca funcionava
+      const args = dropMentionArgs(ctx.args, ctx.mentionedJid);
+      const itemId = String(args[0] || '').toLowerCase();
+      const qty = parseInt(args[1], 10) || 1;
       if (!target || !itemId) return ctx.reply('⚠️ Use: !giveitem @usuario <item> [qtd]');
       const item = rpg.getShopItem(itemId);
       if (!item) return ctx.reply('❌ Item não encontrado.');
@@ -113,8 +123,11 @@ module.exports = [
     cooldown: 1000,
     execute: async (ctx) => {
       const target = ctx.mentionedJid[0];
-      const itemId = String(ctx.args[ctx.mentionedJid.length ? 0 : 1] || '').toLowerCase();
-      const qty = parseInt(ctx.args[ctx.mentionedJid.length ? 1 : 2], 10) || 1;
+      // a menção também está dentro de ctx.args: sem remover, o valor lido
+      // era o texto "@fulano" (parseInt -> NaN) e o comando nunca funcionava
+      const args = dropMentionArgs(ctx.args, ctx.mentionedJid);
+      const itemId = String(args[0] || '').toLowerCase();
+      const qty = parseInt(args[1], 10) || 1;
       if (!target || !itemId) return ctx.reply('⚠️ Use: !removeitem @usuario <item> [qtd]');
       try {
         await withLock(target, () => {
@@ -137,7 +150,10 @@ module.exports = [
     cooldown: 1000,
     execute: async (ctx) => {
       const target = ctx.mentionedJid[0];
-      const value = parseInt(ctx.args[ctx.mentionedJid.length ? 0 : 1], 10);
+      // a menção também está dentro de ctx.args: sem remover, o valor lido
+      // era o texto "@fulano" (parseInt -> NaN) e o comando nunca funcionava
+      const args = dropMentionArgs(ctx.args, ctx.mentionedJid);
+      const value = parseInt(args[0], 10);
       if (!target || !Number.isFinite(value) || value < 1) return ctx.reply('⚠️ Use: !setlevel @usuario <nível>');
       await withLock(target, () => {
         life.updatePlayer(target, { level: Math.max(1, value), xp: Math.pow(Math.max(0, value - 1), 2) * 50 });
@@ -157,7 +173,10 @@ module.exports = [
     cooldown: 1000,
     execute: async (ctx) => {
       const target = ctx.mentionedJid[0];
-      const value = parseInt(ctx.args[ctx.mentionedJid.length ? 0 : 1], 10);
+      // a menção também está dentro de ctx.args: sem remover, o valor lido
+      // era o texto "@fulano" (parseInt -> NaN) e o comando nunca funcionava
+      const args = dropMentionArgs(ctx.args, ctx.mentionedJid);
+      const value = parseInt(args[0], 10);
       if (!target || !Number.isFinite(value) || value < 0) return ctx.reply('⚠️ Use: !setxp @usuario <xp>');
       await withLock(target, () => {
         const level = life.lifeLevelFromXp(value);

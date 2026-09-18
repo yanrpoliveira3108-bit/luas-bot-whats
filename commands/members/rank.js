@@ -1,6 +1,8 @@
 'use strict';
 
 const users = require('../../database/users');
+const cards = require('../../utils/cards');
+const { displayName } = require('../../engine/interactionEngine');
 const { renderRanking, TYPES } = require('../_shared/ranking');
 
 module.exports = [
@@ -16,6 +18,18 @@ module.exports = [
       const idx = top.findIndex((u) => u.id === ctx.sender);
       if (idx === -1) return ctx.reply('ℹ️ Você ainda não está no ranking. Envie mensagens para ganhar XP!');
       const u = top[idx];
+
+      const card = await cards.renderRankCard({
+        sock: ctx.socket,
+        jid: ctx.sender,
+        name: displayName(ctx.sender),
+        position: idx + 1,
+        total: users.count(),
+        xp: u.xp,
+        level: u.level,
+      });
+      if (await cards.sendCard(ctx, card, `🏆 *${idx + 1}º lugar*`)) return;
+
       await ctx.reply(`🏆 Sua posição: *${idx + 1}º* de ${users.count()} usuários\n▸ XP: ${u.xp}\n▸ Nível: ${u.level}`);
     },
   },

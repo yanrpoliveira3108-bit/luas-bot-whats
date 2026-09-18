@@ -67,23 +67,23 @@ module.exports = [
     cooldown: 3000,
     execute: async (ctx) => {
       const { FISH } = require('../../plugins/life/config');
-      const economy = require('../../database/economy');
       const rpg = require('../../database/rpg');
-      const { withLock } = require('../../utils/keyedMutex');
+      const economyService = require('../../services/economyService');
+      // A REGRA (remover do inventário + creditar + lançar no histórico) está em
+      // services/economyService.sellItem. O preço continua sendo o sell_price do
+      // item, exatamente como antes — o preço de mercado (plugins/life/market)
+      // é usado só na exibição do !precos.
       let total = 0;
       let count = 0;
-      await withLock(ctx.sender, () => {
-        for (const f of FISH) {
-          const item = rpg.getShopItem(f.id);
-          const has = economy.getItem(ctx.sender, f.id);
-          if (!has || has.quantity < 1 || !item) continue;
-          const gain = item.sell_price * has.quantity;
-          economy.removeItem(ctx.sender, f.id, has.quantity);
-          economy.addWallet(ctx.sender, gain);
-          total += gain;
-          count += has.quantity;
-        }
-      });
+      for (const f of FISH) {
+        const item = rpg.getShopItem(f.id);
+        if (!item) continue;
+        const has = require('../../database/economy').getItem(ctx.sender, f.id);
+        if (!has || has.quantity < 1) continue;
+        const r = await economyService.sellItem(ctx.sender, f.id, has.quantity, item.sell_price);
+        total += r.total;
+        count += r.qty;
+      }
       if (!count) return ctx.reply('🎣 Você não tem peixes para vender.');
       await ctx.reply(`💰 Vendeu ${count} peixe(s) por ${formatMoney(total)}.`);
     },

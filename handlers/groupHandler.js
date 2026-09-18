@@ -17,6 +17,7 @@
 const CONFIG = require('../config');
 const logger = require('../utils/logger').child('group');
 const groups = require('../database/groups');
+const moderationService = require('../services/moderationService');
 const { extractText, detectMediaType, getMentionedJids } = require('../utils/messages');
 const permissions = require('../utils/permissions');
 const toxicFilter = require('../utils/toxicFilter');
@@ -26,6 +27,29 @@ const toxicFilter = require('../utils/toxicFilter');
 const spamState = new Map(); // userJid -> { count, windowStart, lastText }
 const FLOOD_WINDOW_MS = 8000;
 const FLOOD_MAX = 8;
+/**
+ * A janela do flood é de segundos, mas quem sumia do grupo deixava a entrada na
+ * Map para sempre — em bot com muitos grupos isso cresce sem limite. A poda roda
+ * só quando o mapa passa do teto, então não custa nada no caminho da mensagem.
+ */
+const SPAM_STATE_MAX = 500;
+const SPAM_STATE_TTL_MS = 5 * 60 * 1000;
+
+function pruneSpamState(now = Date.now(), max = SPAM_STATE_MAX) {
+  if (spamState.size <= max) return 0;
+  let removed = 0;
+  for (const [key, st] of spamState) {
+    if (now - st.windowStart > SPAM_STATE_TTL_MS) {
+      spamState.delete(key);
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
+function spamStateSize() {
+  return spamState.size;
+}
 
 function checkSpamFlood(ctx) {
   const antiManager = require('../utils/antiManager');
@@ -34,6 +58,7 @@ function checkSpamFlood(ctx) {
   if (!isSpamEnabled && !isFloodEnabled) return { action: null };
 
   const now = Date.now();
+  pruneSpamState(now);
   const key = ctx.sender;
   let st = spamState.get(key);
   if (!st || now - st.windowStart > FLOOD_WINDOW_MS) {
@@ -435,17 +460,34 @@ async function maybeKickBanned(sock, jid, userJid) {
   }
 }
 
+/**
+ * Aplica uma advertência e, se o grupo configurar, remove o usuário.
+ *
+ * Desde a Fase 5 a REGRA (gravar aviso → contar → resolver a ação configurada →
+ * registrar o caso) está em services/moderationService.js. Aqui fica só a AÇÃO
+ * de WhatsApp, porque é este módulo que tem o `sock` — e porque não existe
+ * atomicidade real entre chamar a API do WhatsApp e gravar no banco: a ordem é
+ * ação → registro, com `metadata.source` marcando a origem.
+ */
 async function applyWarningFlow(sock, groupJid, userJid, reason, adminId) {
-  groups.addWarning(groupJid, userJid, reason, adminId);
-  const count = groups.countWarnings(groupJid, userJid);
-
-  const s = groups.getSettings(groupJid);
-  const thresholds = s.warning_thresholds || { 1: 'aviso', 2: 'aviso', 3: 'aviso' };
-  const action = thresholds[Math.min(count, 3)] || 'aviso';
+  const { count, action } = moderationService.applyWarning({
+    groupId: groupJid,
+    userId: userJid,
+    reason,
+    moderatorId: adminId,
+  });
 
   if (action === 'kick') {
     try {
       await sock.groupParticipantsUpdate(groupJid, [userJid], 'remove');
+      moderationService.recordAction({
+        groupId: groupJid,
+        userId: userJid,
+        moderatorId: adminId,
+        action: moderationService.ACTIONS.KICK,
+        reason,
+        metadata: { source: 'warnings', warnCount: count },
+      });
     } catch (err) {
       logger.warn({ err: err.message }, 'falha ao remover usuário advertido');
     }
@@ -465,4 +507,8 @@ module.exports = {
   mutedList,
   enforceMute,
   applyWarningFlow,
+  pruneSpamState,
+  spamStateSize,
+  /** uso interno/testes: referência da Map para semear estado */
+  __spamState: spamState,
 };

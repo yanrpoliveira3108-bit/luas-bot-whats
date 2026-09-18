@@ -74,7 +74,10 @@ function doBackup(reason = 'auto') {
   try {
     ensureDir();
     const ts = timestamp();
-    const destRoot = path.join(AUTO_DIR, `backup_${ts}_${reason}`);
+    const finalRoot = path.join(AUTO_DIR, `backup_${ts}_${reason}`);
+    // Estágio 1: monta tudo em <destino>.tmp. Enquanto não for validado, nenhum
+    // consumidor enxerga o backup — e um backup incompleto nunca substitui um válido.
+    const destRoot = `${finalRoot}.tmp`;
     fs.mkdirSync(destRoot, { recursive: true });
 
     let count = 0;
@@ -126,24 +129,91 @@ function doBackup(reason = 'auto') {
     };
     fs.writeFileSync(path.join(destRoot, 'info.json'), JSON.stringify(info, null, 2));
 
-    logger.info({ dest: destRoot, files: count, reason }, 'backup automático criado');
+    // Estágio 2: validação. Qualquer divergência descarta o staging.
+    const problems = validateBackup(destRoot, count);
+    if (problems.length) {
+      logger.warn({ dest: destRoot, problems }, 'backup inválido — descartado');
+      try { fs.rmSync(destRoot, { recursive: true, force: true }); } catch (_) {}
+      return null;
+    }
 
-    // limpa backups antigos (mantém últimos 5)
+    // Estágio 3: rename atômico para o nome final.
+    try {
+      fs.renameSync(destRoot, finalRoot);
+    } catch (err) {
+      logger.warn({ err: err.message }, 'rename do backup falhou — staging removido');
+      try { fs.rmSync(destRoot, { recursive: true, force: true }); } catch (_) {}
+      return null;
+    }
+
+    logger.info({ dest: finalRoot, files: count, reason }, 'backup automático criado');
+
+    // limpa backups antigos (mantém últimos 5) e stagings órfãos
     cleanupOldBackups();
 
-    return destRoot;
+    return finalRoot;
   } catch (err) {
     logger.warn({ err: err.message }, 'falha no backup automático');
     return null;
   }
 }
 
+/**
+ * Valida um staging antes do rename. Retorna lista de problemas (vazia = ok).
+ * Não confia só no contador: confere tamanho real dos arquivos críticos.
+ */
+function validateBackup(dir, count) {
+  const problems = [];
+  if (!(count >= 1)) problems.push('nenhum arquivo copiado');
+
+  let info = null;
+  try { info = JSON.parse(fs.readFileSync(path.join(dir, 'info.json'), 'utf-8')); } catch (_) {}
+  if (!info) problems.push('info.json ausente ou ilegível');
+  else if (info.files !== count) problems.push(`info.json declara ${info.files} mas ${count} foram copiados`);
+
+  const dbSrc = CONFIG.paths.databaseFile;
+  if (fs.existsSync(dbSrc)) {
+    const staged = path.join(dir, 'lua.db');
+    const srcSize = (() => { try { return fs.statSync(dbSrc).size; } catch (_) { return -1; } })();
+    const dstSize = (() => { try { return fs.statSync(staged).size; } catch (_) { return -1; } })();
+    if (srcSize > 0 && dstSize !== srcSize) problems.push(`lua.db incompleto (${dstSize}/${srcSize} bytes)`);
+  }
+
+  const envSrc = path.join(CONFIG.paths.root, '.env');
+  if (fs.existsSync(envSrc)) {
+    const srcSize = (() => { try { return fs.statSync(envSrc).size; } catch (_) { return -1; } })();
+    const dstSize = (() => { try { return fs.statSync(path.join(dir, '.env')).size; } catch (_) { return -1; } })();
+    if (srcSize > 0 && dstSize !== srcSize) problems.push(`.env incompleto (${dstSize}/${srcSize} bytes)`);
+  }
+
+  return problems;
+}
+
+/** Remove stagings .tmp abandonados (crash no meio do backup). */
+function sweepStaleTmp(maxAgeMs = 60 * 60 * 1000) {
+  let removed = 0;
+  try {
+    for (const name of fs.readdirSync(AUTO_DIR)) {
+      if (!name.endsWith('.tmp')) continue;
+      const full = path.join(AUTO_DIR, name);
+      try {
+        if (Date.now() - fs.statSync(full).mtimeMs > maxAgeMs) {
+          fs.rmSync(full, { recursive: true, force: true });
+          removed++;
+        }
+      } catch (_) {}
+    }
+  } catch (_) {}
+  return removed;
+}
+
 function cleanupOldBackups() {
   try {
     ensureDir();
+    sweepStaleTmp();
     const dirs = fs.readdirSync(AUTO_DIR)
       .map((d) => ({ name: d, path: path.join(AUTO_DIR, d), stat: (() => { try { return fs.statSync(path.join(AUTO_DIR, d)); } catch (_) { return null; } })() }))
-      .filter((x) => x.stat && x.stat.isDirectory())
+      .filter((x) => x.stat && x.stat.isDirectory() && !x.name.endsWith('.tmp'))
       .sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs);
 
     if (dirs.length > MAX_BACKUPS) {
@@ -166,6 +236,8 @@ function listBackups() {
         try {
           const stat = fs.statSync(p);
           if (!stat.isDirectory()) return null;
+          // staging em andamento não é backup: nunca listar como disponível
+          if (d.endsWith('.tmp')) return null;
           const infoPath = path.join(p, 'info.json');
           let info = {};
           if (fs.existsSync(infoPath)) {
@@ -206,8 +278,11 @@ function stopAutoBackup() {
 
 module.exports = {
   doBackup,
+  validateBackup,
+  sweepStaleTmp,
   listBackups,
   startAutoBackup,
   stopAutoBackup,
   AUTO_DIR,
+  MAX_BACKUPS,
 };

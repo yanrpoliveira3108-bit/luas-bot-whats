@@ -40,7 +40,7 @@ module.exports = [
   },
   {
     name: 'kick',
-    commands: ['kick', 'remover', 'expulsar'],
+    commands: ['kick', 'remover', 'expulsar', 'remove'],
     category: 'admin',
     adminOnly: true,
     groupOnly: true,
@@ -110,7 +110,7 @@ module.exports = [
   },
   {
     name: 'marcar',
-    commands: ['marcar', 'tagall', 'todos'],
+    commands: ['marcar', 'tagall', 'todos', 'everyone'],
     category: 'admin',
     adminOnly: true,
     groupOnly: true,
@@ -137,7 +137,9 @@ module.exports = [
     execute: async (ctx) => {
       const parts = await getParticipants(ctx);
       const mentions = parts.map((p) => p.id).filter((id) => id !== ctx.socket.user.id);
-      const text = ctx.args.join(' ') || '📢';
+      // Responder a uma mensagem + !hidetag reenvia o texto dela marcando todos.
+      // Prioridade: argumento explícito > texto da mensagem respondida > 📢.
+      const text = ctx.args.join(' ') || ctx.quotedText || '📢';
       await ctx.socket.sendMessage(ctx.remoteJid, { text, mentions });
     },
   },
@@ -158,7 +160,7 @@ module.exports = [
   },
   {
     name: 'membros',
-    commands: ['membros'],
+    commands: ['membros', 'members'],
     category: 'admin',
     groupOnly: true,
     description: 'Lista os membros do grupo.',

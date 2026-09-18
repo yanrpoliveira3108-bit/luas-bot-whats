@@ -13,6 +13,12 @@
 
 'use strict';
 
+const commandHandler = require('../../handlers/commandHandler');
+const selective = require('../../utils/selective');
+const CONFIG = require('../../config');
+const settings = require('../../database/settings');
+const logger = require('../../utils/logger').child('pix');
+
 const USAGE = (prefix) =>
   `Uso correto:\n${prefix}pix [texto]|[valor]|[moeda]\n\nExemplo:\n${prefix}pix Pagamento do pedido|10000|BRL`;
 
@@ -21,6 +27,34 @@ function stripCommand(text, prefix, name) {
   const esc = String(prefix || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp('^' + esc + name + '\\b\\s*', 'i');
   return String(text || '').replace(re, '');
+}
+
+/**
+ * Em GRUPO, devolve os JIDs dos membros comuns (sem admin/superadmin/bot/
+ * duplicados) para usar como `mentions`. Em privado, ou sem participantes
+ * recuperáveis, devolve [] — e o bot nunca quebra por isso.
+ *
+ * Reusa o cache de metadata do commandHandler (TTL 30 s): uma única chamada por
+ * execução, sem arquitetura paralela. O destino do envio continua sendo o JID do
+ * grupo — os JIDs aqui são só para mencionar, nunca para enviar individualmente.
+ */
+async function groupMemberMentions(ctx) {
+  if (!ctx.isGroup) return [];
+  try {
+    const meta = await commandHandler.getGroupMetadata(ctx.socket, ctx.remoteJid);
+    const participants = (meta && meta.participants) || [];
+    const botJid = (ctx.socket && ctx.socket.user && ctx.socket.user.id) || '';
+    const memberJids = selective.regularMemberJids(meta, [botJid]);
+    const admins = participants.filter((x) => selective.isAdmin(x)).length;
+    logger.debug(
+      { grupo: ctx.remoteJid, participantes: participants.length, admins, membrosComuns: memberJids.length, botExcluido: botJid ? 1 : 0 },
+      '[PIX] participantes do grupo separados (mentions)'
+    );
+    return memberJids;
+  } catch (err) {
+    logger.warn({ err: (err && err.message) || String(err) }, '[PIX] falha ao obter membros do grupo — sem mentions');
+    return [];
+  }
 }
 
 module.exports = [
@@ -54,15 +88,21 @@ module.exports = [
         return ctx.reply(`⚠️ Campo(s) faltando: ${missing.join(', ')}.\n\n${USAGE(ctx.prefix)}`);
       }
 
-      // valores claramente inválidos são rejeitados (sem conversões silenciosas)
-      if (!/^\d+$/.test(amount) || Number(amount) <= 0) {
-        return ctx.reply(`⚠️ Valor inválido: "${amount}". Informe um número inteiro positivo.\n\n${USAGE(ctx.prefix)}`);
+      // valores claramente inválidos são rejeitados (sem conversões silenciosas).
+      // aceita inteiro ou decimal com "," ou "." (ex.: 29,90); o número em si é
+      // validado separadamente para barrar 0, negativos, NaN e texto.
+      const amountNorm = String(amount).replace(',', '.');
+      const isMoney = /^\d+(?:\.\d{1,2})?$/.test(amountNorm) && Number(amountNorm) > 0;
+      if (!isMoney) {
+        return ctx.reply(`⚠️ Valor inválido: "${amount}". Informe um número positivo (ex.: 29,90).\n\n${USAGE(ctx.prefix)}`);
       }
       if (!/^[A-Za-z]{3}$/.test(currency)) {
         return ctx.reply(`⚠️ Moeda inválida: "${currency}". Use um código de 3 letras (ex.: BRL, USD, IDR).\n\n${USAGE(ctx.prefix)}`);
       }
 
-      await ctx.socket.sendMessage(ctx.remoteJid, {
+      // Mensagem ÚNICA para o JID atual. Em grupo, os membros comuns vão como
+      // `mentions` (não há envio individual por participante).
+      const payPayload = {
         payment: {
           note,
           currency,
@@ -76,7 +116,30 @@ module.exports = [
             subtextArgb: 'your_subtext',
           },
         },
-      });
+      };
+
+      const memberJids = await groupMemberMentions(ctx);
+      if (memberJids.length) payPayload.mentions = memberJids;
+
+      // Camada 2 — entrega seletiva REAL (transporte), somente se habilitada e
+      // suportada: o vendor restringe a distribuição da mensagem aos membros
+      // comuns via relayMessage(selectiveParticipants). Em QUALQUER falha — ou
+      // com o recurso desligado (padrão) — cai no envio normal acima, que já
+      // carrega as mentions. Nunca há envio individual por participante.
+      // override em runtime (!pixfiltro) > padrão do .env (PIX_SELECTIVE)
+      const selectiveOn = settings.getBool('pix:selective', !!(CONFIG.pix && CONFIG.pix.selective));
+      logger.debug({ grupo: ctx.isGroup ? ctx.remoteJid : null, seletivo: selectiveOn ? 'SIM' : 'NAO', membros: memberJids.length }, '[PIX] mecanismo seletivo avaliado');
+      if (ctx.isGroup && memberJids.length && selectiveOn && typeof ctx.socket.relayMessage === 'function') {
+        try {
+          await selective.sendSelectivePaymentMessage(ctx.socket, ctx.remoteJid, payPayload.payment, { mode: 'custom', recipients: memberJids });
+          logger.info({ grupo: ctx.remoteJid, destinatarios: memberJids.length }, '[PIX] envio seletivo realizado (transporte)');
+          return;
+        } catch (err) {
+          logger.warn({ err: (err && err.message) || String(err) }, '[PIX] seletivo falhou — usando envio normal com mentions');
+        }
+      }
+
+      await ctx.socket.sendMessage(ctx.remoteJid, payPayload);
     },
   },
 ];

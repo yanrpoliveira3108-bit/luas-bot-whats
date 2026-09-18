@@ -14,99 +14,21 @@
 const Jimp = require('jimp');
 const templates = require('./templates');
 const CONFIG = require('./config');
+// primitivos de desenho compartilhados com as cards (utils/cards/*)
+const kit = require('../../utils/imageKit');
 
 const { width: W, height: H } = CONFIG.size;
 const C = CONFIG.theme.colors;
 
-/** Remove acentos (fontes bitmap do Jimp não têm glifos acentuados). */
-function clean(s) {
-  return String(s == null ? '' : s)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^\x20-\x7EÀ-ÿ]/g, '')
-    .replace(/[^\x20-\x7E]/g, '')
-    .trim();
-}
-
-function rgba(arr, a) {
-  return Jimp.rgbaToInt(arr[0], arr[1], arr[2], Math.max(0, Math.min(255, Math.round(a))));
-}
-
-function blend(img, x, y, r, g, b, a) {
-  if (x < 0 || y < 0 || x >= img.bitmap.width || y >= img.bitmap.height) return;
-  const idx = img.getPixelIndex(x, y);
-  const d = img.bitmap.data;
-  const sa = a / 255;
-  d[idx] = Math.round(d[idx] * (1 - sa) + r * sa);
-  d[idx + 1] = Math.round(d[idx + 1] * (1 - sa) + g * sa);
-  d[idx + 2] = Math.round(d[idx + 2] * (1 - sa) + b * sa);
-  d[idx + 3] = Math.min(255, d[idx + 3] + a);
-}
-
-/** Trunca com "…" até caber em maxWidth (na fonte dada). */
-function fit(font, text, maxWidth) {
-  let t = text;
-  while (t.length > 1 && Jimp.measureText(font, t) > maxWidth) {
-    t = t.slice(0, -1);
-  }
-  return t.length < text.length ? t.slice(0, -1) + '…' : t;
-}
-
-async function loadFont(name) {
-  return Jimp.loadFont(Jimp[name]);
-}
-
 /* ------------------------------ scrims ------------------------------ */
+// Os primitivos vieram de utils/imageKit (mesma implementação, sem cópia).
+const {
+  clean, rgba, blend, blendRegion, scrim, scrimRight, scrimBlock,
+  drawRect, fillCircle, punchHole, labelBar, fit, loadFont,
+} = kit;
 
-/** Véu uniforme escuro (uniformiza e melhora contraste). */
-function scrim(img, alpha) {
-  blendRegion(img, 0, 0, W, H, alpha);
-}
-
-function blendRegion(img, x0, y0, w, h, alpha, r = 4, g = 3, b = 12) {
-  const x1 = Math.min(W, x0 + w);
-  const y1 = Math.min(H, y0 + h);
-  for (let y = Math.max(0, y0); y < y1; y++) {
-    for (let x = Math.max(0, x0); x < x1; x++) {
-      blend(img, x, y, r, g, b, alpha);
-    }
-  }
-}
-
-/** Gradiente horizontal (esquerda fraca → direita forte) — coluna de dados. */
-function scrimRight(img, x0, maxAlpha) {
-  const x1 = Math.min(W, x0 + (W - x0));
-  for (let x = x0; x < x1; x++) {
-    const t = (x - x0) / (x1 - x0);
-    const a = Math.round(maxAlpha * t * t);
-    for (let y = 0; y < H; y++) blend(img, x, y, 4, 3, 12, a);
-  }
-}
-
-/** Véu vertical atrás do bloco de identidade (nome/número/chip). */
-function scrimBlock(img, cx, w, y0, y1, maxAlpha) {
-  const x0 = Math.max(0, Math.floor(cx - w / 2));
-  const x1 = Math.min(W, Math.ceil(cx + w / 2));
-  for (let y = y0; y < y1; y++) {
-    for (let x = x0; x < x1; x++) {
-      const dx = Math.abs(x - cx) / (w / 2);
-      const a = Math.round(maxAlpha * (1 - dx * dx));
-      if (a > 0) blend(img, x, y, 4, 3, 12, a);
-    }
-  }
-}
 
 /* ------------------------------ HUD ---------------------------------- */
-
-function drawRect(img, x, y, w, h, col, a) {
-  const x0 = Math.min(x, x + w);
-  const x1 = Math.max(x, x + w);
-  const y0 = Math.min(y, y + h);
-  const y1 = Math.max(y, y + h);
-  for (let yy = y0; yy <= y1; yy++) {
-    for (let xx = x0; xx <= x1; xx++) blend(img, xx, yy, col[0], col[1], col[2], a);
-  }
-}
 
 /** Moldura HUD (bordas neon + colchetes + scanlines). */
 function drawHud(img) {
@@ -136,38 +58,6 @@ function drawHud(img) {
 }
 
 /* ------------------------------ foto --------------------------------- */
-
-function fillCircle(img, cx, cy, r, [rr, gg, bb], a) {
-  const x0 = Math.max(0, Math.floor(cx - r));
-  const x1 = Math.min(img.bitmap.width - 1, Math.ceil(cx + r));
-  const y0 = Math.max(0, Math.floor(cy - r));
-  const y1 = Math.min(img.bitmap.height - 1, Math.ceil(cy + r));
-  for (let y = y0; y <= y1; y++) {
-    for (let x = x0; x <= x1; x++) {
-      const dx = x - cx;
-      const dy = y - cy;
-      if (dx * dx + dy * dy <= r * r) blend(img, x, y, rr, gg, bb, a);
-    }
-  }
-}
-
-/** Recorta o miolo (alpha 0) de um círculo — faz um anel. */
-function punchHole(img, cx, cy, r) {
-  const x0 = Math.max(0, Math.floor(cx - r));
-  const x1 = Math.min(img.bitmap.width - 1, Math.ceil(cx + r));
-  const y0 = Math.max(0, Math.floor(cy - r));
-  const y1 = Math.min(img.bitmap.height - 1, Math.ceil(cy + r));
-  for (let y = y0; y <= y1; y++) {
-    for (let x = x0; x <= x1; x++) {
-      const dx = x - cx;
-      const dy = y - cy;
-      if (dx * dx + dy * dy <= r * r) {
-        const idx = img.getPixelIndex(x, y);
-        img.bitmap.data[idx + 3] = 0;
-      }
-    }
-  }
-}
 
 /** Foto: crop central quadrado → círculo, anel neon duplo + glow + sombra. */
 async function compositePhoto(card, photoBuffer) {
@@ -212,11 +102,6 @@ async function compositePhoto(card, photoBuffer) {
 }
 
 /* ------------------------------ textos ------------------------------- */
-
-/** Faixa translúcida (label bar). */
-function labelBar(img, x, y, w, h, a = 150) {
-  blendRegion(img, x, y, w, h, a, 9, 5, 22);
-}
 
 async function drawInfo(card, data) {
   const [fTitle, fSub, fName, fValue, fLabel, fBrand, fSmall] = await Promise.all([
