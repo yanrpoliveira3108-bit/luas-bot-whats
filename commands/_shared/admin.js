@@ -17,7 +17,8 @@ async function getParticipants(ctx) {
 /** Resolve o usuário-alvo (menção > argumento numérico). */
 function resolveTarget(ctx) {
   if (ctx.mentionedJid && ctx.mentionedJid.length) return ctx.mentionedJid[0];
-  const raw = (ctx.args[0] || '').trim();
+  // aceita "@5522...", "<@5522...>" e "5522..." (sem contextInfo de menção)
+  const raw = (ctx.args[0] || '').trim().replace(/^[<]?@+/, '').replace(/>$/, '');
   if (raw) return toJid(raw);
   return null;
 }

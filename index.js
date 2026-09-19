@@ -92,6 +92,9 @@ logger.info({ tag: 'OWNER' }, '[LUA][OWNER] Owner carregado do .env');
 // handlers
 const commandHandler = require('./handlers/commandHandler');
 const groupHandler = require('./handlers/groupHandler');
+const eventHandler = require('./handlers/eventHandler');
+const janitor = require('./utils/janitor');
+const autobot = require('./utils/autobot');
 const connection = require('./connection/connect');
 const { cleanupTmp } = require('./utils/download');
 const autoBackup = require('./utils/autoBackup');
@@ -99,9 +102,9 @@ autoBackup.startAutoBackup();
 
 /* ------------------------- roteamento de eventos ------------------------ */
 
-connection.onMessage((sock, messages) => {
+connection.onMessage((sock, messages, type) => {
   for (const msg of messages) {
-    commandHandler.handleMessage(sock, msg).catch((err) => {
+    commandHandler.handleMessage(sock, msg, type).catch((err) => {
       logger.error({ err: err.message }, 'erro não tratado em mensagem');
     });
   }
@@ -118,6 +121,36 @@ connection.onGroupUpdate((sock, ev) => {
     logger.error({ err: err.message }, 'erro em groups.update');
   });
 });
+
+// Eventos usados pelos antis que não podem ser decididos pela mensagem:
+// edição/revogação (anti editar/apagar), reação (anti reação) e chamada.
+connection.onMessageUpdate((sock, updates) => {
+  eventHandler.handleMessageUpdate(sock, updates).catch((err) => {
+    logger.error({ err: err.message }, 'erro em messages.update');
+  });
+});
+
+connection.onReaction((sock, reactions) => {
+  eventHandler.handleReactions(sock, reactions).catch((err) => {
+    logger.error({ err: err.message }, 'erro em messages.reaction');
+  });
+});
+
+connection.onCall((sock, calls) => {
+  eventHandler.handleCalls(sock, calls).catch((err) => {
+    logger.error({ err: err.message }, 'erro em call');
+  });
+});
+
+/* ---------------------- AutoBot + faxina de memória ---------------------- */
+
+// Cria as chaves padrão dos recursos globais e garante que o núcleo do
+// AutoBot está carregado antes de qualquer mensagem chegar.
+autobot.boot();
+ui.ok(`AutoBot pronto (${autobot.FEATURES.length} recursos)`);
+
+// UM timer para todas as limpezas de memória (utils/janitor).
+janitor.start();
 
 /* --------------------------- limpeza de tmp ----------------------------- */
 
