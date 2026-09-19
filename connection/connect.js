@@ -47,7 +47,17 @@ let lastCloseReason = null;
 // tentar sozinho e avisa (evita o loop infinito "reconectando...").
 const MAX_RECONNECT_ATTEMPTS = 8;
 
-const listeners = { message: null, groupParticipants: null, groupUpdate: null };
+// Listeners de evento registrados pelo index.js. Cada um tem UM dono —
+// evita o problema de "listener que nunca roda" ou de dois handlers
+// disputando o mesmo evento.
+const listeners = {
+  message: null,          // messages.upsert
+  groupParticipants: null, // group-participants.update
+  groupUpdate: null,       // groups.update
+  messageUpdate: null,     // messages.update (edição/revogação) — antis de edição/apagar
+  reaction: null,          // messages.reaction — anti reação
+  call: null,              // call — anti chamada
+};
 const statusListeners = new Set();
 
 /* --------------------------- eventos de status ----------------------- */
@@ -116,6 +126,15 @@ function onGroupParticipants(fn) {
 }
 function onGroupUpdate(fn) {
   listeners.groupUpdate = fn;
+}
+function onMessageUpdate(fn) {
+  listeners.messageUpdate = fn;
+}
+function onReaction(fn) {
+  listeners.reaction = fn;
+}
+function onCall(fn) {
+  listeners.call = fn;
 }
 
 /* ------------------------------ getters ------------------------------ */
@@ -358,6 +377,21 @@ function wireEvents(sockRef, saveCreds) {
   sockRef.ev.on('groups.update', (ev) => {
     if (listeners.groupUpdate) listeners.groupUpdate(sockRef, ev);
   });
+
+  // Edição e "apagar para todos" chegam por messages.update; reações por
+  // messages.reaction; chamadas por call. Sem estes listeners, os antis
+  // correspondentes simplesmente não existiriam (era o caso antes).
+  sockRef.ev.on('messages.update', (updates) => {
+    if (listeners.messageUpdate) listeners.messageUpdate(sockRef, updates);
+  });
+
+  sockRef.ev.on('messages.reaction', (reactions) => {
+    if (listeners.reaction) listeners.reaction(sockRef, reactions);
+  });
+
+  sockRef.ev.on('call', (calls) => {
+    if (listeners.call) listeners.call(sockRef, calls);
+  });
 }
 
 /** Mensagem amigável (pt-BR) para um código de fechamento da conexão. */
@@ -593,6 +627,9 @@ async function shutdown() {
 
 module.exports = {
   connect,
+  onMessageUpdate,
+  onReaction,
+  onCall,
   shutdown,
   changeSession,
   restoreSession,

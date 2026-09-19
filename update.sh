@@ -26,16 +26,23 @@ DELETE_SOURCE=0
 FORCE=0
 ARCHIVE=""
 SHOW_HELP=0
+BRANCH_ALVO=""
+DEV=0
 
-for arg in "$@"; do
+while [ "$#" -gt 0 ]; do
+  arg="$1"
   case "$arg" in
     --delete-source|--rm-source) DELETE_SOURCE=1 ;;
     --force|-f) FORCE=1 ;;
     --help|-h) SHOW_HELP=1 ;;
+    --dev) DEV=1 ;;
+    --branch) BRANCH_ALVO="${2:-}"; shift ;;
+    --branch=*) BRANCH_ALVO="${arg#--branch=}" ;;
     *.zip|*.tar.gz|*.tgz)
       if [ -f "$arg" ]; then ARCHIVE="$arg"; else err "Arquivo não encontrado: $arg"; exit 1; fi ;;
     *) if [ -n "$arg" ]; then warn "Argumento desconhecido ignorado: $arg"; fi ;;
   esac
+  shift
 done
 
 if [ "$SHOW_HELP" -eq 1 ]; then
@@ -45,11 +52,14 @@ Uso: ./update.sh [opções] [arquivo.zip]
 Opções:
   --delete-source   Limpeza segura de arquivos temporários APÓS atualizar
   --force, -f       Stash automático se houver alterações locais + reset com confirmação se divergiu
+  --dev             Usa a branch de desenvolvimento mais recente (arena/*) no lugar da main
+  --branch <nome>   Atualiza a partir de uma branch específica (ex.: arena/01a0b7fd-luas-bot-whats)
   --help, -h        Mostra esta ajuda
 
 Exemplos:
   cd ~/lua && ./update.sh --delete-source && ./start.sh
   cd ~/lua && ./update.sh --force && ./start.sh
+  cd ~/lua && ./update.sh --dev && ./start.sh     # pega as últimas melhorias (dev)
 EOF
   exit 0
 fi
@@ -147,7 +157,7 @@ else
     ARENA_REMOTE=$(git branch -r | grep "origin/arena/" | head -n 1 | sed 's/.*origin\///' | xargs || true)
     if [ -n "$ARENA_REMOTE" ]; then
       info "Branch arena remota encontrada: $ARENA_REMOTE"
-      info "Para últimas melhorias: git checkout $ARENA_REMOTE && ./update.sh"
+      info "Para últimas melhorias: ./update.sh --dev   (ou ./update.sh --branch $ARENA_REMOTE)"
       echo ""
     fi
   fi
@@ -169,7 +179,11 @@ else
   fi
 
   step "Buscando atualizações (git fetch)..."
-  # Corrige clones single-branch (apenas main) — busca todas as branches
+  # Clones feitos com --single-branch (e o clone padrão antigo) só conhecem a
+  # main: o fetch "dá certo" mas as branches arena/* nunca aparecem, então o
+  # update jura que "está atualizado". Aqui o refspec completo é gravado no
+  # repositório — a partir daí TODAS as branches passam a ser buscadas.
+  git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*" 2>/dev/null || true
   if ! git fetch origin --prune 2>/dev/null; then
     if ! git fetch origin "+refs/heads/*:refs/remotes/origin/*" --prune 2>/dev/null; then
       err "Falha no git fetch. Verifique internet"
@@ -180,6 +194,34 @@ else
     git fetch origin "$CURRENT_BRANCH":"refs/remotes/origin/$CURRENT_BRANCH" 2>/dev/null || true
   fi
   ok "Fetch concluído"
+
+  # --dev: escolhe automaticamente a branch de desenvolvimento mais recente
+  if [ "$DEV" -eq 1 ] && [ -z "$BRANCH_ALVO" ]; then
+    BRANCH_ALVO=$(git for-each-ref --sort=-committerdate --format='%(refname:short)' 'refs/remotes/origin/arena/*' 2>/dev/null | head -n 1 | sed 's#^origin/##' || true)
+    if [ -z "$BRANCH_ALVO" ]; then err "Nenhuma branch arena/* encontrada no remoto"; exit 1; fi
+    info "Branch de desenvolvimento mais recente: $BRANCH_ALVO"
+  fi
+
+  if [ -n "$BRANCH_ALVO" ]; then
+    if ! git rev-parse --verify "origin/$BRANCH_ALVO" >/dev/null 2>&1; then
+      err "Branch remota não encontrada: origin/$BRANCH_ALVO"
+      echo "  Branches disponíveis:"; git branch -r | sed 's/^/    /'
+      exit 1
+    fi
+    if [ "$CURRENT_BRANCH" != "$BRANCH_ALVO" ]; then
+      step "Trocando para a branch $BRANCH_ALVO..."
+      if ! git checkout -B "$BRANCH_ALVO" "origin/$BRANCH_ALVO" 2>/dev/null; then
+        err "Falha ao trocar para $BRANCH_ALVO (alterações locais? use --force)"
+        exit 1
+      fi
+      git branch --set-upstream-to="origin/$BRANCH_ALVO" "$BRANCH_ALVO" >/dev/null 2>&1 || true
+      CURRENT_BRANCH="$BRANCH_ALVO"
+      if echo "$CURRENT_BRANCH" | grep -q "^arena/"; then IS_ARENA=1; fi
+      ok "Branch atual: $CURRENT_BRANCH"
+    else
+      info "Já está na branch solicitada: $CURRENT_BRANCH"
+    fi
+  fi
 
   UPSTREAM=""
   if [ "$IS_ARENA" -eq 1 ]; then
@@ -345,9 +387,21 @@ rm -f tmp/lua_audit.log
 if node test/smoke.js >tmp/lua_smoke.log 2>&1; then ok "Smoke test: OK"; else err "Smoke falhou:"; tail -n 20 tmp/lua_smoke.log; exit 1; fi
 rm -f tmp/lua_smoke.log
 
+# Suíte do AutoBot: se falhar, o update NÃO é abortado (os arquivos já foram
+# atualizados) — mas o aviso fica visível para investigar antes de subir.
+if [ -f test/autobot.test.js ]; then
+  if OWNER_NUMBER="${OWNER_NUMBER:-1}" node test/autobot.test.js >tmp/lua_autobot.log 2>&1; then
+    ok "AutoBot: testes OK"
+  else
+    warn "Testes do AutoBot falharam (veja tmp/lua_autobot.log)"; tail -n 10 tmp/lua_autobot.log | sed 's/^/    /'
+  fi
+  rm -f tmp/lua_autobot.log
+fi
+
 echo ""; echo "============================="; ok "Atualização concluída!"
 echo ""; echo "📁 Dados preservados: .env, session/, database/, backup/, logs/, assets/"
 if [ -n "${BEFORE_SHA:-}" ] && [ -n "${AFTER_SHA:-}" ] && [ "$BEFORE_SHA" != "$AFTER_SHA" ]; then echo "🔄 Atualizado: ${BEFORE_SHA:0:7} → ${AFTER_SHA:0:7} ($BEHIND novos)"; fi
+echo "🌿 Branch: ${CURRENT_BRANCH:-?}"
 echo "📦 Snapshot: $SNAP"
 echo "🚀 Inicie: ./start.sh"
 echo "============================="; echo ""

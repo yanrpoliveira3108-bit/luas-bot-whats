@@ -1,103 +1,135 @@
+/**
+ * commands/admin/filters.js — comandos CLÁSSICOS dos antis (compatibilidade).
+ *
+ * Os nomes públicos (`!antilink`, `!antispam`, `!antiinvite`, `!antifoto`,
+ * `!antivv`, ...) foram PRESERVADOS exatamente como eram. O que mudou é o
+ * miolo: em vez de cada comando gravar direto em `settings.filters`, todos
+ * passam pelo núcleo do AutoBot (utils/autobot.js) — ou seja, o mesmo estado
+ * consultado pelo motor de execução, pelo `!anti` avançado, pelos menus e
+ * pelo `!statusgrupo`.
+ *
+ * Resposta padronizada (todos os on/off do projeto):
+ *
+ *   ✅ Recurso ativado.
+ *   🔒 Anti Link • !antilink
+ *
+ *   ❌ Recurso desativado.
+ *   🔒 Anti Link • !antilink
+ */
+
 'use strict';
 
 const groups = require('../../database/groups');
+const autobot = require('../../utils/autobot');
 
-/** Fábrica de comando de filtro on/off. */
-function makeFilter(name, description, key, aliases = []) {
+const ON_WORDS = ['on', 'ligar', 'ativar', 'liga', '1', 'sim', 'true', 'enable'];
+const OFF_WORDS = ['off', 'desligar', 'desativar', 'desativa', '0', 'nao', 'não', 'false', 'disable'];
+
+function botAdminHint(ctx) {
+  return ctx.isBotAdmin ? '' : '\n_⚠️ Para APAGAR as mensagens, o bot precisa ser admin do grupo (senão ele só avisa)._';
+}
+
+function replyState(ctx, def, enabled) {
+  const first = enabled ? '✅ Recurso ativado.' : '❌ Recurso desativado.';
+  return ctx.reply(`${first}\n${def.label} • !${ctx.command}${botAdminHint(ctx)}`);
+}
+
+function replyInfo(ctx, def) {
+  const on = autobot.isEnabled(ctx.remoteJid, def.id);
+  return ctx.reply(
+    `${on ? '✅ Recurso ativado.' : '❌ Recurso desativado.'}\n` +
+      `${def.label} • !${def.cmd}\n` +
+      `📝 ${def.desc}\n` +
+      `💡 Uso: !${ctx.command} on|off`
+  );
+}
+
+/**
+ * Comando clássico de anti (nome público preservado).
+ * @param {string} featureId id no registro do AutoBot
+ * @param {string} publicName trigger público (ex.: 'antiinvite')
+ * @param {string[]} aliases triggers extras
+ */
+function legacyCommand(featureId, publicName, aliases = [], extra = {}) {
+  const def = autobot.resolve(featureId);
+  if (!def) throw new Error(`filters.js: recurso desconhecido "${featureId}"`);
   return {
-    name,
-    commands: [name, ...aliases],
+    name: publicName,
+    commands: [publicName, ...aliases],
     category: 'admin',
     adminOnly: true,
     groupOnly: true,
-    description,
-    usage: `!${name} on|off`,
+    description: def.desc,
+    usage: `!${publicName} on|off`,
     cooldown: 1500,
     execute: async (ctx) => {
       const arg = (ctx.args[0] || '').toLowerCase();
-      const cur = ((groups.getSettings(ctx.remoteJid).filters || {})[key]);
-      if (arg === 'on' || arg === 'ligar' || arg === '1') {
-        groups.updateFilter(ctx.remoteJid, key, true);
-        const hint = ctx.isBotAdmin ? '' : '\n_⚠️ Para APAGAR as mensagens, o bot precisa ser admin do grupo (senão ele só avisa)._';
-        return ctx.reply(`✅ Filtro *${key}* ligado.${hint}`);
+      if (ON_WORDS.includes(arg)) {
+        autobot.setEnabled(ctx.remoteJid, def.id, true);
+        return replyState(ctx, def, true);
       }
-      if (arg === 'off' || arg === 'desligar' || arg === '0') {
-        groups.updateFilter(ctx.remoteJid, key, false);
-        return ctx.reply(`❌ Filtro *${key}* desligado.`);
+      if (OFF_WORDS.includes(arg)) {
+        autobot.setEnabled(ctx.remoteJid, def.id, false);
+        return replyState(ctx, def, false);
       }
-      return ctx.reply(`🔧 Filtro *${key}*: ${cur ? '✅ ligado' : '❌ desligado'}.\nUso: !${key} on|off`);
+      if (extra.onArgs) {
+        const handled = await extra.onArgs(ctx, def, arg);
+        if (handled) return;
+      }
+      return replyInfo(ctx, def);
     },
   };
 }
 
-// [nome, descrição, aliases]
-const FILTERS = [
-  ['antispam', 'Detecta mensagens repetidas em sequência.'],
-  ['antiflood', 'Limita a quantidade de mensagens por intervalo.'],
-  ['antifake', 'Marca números estrangeiros que entrarem no grupo.'],
-  ['antibot', 'Marca possíveis bots que entrarem no grupo.'],
-  ['antiparentese', 'Apaga mensagens dominadas por símbolos.'],
-  ['antiinvite', 'Apaga links de convite enviados por membros.'],
-  ['antimedia', 'Apaga qualquer mídia de não-admins.'],
-  ['antiimagem', 'Apaga imagens/fotos de não-admins.', ['antifoto']],
-  ['antivideo', 'Apaga vídeos de não-admins.'],
-  ['antiaudio', 'Apaga áudios de não-admins.'],
-  ['antidocumento', 'Apaga documentos/arquivos de não-admins.', ['antidoc']],
-  ['antisticker', 'Apaga figurinhas de não-admins.', ['antifig', 'antifigurinha']],
-  ['antiviewonce', 'Apaga mídias de visualização única de não-admins.', ['antivv']],
-  ['antilocalizacao', 'Apaga localizações enviadas por não-admins.', ['antiloc', 'antilocal']],
-  ['antipix', 'Apaga links/chaves de pagamento (pix) de não-admins.', ['antipagamento', 'antipag']],
-  ['anticontato', 'Apaga contatos enviados por não-admins.', ['antictt']],
+/** Whitelist do anti-link (comportamento antigo, intacto). */
+async function antilinkArgs(ctx, def) {
+  const sub = (ctx.args[0] || '').toLowerCase();
+  if (sub !== 'whitelist' && sub !== 'wl') return false;
+  const op = (ctx.args[1] || '').toLowerCase();
+  const domain = (ctx.args[2] || '').toLowerCase().replace(/^www\./, '');
+  const s = groups.getSettings(ctx.remoteJid);
+  const wl = Array.isArray(s.antilink_whitelist) ? [...s.antilink_whitelist] : [];
+
+  if ((op === 'add' || op === 'adicionar') && domain) {
+    if (!wl.includes(domain)) wl.push(domain);
+    groups.setWhitelist(ctx.remoteJid, wl);
+    await ctx.reply(`✅ Domínio *${domain}* adicionado à whitelist.`);
+    return true;
+  }
+  if (op === 'remove' || op === 'rm' || op === 'remover') {
+    groups.setWhitelist(ctx.remoteJid, wl.filter((d) => d !== domain));
+    await ctx.reply(`🗑️ Domínio *${domain}* removido da whitelist.`);
+    return true;
+  }
+  if (op === 'list' || op === 'lista' || !op) {
+    await ctx.reply(`📋 *Whitelist do anti-link:*\n${wl.length ? wl.map((d) => '▸ ' + d).join('\n') : '(vazia)'}`);
+    return true;
+  }
+  await ctx.reply(`⚠️ Uso: !${ctx.command} whitelist add|remove|list <domínio>`);
+  return true;
+}
+
+/* ------------------- catálogo de comandos clássicos -------------------- */
+
+const LEGACY = [
+  // [id no AutoBot, nome público, aliases]
+  ['antilink', 'antilink', [], { onArgs: antilinkArgs }],
+  ['antipix', 'antipix', ['antipagamento', 'antipag']],
+  ['antispam', 'antispam', []],
+  ['antiflood', 'antiflood', []],
+  ['antifake', 'antifake', []],
+  ['antibot', 'antibot', []],
+  ['antiparentese', 'antiparentese', []],
+  ['antilinkgp', 'antiinvite', []], // nome público antigo do "anti link de grupo"
+  ['antimedia', 'antimedia', []],
+  ['antiimagem', 'antiimagem', ['antifoto']],
+  ['antivideo', 'antivideo', []],
+  ['antiaudio', 'antiaudio', []],
+  ['antidocumento', 'antidocumento', ['antidoc']],
+  ['antisticker', 'antisticker', ['antifig', 'antifigurinha']],
+  ['antiviewonce', 'antiviewonce', ['antivv']],
+  ['antilocalizacao', 'antilocalizacao', ['antiloc', 'antilocal']],
+  ['anticontato', 'anticontato', ['antictt']],
 ];
 
-module.exports = [
-  // antilink com whitelist (comando especial)
-  {
-    name: 'antilink',
-    commands: ['antilink'],
-    category: 'admin',
-    adminOnly: true,
-    groupOnly: true,
-    description: 'Bloqueia links de não-admins (com whitelist).',
-    usage: '!antilink on|off | whitelist add|remove|list [domínio]',
-    cooldown: 1500,
-    execute: async (ctx) => {
-      const sub = (ctx.args[0] || '').toLowerCase();
-      const s = groups.getSettings(ctx.remoteJid);
-      const cur = (s.filters || {}).antilink;
-
-      if (sub === 'whitelist' || sub === 'wl') {
-        const op = (ctx.args[1] || '').toLowerCase();
-        const domain = (ctx.args[2] || '').toLowerCase().replace(/^www\./, '');
-        const wl = s.antilink_whitelist || [];
-        if (op === 'add' && domain) {
-          if (!wl.includes(domain)) wl.push(domain);
-          groups.setWhitelist(ctx.remoteJid, wl);
-          return ctx.reply(`✅ Domínio *${domain}* adicionado à whitelist.`);
-        }
-        if (op === 'remove' || op === 'rm') {
-          groups.setWhitelist(ctx.remoteJid, wl.filter((d) => d !== domain));
-          return ctx.reply(`🗑️ Domínio *${domain}* removido da whitelist.`);
-        }
-        if (op === 'list' || !op) {
-          return ctx.reply(`📋 *Whitelist antilink:*\n${wl.length ? wl.map((d) => '▸ ' + d).join('\n') : '(vazia)'}`);
-        }
-      }
-
-      if (sub === 'on' || sub === 'ligar') {
-        groups.updateFilter(ctx.remoteJid, 'antilink', true);
-        const hint = ctx.isBotAdmin ? '' : '\n_⚠️ Para APAGAR as mensagens, o bot precisa ser admin do grupo (senão ele só avisa)._';
-        return ctx.reply('✅ Anti-link ligado.' + hint);
-      }
-      if (sub === 'off' || sub === 'desligar') {
-        groups.updateFilter(ctx.remoteJid, 'antilink', false);
-        return ctx.reply('❌ Anti-link desligado.');
-      }
-      return ctx.reply(
-        `🔧 Anti-link: ${cur ? '✅ ligado' : '❌ desligado'}.\n` +
-          `Uso: !antilink on|off\n!antilink whitelist add <domínio>\n!antilink whitelist remove <domínio>\n!antilink whitelist list`
-      );
-    },
-  },
-  ...FILTERS.map(([key, desc, aliases]) => makeFilter(key, desc, key, aliases || [])),
-];
+module.exports = LEGACY.map(([id, name, aliases, extra]) => legacyCommand(id, name, aliases, extra));

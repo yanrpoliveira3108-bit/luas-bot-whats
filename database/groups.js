@@ -1,11 +1,50 @@
 /**
  * database/groups.js — domínio de grupos, membros, advertências e registro X9.
+ *
+ * CACHE DE CONFIGURAÇÕES: `settings` é um JSON lido em TODO o pipeline de
+ * mensagens (antis, automações, status). Antes, cada verificação fazia
+ * `SELECT` + `JSON.parse` — um grupo com os antis ligados gerava ~25 consultas
+ * por mensagem. Agora existe um cache por grupo, com TTL curto e invalidação
+ * explícita em toda escrita: o valor lido é sempre o que está no banco e o
+ * custo por mensagem cai a praticamente zero.
+ *
+ * IMPORTANTE: `getSettings()` devolve o objeto do cache (não uma cópia) para
+ * que o pipeline seja rápido. Mutações soltas nele são persistidas na próxima
+ * escrita (`patchSettings`/`setSetting`) — sempre que quiser GARANTIR a
+ * gravação, use `patchSettings` (atômico, 1 write) ou `setSetting`.
  */
 
 'use strict';
 
 const { prepare } = require('./database');
+const logger = require('../utils/logger').child('groups');
 const now = () => new Date().toISOString();
+
+/* --------------------------- cache de settings ---------------------- */
+
+const SETTINGS_TTL_MS = 15000;
+const SETTINGS_CACHE_MAX = 2000;
+const settingsCache = new Map(); // jid -> { value, expiresAt }
+
+function settingsCacheStats() {
+  return { size: settingsCache.size, ttlMs: SETTINGS_TTL_MS };
+}
+
+/** Invalida o cache de um grupo (ou de todos, sem argumento). */
+function invalidateSettings(jid) {
+  if (jid) settingsCache.delete(jid);
+  else settingsCache.clear();
+}
+
+function readSettingsRow(jid) {
+  const g = get(jid);
+  if (!g) return {};
+  try {
+    return JSON.parse(g.settings || '{}');
+  } catch (_) {
+    return {};
+  }
+}
 
 /* ------------------------------ grupos ------------------------------ */
 
@@ -27,20 +66,61 @@ function setName(jid, name) {
 }
 
 function getSettings(jid) {
-  const g = get(jid);
-  if (!g) return {};
-  try {
-    return JSON.parse(g.settings || '{}');
-  } catch (_) {
-    return {};
+  const nowMs = Date.now();
+  const hit = settingsCache.get(jid);
+  if (hit && hit.expiresAt > nowMs) return hit.value;
+
+  const value = readSettingsRow(jid);
+  // LRU simples: acima do limite, descarta o mais antigo
+  if (settingsCache.size >= SETTINGS_CACHE_MAX) {
+    const oldest = settingsCache.keys().next().value;
+    settingsCache.delete(oldest);
   }
+  settingsCache.set(jid, { value, expiresAt: nowMs + SETTINGS_TTL_MS });
+  return value;
 }
 
 function setSetting(jid, key, value) {
   ensure(jid, '');
   const s = getSettings(jid);
-  s[key] = value;
-  return prepare('setcfg_group', `UPDATE groups SET settings = ? WHERE id = ?`).run(JSON.stringify(s), jid);
+  const next = { ...s, [key]: value };
+  persistSettings(jid, next);
+  return next;
+}
+
+/**
+ * Grava VÁRIAS chaves de uma vez, de forma atômica: lê o cache, aplica a
+ * mutação e faz UM único UPDATE. Use isto sempre que precisar mexer em mais
+ * de uma chave (ex.: ligar um anti + espelhar o filtro legado).
+ * @param {string} jid
+ * @param {(s:object) => void} mutate recebe o objeto de settings e altera
+ */
+function patchSettings(jid, mutate) {
+  ensure(jid, '');
+  const s = getSettings(jid);
+  if (typeof mutate === 'function') mutate(s);
+  persistSettings(jid, s);
+  return s;
+}
+
+/** Substitui o objeto de settings inteiro (uso interno/avançado). */
+function setAllSettings(jid, value) {
+  ensure(jid, '');
+  persistSettings(jid, value && typeof value === 'object' ? value : {});
+  return value;
+}
+
+function persistSettings(jid, value) {
+  const json = JSON.stringify(value || {});
+  try {
+    prepare('setall_group', `UPDATE groups SET settings = ? WHERE id = ?`).run(json, jid);
+  } catch (err) {
+    logger.error({ err: err.message, grupo: jid }, 'falha ao gravar settings do grupo');
+    invalidateSettings(jid);
+    throw err;
+  }
+  settingsCache.set(jid, { value, expiresAt: Date.now() + SETTINGS_TTL_MS });
+  return true;
 }
 
 /** Atualiza um filtro do grupo (ex.: antilink = true). */
@@ -55,6 +135,38 @@ function setWhitelist(jid, list) {
   const s = getSettings(jid);
   s.antilink_whitelist = Array.isArray(list) ? list : [];
   return setSetting(jid, 'antilink_whitelist', s.antilink_whitelist);
+}
+
+/* --------------------- listas genéricas (x9, gold) -------------------- */
+
+/** Lê uma lista guardada em settings (ex.: 'x9', 'gold'). */
+function getList(jid, key) {
+  const s = getSettings(jid);
+  const v = s && s[key];
+  return Array.isArray(v) ? v : [];
+}
+
+function setList(jid, key, list) {
+  const arr = Array.isArray(list) ? [...new Set(list.filter(Boolean))] : [];
+  patchSettings(jid, (s) => {
+    s[key] = arr;
+  });
+  return arr;
+}
+
+function addToList(jid, key, item) {
+  if (!item) return getList(jid, key);
+  const list = getList(jid, key);
+  if (!list.includes(item)) list.push(item);
+  return setList(jid, key, list);
+}
+
+function removeFromList(jid, key, item) {
+  return setList(jid, key, getList(jid, key).filter((x) => x !== item));
+}
+
+function inList(jid, key, item) {
+  return getList(jid, key).includes(item);
 }
 
 function setWelcome(jid, enabled, msg) {
@@ -118,6 +230,14 @@ function inactiveMembers(groupId, hours = 72, limit = 20) {
     'inactive_members',
     `SELECT user_id, message_count, last_seen FROM group_members WHERE group_id = ? AND last_seen < ? ORDER BY last_seen ASC LIMIT ?`
   ).all(groupId, cutoff, limit);
+}
+
+/** Grupos em que um usuário é membro conhecido (usado por aniversários/avisos). */
+function groupsOfMember(userId) {
+  return prepare(
+    'groups_of_member',
+    `SELECT group_id FROM group_members WHERE user_id = ?`
+  ).all(userId).map((r) => r.group_id);
 }
 
 /* ---------------------------- advertências -------------------------- */
@@ -194,8 +314,17 @@ module.exports = {
   setName,
   getSettings,
   setSetting,
+  patchSettings,
+  setAllSettings,
+  invalidateSettings,
+  settingsCacheStats,
   updateFilter,
   setWhitelist,
+  getList,
+  setList,
+  addToList,
+  removeFromList,
+  inList,
   setWelcome,
   setGoodbye,
   addMember,
@@ -204,6 +333,7 @@ module.exports = {
   memberStats,
   topMembers,
   inactiveMembers,
+  groupsOfMember,
   addWarning,
   getWarnings,
   countWarnings,

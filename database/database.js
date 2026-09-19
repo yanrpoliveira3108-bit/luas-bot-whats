@@ -388,6 +388,16 @@ const MIGRATIONS = [
     created_at TEXT DEFAULT ''
   );
   CREATE INDEX IF NOT EXISTS idx_welcome_events_group ON welcome_events(group_id);`,
+
+  // 40 — aniversários (AutoBot: !aniversario)
+  `CREATE TABLE IF NOT EXISTS birthdays (
+    user_id TEXT PRIMARY KEY,
+    day INTEGER NOT NULL,
+    month INTEGER NOT NULL,
+    created_at TEXT DEFAULT '',
+    last_announced TEXT DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS idx_birthdays_day_month ON birthdays(day, month);`,
 ];
 
 /* ----------------------------- core ------------------------------ */

@@ -153,12 +153,24 @@ async function main() {
     groups.updateFilter(GID, 'antilink', true);
     sent.length = 0;
     await commandHandler.handleMessage(sock, mkMsg(ADMIN, { conversation: '!antilink on' }));
-    assert.ok(sent.some((s) => s.content.text && /Anti-link ligado/.test(s.content.text)), '!antilink on confirma');
+    assert.ok(
+      sent.some((s) => s.content.text && /^✅ Recurso ativado\./.test(s.content.text) && /Anti Link/.test(s.content.text)),
+      '!antilink on responde no padrão do AutoBot'
+    );
     sent.length = 0;
     await commandHandler.handleMessage(sock, mkMsg(MEMBER, { conversation: 'vejam https://exemplo.com' }));
     assert.ok(sent.some((s) => s.content.delete), 'link do membro apagado');
     assert.strictEqual(sent.length, 1, 'somente o delete, sem processar o link');
-    ok('6: antilink ponta a ponta');
+
+    // desligar deve parar IMEDIATAMENTE (sem reiniciar o bot)
+    await new Promise((r) => setTimeout(r, 1600)); // respeita o cooldown do comando
+    sent.length = 0;
+    await commandHandler.handleMessage(sock, mkMsg(ADMIN, { conversation: '!antilink off' }));
+    assert.ok(sent.some((s) => s.content.text && /^❌ Recurso desativado\./.test(s.content.text)), '!antilink off responde no padrão');
+    sent.length = 0;
+    await commandHandler.handleMessage(sock, mkMsg(MEMBER, { conversation: 'vejam https://exemplo.com' }));
+    assert.ok(!sent.some((s) => s.content.delete), 'link NÃO é apagado depois de desligar');
+    ok('6: antilink ponta a ponta (liga e desliga em tempo real)');
   } catch (e) { fail('6: antilink', e); }
 
   database.close();

@@ -22,8 +22,10 @@ const errorHandler = require('./errorHandler');
 const buttonHandler = require('./buttonHandler');
 const groupHandler = require('./groupHandler');
 const activity = require('../utils/activity');
+const groupMeta = require('../utils/groupMeta');
+const autobot = require('../utils/autobot');
+const janitor = require('../utils/janitor');
 const mediaUtil = require('../utils/media');
-const { cache } = require('../utils/cache');
 const session = require('../utils/session');
 const numberFallback = require('../utils/numberFallback');
 const interactive = require('../utils/interactive');
@@ -50,20 +52,54 @@ const XP_MIN_INTERVAL = 30 * 1000;
 const lastXp = new Map();
 const afkNotified = new Map();
 
-async function getGroupMetadata(sock, jid) {
-  const cached = cache.get('meta:' + jid);
-  if (cached) return cached;
-  try {
-    const meta = await sock.groupMetadata(jid);
-    cache.set('meta:' + jid, meta, 30000);
-    return meta;
-  } catch (_) {
-    return { id: jid, participants: [] };
+// Limite de comandos por usuário/grupo (recurso "Limitar Comandos").
+const cmdRate = new Map(); // "grupo|usuário" -> { n, start }
+
+/**
+ * Faxina dos mapas deste handler. Antes eles cresciam para sempre (cada
+ * usuário/chat novo ficava na memória até o processo morrer). Agora existe
+ * UM único timer para o bot inteiro (utils/janitor).
+ */
+function sweepMemory() {
+  const now = Date.now();
+  for (const [k, ts] of lastXp) if (now - ts > 6 * 60 * 60 * 1000) lastXp.delete(k);
+  for (const [k, ts] of afkNotified) if (now - ts > 6 * 60 * 60 * 1000) afkNotified.delete(k);
+  for (const [k, st] of cmdRate) if (now - st.start > 10 * 60 * 1000) cmdRate.delete(k);
+  if (lastXp.size > 20000) lastXp.clear();
+  if (afkNotified.size > 20000) afkNotified.clear();
+}
+
+janitor.register('commandHandler-memory', sweepMemory, 10 * 60 * 1000);
+
+/**
+ * Contador de comandos por usuário (recurso Limitar Comandos).
+ * @returns {{limited:boolean, remaining:number}}
+ */
+function checkCommandLimit(ctx, limit, windowSec) {
+  if (!ctx.isGroup) return { limited: false, remaining: 0 };
+  if (ctx.isOwner || ctx.isAdmin || ctx.isX9 || ctx.isGold) return { limited: false, remaining: 0 };
+  const key = `${ctx.remoteJid}|${ctx.sender}`;
+  const now = Date.now();
+  let st = cmdRate.get(key);
+  if (!st || now - st.start > windowSec * 1000) {
+    st = { n: 0, start: now };
+    if (cmdRate.size > 20000) cmdRate.delete(cmdRate.keys().next().value);
+    cmdRate.set(key, st);
   }
+  st.n += 1;
+  if (st.n > limit) {
+    return { limited: true, remaining: Math.ceil((st.start + windowSec * 1000 - now) / 1000) };
+  }
+  return { limited: false, remaining: limit - st.n };
+}
+
+/** Metadados do grupo (cache compartilhado — ver utils/groupMeta). */
+async function getGroupMetadata(sock, jid) {
+  return groupMeta.get(sock, jid);
 }
 
 function invalidateGroupMeta(jid) {
-  cache.delete('meta:' + jid);
+  groupMeta.invalidate(jid);
 }
 
 /* ----------------------------- contexto ------------------------------ */
@@ -116,6 +152,17 @@ async function buildContext(sock, msg) {
   const user = users.get(sender);
   const isRegistered = !!(user && user.is_registered);
 
+  // O bot foi citado/respondido? (usado por simih2 e por comandos de chat)
+  const quotedParticipant = quotedKey && (quotedKey.participant || '');
+  const quotedFromBot =
+    !!quotedParticipant && (quotedParticipant === botJid || (botLid && quotedParticipant === botLid));
+  const botAddressed =
+    (isGroup && mentionedJid.some((j) => j === botJid || (botLid && j === botLid))) || quotedFromBot;
+
+  // Cargo X9 e Modo Gold (só consultam o banco quando o recurso está ligado)
+  const isX9 = isGroup && autobot.isEnabled(remoteJid, 'cargox9') && groups.inList(remoteJid, 'x9', sender);
+  const isGold = isGroup && autobot.isEnabled(remoteJid, 'modogold') && groups.inList(remoteJid, 'gold', sender);
+
   const ctx = {
     socket: sock,
     message: msg,
@@ -129,6 +176,9 @@ async function buildContext(sock, msg) {
     isPrivate: !isGroup,
     isBot: sender === botJid,
     isRegistered,
+    isX9,
+    isGold,
+    botAddressed,
     args: [],
     command: null,
     prefix,
@@ -194,10 +244,16 @@ function checkGate(cmd, ctx) {
   if (cmd.groupOnly && !ctx.isGroup) return { ok: false, message: M.groupOnly };
   if (cmd.privateOnly && ctx.isGroup) return { ok: false, message: M.privateOnly };
   if (cmd.adminOnly) {
-    const allowed = ctx.isOwner || (ctx.isGroup && ctx.isAdmin);
+    // Cargo X9 (quando ligado) dá poderes de moderação aos membros marcados
+    const allowed = ctx.isOwner || (ctx.isGroup && (ctx.isAdmin || ctx.isX9));
     if (!allowed) return { ok: false, message: ctx.isGroup ? M.deniedAdmin : M.deniedOwner };
   }
   if (cmd.botAdmin && ctx.isGroup && !ctx.isBotAdmin) return { ok: false, message: M.botNotAdmin };
+
+  // Modo Registro (AutoBot, global) — sobrepõe o modo privado do .env
+  if (autobot.isEnabled(null, 'modoregistro') && !ctx.isRegistered && !ctx.isOwner) {
+    return { ok: false, message: '🔒 *Modo Registro ativo.*\n▸ Peça a um administrador para te registrar com *!registrar*. ' };
+  }
   if (CONFIG.mode.private && !ctx.isRegistered && !ctx.isOwner) return { ok: false, message: M.notRegistered };
   return { ok: true, message: '' };
 }
@@ -211,7 +267,16 @@ async function executeCommand(ctx, cmd, args) {
     await ctx.reply(gate.message);
     return { ok: false, reason: 'gate' };
   }
-  const cd = cooldown.check(cmd, ctx);
+  if (autobot.isEnabled(ctx.isGroup ? ctx.remoteJid : null, 'limitarcomandos')) {
+    const { limite, janela } = autobot.options(ctx.remoteJid, 'limitarcomandos');
+    const lim = checkCommandLimit(ctx, Number(limite) || 10, Number(janela) || 60);
+    if (lim.limited) {
+      await ctx.reply(`⏳ Calma lá! Você atingiu o limite de *${Number(limite) || 10} comandos* por ${Number(janela) || 60}s.\n▸ Tente de novo em ${lim.remaining}s.`);
+      return { ok: false, reason: 'rate-limit' };
+    }
+  }
+  // Modo Gold: membros gold não pegam cooldown (benefício do recurso)
+  const cd = ctx.isGold ? { allowed: true, remaining: 0 } : cooldown.check(cmd, ctx);
   if (!cd.allowed) {
     await ctx.reply(cooldown.message(cd.remaining));
     return { ok: false, reason: 'cooldown' };
@@ -267,8 +332,16 @@ function shouldProcessMessage(msg) {
   return false;
 }
 
-async function handleMessage(sock, msg) {
+/**
+ * @param {object} sock socket Baileys
+ * @param {object} msg mensagem
+ * @param {string} [type] tipo do upsert ('notify' = tempo real, 'append' = histórico)
+ */
+async function handleMessage(sock, msg, type) {
   try {
+    // Histórico/sincronização não é "mensagem nova": processar 'append'
+    // fazia o bot rodar filtros, XP e comandos em mensagens antigas.
+    if (type && type !== 'notify' && type !== 'reaction') return;
     if (!shouldProcessMessage(msg)) return;
     if (isStatusJid(msg.key.remoteJid)) return;
 
@@ -276,6 +349,9 @@ async function handleMessage(sock, msg) {
     if (!ctx.sender) return;
 
     perf.add('messages');
+
+    // Anti-PV (recursos globais): trata o privado antes de qualquer coisa
+    if (!ctx.isGroup && (await handlePrivateAntiPv(sock, ctx))) return;
 
     const lidAddressed = ctx.isGroup && (
       String(msg.key.participant || '').endsWith('@lid') ||
@@ -313,6 +389,7 @@ async function handleMessage(sock, msg) {
     users.upsert(ctx.sender, msg.pushName || '');
     if (ctx.isGroup) {
       groups.ensure(ctx.remoteJid, '');
+      autobot.ensureGroupDefaults(ctx.remoteJid);
       groups.incMemberMessages(ctx.remoteJid, ctx.sender);
     }
     users.incMessages(ctx.sender);
@@ -327,20 +404,27 @@ async function handleMessage(sock, msg) {
 
     if (await buttonHandler.process(ctx)) return;
 
-    if (ctx.isGroup) {
-      try {
-        const antiManager = require('../utils/antiManager');
-        antiManager.addToHistory(ctx.remoteJid, ctx.sender, ctx.message.key);
-      } catch (_) {}
-    }
-
-    if (ctx.isGroup) {
-      const filtered = await groupHandler.applyFilters(sock, ctx);
-      if (filtered.deleted) return;
-    }
-
     const prefix = settings.effectivePrefix();
     const parsed = splitCommand(ctx.text, prefix);
+
+    if (ctx.isGroup) {
+      // UMA vez por mensagem (antes era registrada aqui E dentro do
+      // applyFilters — o purge apagava o mesmo item duas vezes)
+      try {
+        require('../utils/antiManager').addToHistory(ctx.remoteJid, ctx.sender, ctx.message.key);
+      } catch (_) {}
+
+      const filtered = await groupHandler.applyFilters(sock, ctx);
+      // blocked = um anti foi acionado: a mensagem não segue como comando
+      if (filtered.blocked || filtered.deleted) return;
+    }
+
+    // Automações do AutoBot (autofigu, autoresposta, simih, simih2,
+    // iaaleatory, autobaixar, visu única, modo brincadeira)
+    if (ctx.isGroup) {
+      const consumed = await require('./autoHandler').process(sock, ctx, { isCommand: !!parsed });
+      if (consumed) return;
+    }
 
     if (parsed) {
       const cmd = registry.resolveTrigger(parsed.command);
@@ -464,6 +548,71 @@ async function handleMessage(sock, msg) {
   }
 }
 
+/* ------------------------------- anti-PV ------------------------------- */
+
+const pvWarned = new Map(); // jid -> timestamp do último aviso
+
+janitor.register(
+  'anti-pv',
+  () => {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    for (const [k, ts] of pvWarned) if (ts < cutoff) pvWarned.delete(k);
+  },
+  60 * 60 * 1000
+);
+
+/**
+ * Trata mensagens no privado (recursos globais Anti PV / PV2 / PV3).
+ * - antipv  → avisa uma vez por dia e ignora
+ * - antipv2 → ignora em silêncio
+ * - antipv3 → bloqueia o número e avisa o dono (o mais forte vence)
+ * @returns {Promise<boolean>} true se a mensagem foi tratada (deve parar)
+ */
+async function handlePrivateAntiPv(sock, ctx) {
+  if (ctx.isOwner) return false; // dono fala com o bot no PV sempre
+  const pv3 = autobot.isEnabled(null, 'antipv3');
+  const pv2 = autobot.isEnabled(null, 'antipv2');
+  const pv1 = autobot.isEnabled(null, 'antipv');
+  if (!pv1 && !pv2 && !pv3) return false;
+
+  const sender = ctx.sender;
+
+  if (pv3) {
+    try {
+      if (typeof sock.updateBlockStatus === 'function') {
+        await sock.updateBlockStatus(sender, 'block');
+      }
+    } catch (err) {
+      logger.warn({ err: err.message, usuario: sender }, 'anti pv3: falha ao bloquear');
+    }
+    for (const owner of CONFIG.owner.numbers) {
+      sock
+        .sendMessage(`${owner}@s.whatsapp.net`, {
+          text: `🚫 *Anti PV3*\n▸ Bloqueei @${String(sender).split('@')[0]} que chamou o bot no privado.`,
+          mentions: [sender],
+        })
+        .catch(() => {});
+    }
+    logger.info({ usuario: sender }, 'anti pv3: usuário bloqueado');
+    return true;
+  }
+
+  if (pv2) {
+    logger.info({ usuario: sender }, 'anti pv2: mensagem ignorada');
+    return true;
+  }
+
+  // pv1 — um aviso por dia
+  const last = pvWarned.get(sender) || 0;
+  if (Date.now() - last > 24 * 60 * 60 * 1000) {
+    pvWarned.set(sender, Date.now());
+    await ctx
+      .reply('🔒 *Anti PV ativo*\n▸ Não atendo no privado. Use os comandos dentro do grupo.')
+      .catch(() => {});
+  }
+  return true;
+}
+
 function grantXp(sender) {
   const now = Date.now();
   const last = lastXp.get(sender) || 0;
@@ -488,6 +637,8 @@ async function notifyAfk(sock, ctx) {
 
 module.exports = {
   handleMessage,
+  handlePrivateAntiPv,
+  checkCommandLimit,
   buildContext,
   executeCommand,
   runByName,
