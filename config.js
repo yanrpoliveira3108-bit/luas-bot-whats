@@ -120,6 +120,24 @@ const CONFIG = {
     buttonsEnabled: envBool('BUTTONS_ENABLED', true),
   },
 
+  /* ------------------ segurança e anti-ban -------------------------- */
+  security: {
+    // Modo seguro global (habilita proteções anti-ban e throttling)
+    safeMode: envBool('SAFE_MODE', true),
+    // Simula presença humana ("digitando..." / "gravando áudio...") antes de responder
+    humanDelays: envBool('HUMAN_DELAYS', true),
+    minTypingDelayMs: envInt('MIN_TYPING_DELAY_MS', 600),
+    maxTypingDelayMs: envInt('MAX_TYPING_DELAY_MS', 2200),
+    // Intervalo mínimo entre mensagens no envio (evita rajadas no WebSocket)
+    outboundIntervalMs: envInt('OUTBOUND_INTERVAL_MS', 1000),
+    // Modo privado silencioso: não responde estranhos no PV com menus/erros (evita denúncias)
+    silentPv: envBool('SILENT_PV', true),
+    // Tipo de assinatura de navegador: windows | macos | ubuntu
+    browserName: envStr('BROWSER_NAME', 'windows'),
+    // Ficar online 24h contínuas (false = mais natural, não mantém online artificialmente)
+    markOnline: envBool('MARK_ONLINE_ON_CONNECT', false),
+  },
+
   /* ------------------ interface / identidade visual ------------------ */
   ui: {
     // Preset de tema (config/themes.js). Ex.: LUA_NIGHT, LUA_VIOLET, ...

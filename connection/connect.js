@@ -247,7 +247,11 @@ async function connect({ phone } = {}) {
       logger.info({ version: Array.isArray(version) ? version.join('.') : version }, 'versão do WhatsApp definida');
     }
 
-    // 4) cria o socket
+    // 4) cria o socket (com fingerprint e presença seguros anti-ban)
+    const antiBan = require('../utils/antiBan');
+    const browserConfig = antiBan.getBrowserConfig(Browsers);
+    const markOnline = CONFIG.security ? CONFIG.security.markOnline : false;
+
     sock = makeWASocket({
       version,
       auth: {
@@ -255,13 +259,13 @@ async function connect({ phone } = {}) {
         keys: makeCacheableSignalKeyStore(state.keys, baileysLogger()),
       },
       printQRInTerminal: false, // QR desabilitado por design
-      browser: Browsers.ubuntu('Chrome'),
+      browser: browserConfig,
       logger: baileysLogger(),
       generateHighQualityLinkPreview: false,
       syncFullHistory: false,
-      markOnlineOnConnect: true,
+      markOnlineOnConnect: markOnline,
     });
-    logger.info('socket criado — aguardando connection.update');
+    logger.info({ browser: browserConfig[0] + ' ' + browserConfig[1], markOnline }, 'socket criado — aguardando connection.update');
     // EXPERIMENTAL (selective payment/text): anexa a API de transporte
     // seletivo ao socket SEM substituí-lo (ver utils/selective.js).
     try {

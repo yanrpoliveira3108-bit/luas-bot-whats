@@ -1,7 +1,7 @@
 'use strict';
 
 const groups = require('../../database/groups');
-const users = require('../../database/users');
+const antiBan = require('../../utils/antiBan');
 const { confirmAction } = require('../_shared/confirm');
 
 module.exports = [
@@ -10,7 +10,7 @@ module.exports = [
     commands: ['broadcast', 'anuncio'],
     category: 'owner',
     ownerOnly: true,
-    description: 'Envia um anúncio para todos os grupos registrados.',
+    description: 'Envia um anúncio para todos os grupos registrados com espaçamento seguro anti-ban.',
     usage: '!broadcast <mensagem>',
     cooldown: 30000,
     execute: async (ctx) => {
@@ -26,18 +26,26 @@ module.exports = [
         await ctx.reply('📭 Nenhum grupo registrado para receber o anúncio.');
         return;
       }
-      await confirmAction(ctx, `enviar anúncio para ${targets.length} grupos`, async (c) => {
+      await confirmAction(ctx, `enviar anúncio para ${targets.length} grupos com proteção anti-ban`, async (c) => {
         let ok = 0;
-        for (const g of targets) {
+        await c.reply(`📢 Iniciando envio seguro para ${targets.length} grupos... Aguarde (intervalo anti-ban ativo para não derrubar o número).`);
+
+        for (let i = 0; i < targets.length; i++) {
+          const g = targets[i];
           try {
+            await antiBan.simulateTyping(c.socket, g.id, text, 'composing');
             await c.socket.sendMessage(g.id, { text: `📢 *Anúncio do ${require('../../config').bot.name}*\n\n${text}` });
             ok++;
           } catch (_) {
             /* ignora grupos que falharem */
           }
-          await new Promise((r) => setTimeout(r, 400));
+          // Delay de segurança entre grupos para não disparar alerta de spam na Meta
+          if (i < targets.length - 1 && process.env.NODE_ENV !== 'test') {
+            const safeDelay = 4000 + Math.floor(Math.random() * 3000); // 4 a 7 segundos
+            await antiBan.sleep(safeDelay);
+          }
         }
-        await c.reply(`📢 Anúncio enviado para ${ok}/${targets.length} grupos.`);
+        await c.reply(`✅ Anúncio enviado com sucesso para ${ok}/${targets.length} grupos.`);
       });
     },
   },
