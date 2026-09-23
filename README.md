@@ -264,6 +264,9 @@ Todas as variáveis ficam em `.env` (nunca versionado). Veja `.env.example` comp
 | Variável | Descrição | Padrão |
 |----------|-----------|--------|
 | `SAFE_MODE` | Opcional: bloqueia lista/botões nativos, cards HTML e pagamento | `0` (desligado) |
+| `HUMAN_DELAYS` / `MIN_TYPING_DELAY_MS` / `MAX_TYPING_DELAY_MS` | Simula "digitando..." antes de responder (camada humana) | `true` / `600` / `2200` |
+| `SILENT_PV` | Não responde conversa casual de desconhecido no PV | `true` |
+| `BROWSER_NAME` / `MARK_ONLINE_ON_CONNECT` | Fingerprint do cliente e presença online | `windows` / `false` |
 | `ALLOW_INTERACTIVE` / `ALLOW_RICH_CARDS` / `ALLOW_PAYMENT_TEST` | Liberam só aquele payload (vazio = segue o `SAFE_MODE`) | vazio |
 | `SEND_MIN_INTERVAL_MS` / `SEND_CHAT_INTERVAL_MS` / `SEND_JITTER_MS` | Freio: intervalo global, por conversa e variação aleatória | `1200` / `2000` / `900` |
 | `SEND_MAX_PER_MINUTE` / `SEND_CHAT_MAX_PER_MINUTE` | Teto de mensagens por minuto (total / por conversa) | `15` / `6` |
@@ -500,6 +503,7 @@ lista/botões e pagamento.
 
 ```bash
 !freio              # painel: limites, fila, warmup e restrições detectadas
+!antiban            # status das proteções anti-ban + dicas
 !freio seguro on    # opcional: bloqueia cards HTML e menu nativo
 !freio warmup off   # número já é antigo/aquecido → limites normais
 ```

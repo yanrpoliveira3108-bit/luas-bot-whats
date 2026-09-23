@@ -104,6 +104,24 @@ Esse teste é barato, decisivo, e não depende da minha opinião nem da sua.
 
 ---
 
+## 4.3 Sistemas unificados (não há duas proteções concorrentes)
+
+Na mesma branch existia uma segunda camada anti-ban (`utils/antiBan.js`:
+"digitando...", fingerprint de navegador, silent PV). As duas foram **unificadas**:
+
+| Item | Qual ficou |
+|---|---|
+| Fila/ritmo de saída | **`utils/sendGuard.js`** (uma fila só). O `antiBan.enqueueOutbound` virou passthrough — manter os dois somava ~2s por mensagem e criava duas verdades sobre o ritmo |
+| "digitando..." antes de responder | `antiBan.simulateTyping` (camada humana, complementar) |
+| Fingerprint de navegador | `antiBan.getBrowserConfig` (Windows Chrome em vez de Ubuntu) |
+| Online 24h | `MARK_ONLINE_ON_CONNECT=false` (menos artificial) |
+| PV de estranho | `SILENT_PV` (não responde conversa casual) + bloqueio de PV frio do freio |
+| Status | `!antiban` (status + dicas) · `!freio` (painel e controle) |
+
+O guia `GUIA_ANTI_BAN.md` foi ajustado: ele afirmava que botões nativos são
+causa de restrição — hoje está marcado como **fator de risco, não causa
+comprovada**, coerente com o padrão devolvido.
+
 ## 5. O que ficou ligado (freio de envio) — e o que não ficou
 
 **Ligado por padrão** (`utils/sendGuard.js`) — não bloqueia conteúdo, só ritmo:

@@ -30,6 +30,7 @@ const session = require('../utils/session');
 const numberFallback = require('../utils/numberFallback');
 const interactive = require('../utils/interactive');
 const perf = require('../utils/perf');
+const antiBan = require('../utils/antiBan');
 const {
   extractText,
   getQuoted,
@@ -192,7 +193,10 @@ async function buildContext(sock, msg) {
 
   ctx.reply = async (t, opts = {}) => {
     try {
-      const res = await sock.sendMessage(remoteJid, { text: String(t) }, { quoted: opts.quoted === false ? undefined : msg });
+      await antiBan.simulateTyping(sock, remoteJid, t, 'composing');
+      const res = await antiBan.enqueueOutbound(() =>
+        sock.sendMessage(remoteJid, { text: String(t) }, { quoted: opts.quoted === false ? undefined : msg })
+      );
       if (isCommunity || lidGroupMsg) {
         logger.info(
           { chat: remoteJid, hasId: !!(res && res.key && res.key.id), community: !!isCommunity, lid: !!lidGroupMsg },
@@ -205,15 +209,50 @@ async function buildContext(sock, msg) {
       throw e;
     }
   };
-  ctx.replyWithMentions = (t, mentions) =>
-    sock.sendMessage(remoteJid, { text: String(t), mentions }, { quoted: msg });
-  ctx.sendButtons = (o) => interactive.sendButtons(sock, remoteJid, Object.assign({ quoted: msg }, o));
-  ctx.sendList = (o) => interactive.sendList(sock, remoteJid, Object.assign({ quoted: msg }, o));
-  ctx.sendImage = (b, caption = '') => mediaUtil.sendImage(sock, remoteJid, b, caption, { quoted: msg });
-  ctx.sendVideo = (b, caption = '', opts = {}) => mediaUtil.sendVideo(sock, remoteJid, b, caption, Object.assign({ quoted: msg }, opts));
-  ctx.sendAudio = (b, opts = {}) => mediaUtil.sendAudio(sock, remoteJid, b, Object.assign({ quoted: msg }, opts));
-  ctx.sendSticker = (b, opts = {}) => mediaUtil.sendSticker(sock, remoteJid, b, Object.assign({ quoted: msg }, opts));
-  ctx.sendDocument = (b, opts = {}) => mediaUtil.sendDocument(sock, remoteJid, b, Object.assign({ quoted: msg }, opts));
+  ctx.replyWithMentions = async (t, mentions) => {
+    await antiBan.simulateTyping(sock, remoteJid, t, 'composing');
+    return antiBan.enqueueOutbound(() =>
+      sock.sendMessage(remoteJid, { text: String(t), mentions }, { quoted: msg })
+    );
+  };
+  ctx.sendButtons = async (o) => {
+    await antiBan.simulateTyping(sock, remoteJid, o && o.text, 'composing');
+    return antiBan.enqueueOutbound(() =>
+      interactive.sendButtons(sock, remoteJid, Object.assign({ quoted: msg }, o))
+    );
+  };
+  ctx.sendList = async (o) => {
+    await antiBan.simulateTyping(sock, remoteJid, o && o.text, 'composing');
+    return antiBan.enqueueOutbound(() =>
+      interactive.sendList(sock, remoteJid, Object.assign({ quoted: msg }, o))
+    );
+  };
+  ctx.sendImage = async (b, caption = '') => {
+    await antiBan.simulateTyping(sock, remoteJid, caption, 'composing');
+    return antiBan.enqueueOutbound(() =>
+      mediaUtil.sendImage(sock, remoteJid, b, caption, { quoted: msg })
+    );
+  };
+  ctx.sendVideo = async (b, caption = '', opts = {}) => {
+    await antiBan.simulateTyping(sock, remoteJid, caption, 'composing');
+    return antiBan.enqueueOutbound(() =>
+      mediaUtil.sendVideo(sock, remoteJid, b, caption, Object.assign({ quoted: msg }, opts))
+    );
+  };
+  ctx.sendAudio = async (b, opts = {}) => {
+    await antiBan.simulateTyping(sock, remoteJid, '', 'recording');
+    return antiBan.enqueueOutbound(() =>
+      mediaUtil.sendAudio(sock, remoteJid, b, Object.assign({ quoted: msg }, opts))
+    );
+  };
+  ctx.sendSticker = (b, opts = {}) =>
+    antiBan.enqueueOutbound(() =>
+      mediaUtil.sendSticker(sock, remoteJid, b, Object.assign({ quoted: msg }, opts))
+    );
+  ctx.sendDocument = (b, opts = {}) =>
+    antiBan.enqueueOutbound(() =>
+      mediaUtil.sendDocument(sock, remoteJid, b, Object.assign({ quoted: msg }, opts))
+    );
   ctx.react = (emoji) => sock.sendMessage(remoteJid, { react: { text: emoji, key: msg.key } }).catch(() => {});
   ctx.deleteMessage = (key) => sock.sendMessage(remoteJid, { delete: key || msg.key }).catch(() => {});
   ctx.presence = (state) => sock.sendPresenceUpdate(state, remoteJid).catch(() => {});
@@ -429,6 +468,11 @@ async function handleMessage(sock, msg, type) {
     if (parsed) {
       const cmd = registry.resolveTrigger(parsed.command);
       if (!cmd) {
+        // Anti-ban: não envia sugestões/menus para estranhos no privado se silentPv estiver ligado (evita denúncias)
+        if (!ctx.isGroup && !ctx.isOwner && CONFIG.security?.silentPv) {
+          logger.info({ user: ctx.sender, cmd: parsed.command }, '[ANTI-BAN] Silent PV: comando inválido ignorado no privado');
+          return;
+        }
         try {
           const fuzzy = require('../utils/fuzzySearch');
           const allCmds = registry.all();
@@ -511,11 +555,13 @@ async function handleMessage(sock, msg, type) {
 
     const bare = (ctx.text || '').trim().toLowerCase();
     if (bare === 'prefixo' || bare === 'prefix') {
+      if (!ctx.isGroup && !ctx.isOwner && CONFIG.security?.silentPv) return;
       await ctx.reply(`🔤 Prefixo atual: *${prefix}*\n\n💡 Use *${prefix}menu* para ver os comandos.`);
       return;
     }
 
     if (bare === 'menu' || bare === 'menuprincipal') {
+      if (!ctx.isGroup && !ctx.isOwner && CONFIG.security?.silentPv) return;
       await require('../utils/buttons').sendMainMenu(ctx);
       return;
     }
@@ -603,14 +649,29 @@ async function handlePrivateAntiPv(sock, ctx) {
   }
 
   // pv1 — um aviso por dia
-  const last = pvWarned.get(sender) || 0;
-  if (Date.now() - last > 24 * 60 * 60 * 1000) {
-    pvWarned.set(sender, Date.now());
-    await ctx
-      .reply('🔒 *Anti PV ativo*\n▸ Não atendo no privado. Use os comandos dentro do grupo.')
-      .catch(() => {});
+  if (pv1) {
+    const last = pvWarned.get(sender) || 0;
+    if (Date.now() - last > 24 * 60 * 60 * 1000) {
+      pvWarned.set(sender, Date.now());
+      await ctx
+        .reply('🔒 *Anti PV ativo*\n▸ Não atendo no privado. Use os comandos dentro do grupo.')
+        .catch(() => {});
+    }
+    return true;
   }
-  return true;
+
+  // Silent PV seguro (Anti-Ban): se nenhum anti-pv explícito estiver ligado,
+  // ignora conversas casuais de estranhos no privado para evitar denúncias (report spam).
+  if (CONFIG.security?.silentPv) {
+    const prefix = settings.effectivePrefix();
+    const isCmd = (ctx.text || '').trim().startsWith(prefix);
+    if (!isCmd) {
+      logger.info({ usuario: sender }, '[ANTI-BAN] Silent PV: mensagem casual de estranho ignorada no privado');
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function grantXp(sender) {

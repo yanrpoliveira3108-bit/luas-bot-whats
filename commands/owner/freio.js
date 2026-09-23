@@ -66,6 +66,8 @@ function statusText() {
     '▸ `!freio seguro on|off`',
     '▸ `!freio warmup reset` — reinicia o aquecimento',
     '▸ `!freio warmup off` — encerra (número já aquecido)',
+    '',
+    '📖 `!antiban` — status das proteções + dicas (GUIA_ANTI_BAN.md)',
   ]
     .filter((l) => l !== null)
     .join('\n');
@@ -74,7 +76,7 @@ function statusText() {
 module.exports = [
   {
     name: 'freio',
-    commands: ['freio', 'anti-ban', 'antiban', 'seguranca', 'risco'],
+    commands: ['freio', 'anti-ban', 'seguranca', 'risco'],
     category: 'owner',
     ownerOnly: true,
     description: 'Painel do freio de envio: pausa, limites, warmup e modo seguro.',
