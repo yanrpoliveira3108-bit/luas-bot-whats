@@ -45,6 +45,16 @@ const CONFIG = require('./config');
 CONFIG.helpers.ensureDirs();
 ui.ok('Configuração carregada');
 
+// Diretório temporário UTILIZÁVEL antes de qualquer coisa do Baileys: no
+// Android/Termux o padrão do Node (/tmp) pode não existir e TODO envio de
+// mídia (ou seja: todo download) falha com ENOENT. Ver utils/tmpdir.js.
+try {
+  const tmp = require('./utils/tmpdir').ensureTmpDir(CONFIG.paths.tmpDir);
+  if (tmp.changed) console.log(`⚠️  TMPDIR ajustado: ${tmp.motivo}`);
+} catch (_) {
+  /* nunca impede o boot */
+}
+
 // single instance lock (evita duplicar bot no Termux)
 const singleInstance = require('./utils/singleInstance');
 singleInstance.acquireLock();
@@ -75,8 +85,24 @@ console.log(`Botões: ${settings.buttonsEnabled() ? 'ATIVADOS' : 'DESATIVADOS'}`
 
 // motores de download (YouTube) — aviso imediato se faltar yt-dlp/ffmpeg no Termux
 const youtubeEngine = require('./downloaders/youtube');
-console.log(`[MOTORES] yt-dlp: ${youtubeEngine.ytdlpAvailable() ? 'DISPONÍVEL ✔ (motor principal)' : 'AUSENTE ✘ (pkg install yt-dlp)'}`);
-console.log(`[MOTORES] ffmpeg: ${youtubeEngine.ffmpegAvailable() ? 'DISPONÍVEL ✔ (mescla vídeo+áudio)' : 'AUSENTE ✘ (pkg install ffmpeg)'}`);
+console.log(
+  `[MOTORES] yt-dlp: ${
+    youtubeEngine.ytdlpAvailable()
+      ? 'DISPONÍVEL ✔ (motor principal do YouTube)'
+      : 'AUSENTE ✘ → pkg install python && pip install -U yt-dlp'
+  }`
+);
+console.log(
+  `[MOTORES] ffmpeg: ${
+    youtubeEngine.ffmpegAvailable()
+      ? 'DISPONÍVEL ✔ (mescla vídeo+áudio e converte)'
+      : 'AUSENTE ✘ → pkg install ffmpeg'
+  }`
+);
+if (!youtubeEngine.ytdlpAvailable()) {
+  console.log('[MOTORES] Sem yt-dlp, o YouTube usa o motor reserva (ytdl-core), que hoje costuma falhar');
+  console.log('[MOTORES] com "Sign in to confirm you are not a bot". Rode: node scripts/downloads-doctor.js');
+}
 
 // comandos/plugins
 const { loadCommands } = require('./commands/loader');

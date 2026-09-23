@@ -51,7 +51,8 @@ function statusText() {
     '',
     '*Warmup (número novo)*',
     s.warmup.active
-      ? `▸ 🔥 ATIVO — limites ÷${s.warmup.factor} por mais ${s.warmup.remainingHours}h`
+      ? `▸ 🔥 ATIVO — teto por minuto ÷${s.warmup.factor} por mais ${s.warmup.remainingHours}h` +
+        (s.warmup.intervalFactor > 1 ? ` (espaçamento ×${s.warmup.intervalFactor})` : '')
       : '▸ ✅ concluído (limites normais)',
     `▸ Início: ${s.warmup.since}`,
     '',
@@ -140,7 +141,7 @@ module.exports = [
         const since = sendGuard.resetWarmup('!freio warmup reset');
         await ctx.reply(
           `🔥 *Warmup reiniciado* (${since}).\n` +
-            `_Limites ÷${CONFIG.safety.send.warmupFactor} pelas próximas ${CONFIG.safety.send.warmupHours}h._`
+            `_Teto por minuto ÷${CONFIG.safety.send.warmupFactor} pelas próximas ${CONFIG.safety.send.warmupHours}h (o espaçamento entre mensagens não muda)._`
         );
         return;
       }

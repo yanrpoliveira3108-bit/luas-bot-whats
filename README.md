@@ -461,18 +461,25 @@ cp -a backup/pre-update-20250101-120000/. .
 | `Conexão perdida (restartRequired)` | **Sucesso** — WhatsApp aceitou código e pede reconexão, bot reconecta sozinho |
 | Pairing code não aparece / `Connection Closed` 428 | Aguarde websocket abrir (correção na versão atual). Se persistir, rate-limit 429 — aguarde 15-30min |
 | Fica "Aguardando autenticação" para sempre | Versão atual sempre mostra causa. Veja `logs/baileys-*.log` |
-| Download YouTube falha | `pkg install yt-dlp ffmpeg` + `node scripts/diagnose.js`. Bot tenta client `android` automaticamente se YouTube pedir login |
+| **Nenhum download funciona** | Rode `node scripts/downloads-doctor.js` — ele diz o que falhou, item por item. Guia: `DOWNLOAD-TROUBLESHOOTING.md` |
+| Download YouTube falha | `pkg install python ffmpeg && pip install -U yt-dlp` (**não** existe `pkg install yt-dlp`) + `node scripts/downloads-doctor.js youtube`. Se aparecer "Sign in to confirm you're not a bot", exporte os cookies e use `YT_COOKIES=./cookies.txt` |
+| Áudio/vídeo não chega no WhatsApp (só texto) | Diretório temporário inválido no Android — rode pelo `index.js` (ele corrige) ou `export TMPDIR="$PWD/tmp"`. `node scripts/downloads-doctor.js` mostra |
+| Vídeo do YouTube sai sem som / não abre | `pkg install ffmpeg` (mescla vídeo+áudio) |
 | Sticker animado falha | `pkg install ffmpeg` — imagem funciona sem ffmpeg (WASM) |
 | Quer trocar prefixo | `!prefix <novo>` (dono) |
 | Logs JSON no terminal, sem menu bonito | Atualize código — versão antiga usava `process.stdin.isTTY` que falha no Termux. Nova usa `tty.isatty()` |
 
-**Diagnóstico completo:**
+**Diagnósticos:**
 
 ```bash
-node scripts/diagnose.js
+node scripts/diagnose.js          # ambiente (Node, banco, motores, rede, IA)
+node scripts/downloads-doctor.js  # downloads: ambiente + rede + cada site + saída
+node scripts/downloads-doctor.js youtube   # só uma plataforma
 ```
 
-Verifica Node, better-sqlite3, ffmpeg, yt-dlp, conversores, fetch, rede, downloaders, IA.
+O `downloads-doctor` é o que resolve "nenhum download funciona": ele testa cada
+site de verdade e diz, linha por linha, o que fazer. Detalhes em
+[`DOWNLOAD-TROUBLESHOOTING.md`](DOWNLOAD-TROUBLESHOOTING.md).
 
 ---
 

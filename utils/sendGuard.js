@@ -22,7 +22,17 @@
  *   • teto global por minuto                             (SEND_MAX_PER_MINUTE)
  *   • teto por conversa por minuto                       (SEND_CHAT_MAX_PER_MINUTE)
  *   • mídia espera mais                                   (SEND_MEDIA_MULTIPLIER)
- *   • "warmup": número recém-pareado tem limites ÷3 por 48h (SEND_WARMUP_HOURS)
+ *   • "warmup": número recém-pareado tem o TETO POR MINUTO ÷3 por 48h
+ *     (SEND_WARMUP_HOURS). O warmup NÃO mexe no espaçamento entre mensagens:
+ *     quando ele multiplicava os intervalos (até 12s por mensagem na mesma
+ *     conversa), um comando normal que responde "baixando...", o título e o
+ *     arquivo entregava o arquivo só ~62s depois — e o dono, com razão,
+ *     concluía que "o download não funciona". Medido: test/sendguard.test.js
+ *     bloco 12.
+ *   • mídia (arquivo/imagem/vídeo/áudio) NÃO consome a cota de mensagens da
+ *     conversa: a rajada de texto é o sinal de spam, não o arquivo que o dono
+ *     acabou de pedir. Mídia continua respeitando intervalo, teto global e o
+ *     multiplicador próprio.
  *   • trava de mensagem IDÊNTICA para vários chats       (SEND_DUP_MAX_CHATS)
  *   • bloqueio de conversa fria no PV                    (SEND_BLOCK_COLD_PV)
  *   • pausa automática ao detectar sinal de restrição     (SEND_PAUSE_MINUTES)
@@ -82,7 +92,11 @@ const state = {
 const queues = new Map(); // jid -> [item]
 const chatOrder = []; // FIFO dos jids com fila (round-robin)
 const chatLast = new Map(); // jid -> ts do último envio
-const chatWindow = new Map(); // jid -> [ts] (últimos 60s)
+const chatWindow = new Map(); // jid -> [ts] (últimos 60s, só KINDS_DE_RAJADA)
+// Tipos que contam para o teto POR CONVERSA. Mídia e reações ficam de fora:
+// elas continuam limitadas pelo teto global, pelo intervalo e pelo multiplicador
+// de mídia — mas não podem atrasar/limitar o arquivo que o usuário pediu.
+const KINDS_DE_RAJADA = new Set(['text', 'interactive']);
 const dupWindow = new Map(); // hash -> [{ jid, ts }]
 let globalWindow = []; // [ts] (últimos 60s)
 let lastSendAt = 0;
@@ -217,8 +231,31 @@ function warmupLeftMs(now = Date.now()) {
   return Math.max(0, Date.parse(state.firstSeen) + CFG.warmupHours * 3600 * 1000 - now);
 }
 
+/**
+ * Fator do warmup aplicado ao TETO POR MINUTO (volume). É a proteção que
+ * realmente importa em número recém-pareado: menos mensagens por minuto.
+ */
 function factor() {
   return warmupActive() ? CFG.warmupFactor : 1;
+}
+
+/**
+ * Fator do warmup aplicado ao ESPAÇAMENTO entre mensagens.
+ *
+ * Fica em 1 por padrão: ver o comentário no topo do arquivo (um download
+ * levava 62s para chegar). Existe como configuração
+ * (SEND_WARMUP_INTERVAL_FACTOR) para quem quiser ser mais conservador.
+ */
+function intervalFactor() {
+  const f = Number(CFG.warmupIntervalFactor);
+  return warmupActive() && f > 0 ? f : 1;
+}
+
+/** A conversa já estourou a cota de mensagens de rajada no último minuto? */
+function chatWindowFull(jid, now) {
+  const cw = chatWindow.get(jid) || [];
+  if (cw.length < chatMaxPerMinute()) return false;
+  return cw[0] + WINDOW_MS > now;
 }
 
 function multiplierFor(kind) {
@@ -228,19 +265,28 @@ function multiplierFor(kind) {
 }
 
 function minIntervalFor(kind) {
-  return Math.round(CFG.minIntervalMs * multiplierFor(kind) * factor());
+  return Math.round(CFG.minIntervalMs * multiplierFor(kind) * intervalFactor());
 }
 
 function chatIntervalFor(kind) {
-  return Math.round(CFG.chatIntervalMs * multiplierFor(kind) * factor());
+  return Math.round(CFG.chatIntervalMs * multiplierFor(kind) * intervalFactor());
 }
 
 function maxPerMinute() {
   return Math.max(1, Math.round(CFG.maxPerMinute / factor()));
 }
 
+/**
+ * Teto de mensagens POR CONVERSA por minuto.
+ *
+ * Piso de 4: um comando normal responde 2 mensagens (aviso + resultado) antes
+ * do arquivo, e o usuário costuma mandar mais um comando em seguida. Com o
+ * warmup dividindo 6 por 3 (= 2), a terceira mensagem da conversa (o arquivo)
+ * era empurrada para o minuto seguinte.
+ */
 function chatMaxPerMinute() {
-  return Math.max(1, Math.round(CFG.chatMaxPerMinute / factor()));
+  if (!warmupActive()) return Math.max(1, Math.round(CFG.chatMaxPerMinute));
+  return Math.max(4, Math.round(CFG.chatMaxPerMinute / factor()));
 }
 
 /* ------------------------ ajuda: JID / dono / PV ------------------------- */
@@ -487,9 +533,10 @@ function waitFor(jid, item, now) {
   let wait = 0;
   wait = Math.max(wait, lastSendAt + minIntervalFor(item.kind) - now);
   wait = Math.max(wait, (chatLast.get(jid) || 0) + chatIntervalFor(item.kind) - now);
-  const cw = chatWindow.get(jid) || [];
-  const chatCap = chatMaxPerMinute();
-  if (cw.length >= chatCap) wait = Math.max(wait, cw[0] + WINDOW_MS - now);
+  if (KINDS_DE_RAJADA.has(item.kind) && chatWindowFull(jid, now)) {
+    const cw = chatWindow.get(jid) || [];
+    wait = Math.max(wait, cw[0] + WINDOW_MS - now);
+  }
   return Math.max(0, wait);
 }
 
@@ -525,7 +572,7 @@ function nextWait(now) {
 function jitter() {
   const j = Number(CFG.jitterMs) || 0;
   if (j <= 0) return 0;
-  return Math.round(Math.random() * j * factor());
+  return Math.round(Math.random() * j * intervalFactor());
 }
 
 async function pump() {
@@ -580,8 +627,10 @@ async function pump() {
       lastSendAt = ts;
       chatLast.set(picked.jid, ts);
       globalWindow.push(ts);
-      if (!chatWindow.has(picked.jid)) chatWindow.set(picked.jid, []);
-      chatWindow.get(picked.jid).push(ts);
+      if (KINDS_DE_RAJADA.has(picked.item.kind)) {
+        if (!chatWindow.has(picked.jid)) chatWindow.set(picked.jid, []);
+        chatWindow.get(picked.jid).push(ts);
+      }
       noteDuplicate(picked.item.hash, picked.jid, ts);
       state.totalSent++;
       audit({ t: ts, jid: picked.jid, kind: picked.item.kind, h: picked.item.hash || undefined });
@@ -864,6 +913,7 @@ function stats() {
       hours: CFG.warmupHours,
       remainingHours: left ? Number((left / 3600000).toFixed(1)) : 0,
       factor: factor(),
+      intervalFactor: intervalFactor(),
     },
     limits: {
       minIntervalMs: minIntervalFor('text'),
@@ -943,6 +993,10 @@ module.exports = {
     isDuplicateBroadcast,
     noteDuplicate,
     waitFor,
+    chatWindow,
+    globalWindow: () => globalWindow,
+    chatWindowFull,
+    intervalFactor,
     config: CFG,
   },
 };

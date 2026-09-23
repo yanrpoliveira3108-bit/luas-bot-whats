@@ -13,6 +13,18 @@ const logger = require('./logger').child('dqueue');
 
 const CONFIG = require('../config');
 const MAX_CONCURRENT = (CONFIG.downloader && CONFIG.downloader.maxConcurrentDownloads) || 3;
+
+/**
+ * Teto de tempo por job. Sem isto, UM download travado ocupa uma vaga para
+ * sempre — e com 3 vagas, três travamentos deixam o bot sem baixar NADA, sem
+ * erro nenhum na tela (o sintoma "nenhum download funciona").
+ *
+ * O tempo é lido a cada job para poder ser ajustado em runtime/teste.
+ */
+function timeoutMs() {
+  const d = (CONFIG.downloader && CONFIG.downloader.queueTimeoutMs) || 0;
+  return Math.max(1000, d || 180000);
+}
 let active = 0;
 let seq = 0;
 const queue = [];
@@ -36,14 +48,26 @@ function pump() {
 async function run(job) {
   active++;
   byChat.set(job.chatId, job);
+  const limite = timeoutMs();
+  let timer;
   try {
-    const out = await job.task({
-      isCancelled: () => job.aborted,
-    });
+    const out = await Promise.race([
+      job.task({ isCancelled: () => job.aborted }),
+      new Promise((_, rej) => {
+        timer = setTimeout(() => {
+          job.aborted = true;
+          const e = new Error(`Download passou de ${Math.round(limite / 1000)}s e foi cancelado.`);
+          e.code = 'TIMEOUT';
+          rej(e);
+        }, limite);
+      }),
+    ]);
     job.resolve(out);
   } catch (err) {
     job.reject(err);
   } finally {
+    // Libera a vaga SEMPRE: um job travado não pode parar a fila inteira.
+    clearTimeout(timer);
     active--;
     byChat.delete(job.chatId);
     pump();

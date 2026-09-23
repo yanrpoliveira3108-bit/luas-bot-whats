@@ -13,7 +13,8 @@
     "audit": "node scripts/audit.js",
     "smoke": "node test/smoke.js",
     "diagnose": "node scripts/diagnose.js",
-    "test": "node scripts/audit.js && node test/smoke.js && node test/phone.test.js && node test/connect_flow.test.js && node test/prefix.test.js && node test/migration.test.js && node test/life.test.js && node test/e2e.test.js && node test/moderation.test.js && node test/pix.test.js && node test/theme.test.js && node test/platform.test.js && node test/selective.test.js && node test/autobot.test.js && node test/sendguard.test.js"
+    "doctor": "node scripts/downloads-doctor.js",
+    "test": "node scripts/audit.js && node test/smoke.js && node test/phone.test.js && node test/connect_flow.test.js && node test/prefix.test.js && node test/migration.test.js && node test/life.test.js && node test/e2e.test.js && node test/moderation.test.js && node test/pix.test.js && node test/theme.test.js && node test/platform.test.js && node test/selective.test.js && node test/autobot.test.js && node test/sendguard.test.js && node test/downloads.test.js"
   },
   "keywords": [
     "whatsapp",

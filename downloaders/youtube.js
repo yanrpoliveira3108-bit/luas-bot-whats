@@ -15,11 +15,14 @@
 const fs = require('fs');
 const path = require('path');
 const { execFile, spawnSync } = require('child_process');
+// O ytdl-core checa atualização na primeira extração: em rede de celular
+// isso custa tempo e, com proxy/certificado estranho, imprime erro no console.
+process.env.YTDL_NO_UPDATE = process.env.YTDL_NO_UPDATE || '1';
 const ytdl = require('@distube/ytdl-core');
 const yts = require('yt-search');
 const CONFIG = require('../config');
 const logger = require('../utils/logger').child('youtube');
-const { safeFileName, deleteFile } = require('../utils/download');
+const { safeFileName, deleteFile, ensureTmp } = require('../utils/download');
 const mediaCache = require('../utils/mediaCache');
 
 const MAX_BYTES = CONFIG.limits.maxDownloadMB * 1024 * 1024;
@@ -201,6 +204,7 @@ function buildAudioFormat() {
 /* ------------------------- download yt-dlp (alta velocidade) ---------------------- */
 
 async function ytdlpDownload(url, suggestedName, kind) {
+  ensureTmp();
   const base = safeFileName(suggestedName || 'youtube', '');
   const outTemplate = path.join(CONFIG.paths.tmpDir, base + '.%(ext)s');
 
@@ -253,6 +257,13 @@ async function runYtdlpAttempt(url, suggestedName, base, outTemplate, kind, att,
     '--buffer-size', '32K',
     '--http-chunk-size', '10M',
   ];
+
+  // cookies do YouTube: é o conserto definitivo do "Sign in to confirm you are
+  // not a bot" (o YouTube exige sessão validada para muitos vídeos).
+  const cookies = String(DL.ytCookies || '').trim();
+  if (cookies) {
+    args.push('--cookies', cookies);
+  }
 
   // aria2c para download ainda mais rápido (se habilitado e disponível)
   if (DL.useAria2c && aria2cAvailable()) {
@@ -342,8 +353,21 @@ function validateUrl(url) {
 function friendlyError(err) {
   const m = String((err && err.message) || '');
   const code = (err && err.code) || '';
+  if (m.includes('sign in to confirm') || m.includes('not a bot') || m.includes('login_required') || m.includes('bot')) {
+    const e = new Error(
+      'O YouTube exigiu sessão validada ("confirme que você não é um robô").\n' +
+        '▸ Instale/atualize o yt-dlp: pkg install python && pip install -U yt-dlp\n' +
+        '▸ Se continuar: exporte os cookies do navegador para um arquivo e defina YT_COOKIES=/caminho/cookies.txt no .env\n' +
+        '▸ Veja DOWNLOAD-TROUBLESHOOTING.md'
+    );
+    e.code = 'YOUTUBE_BLOCKED';
+    return e;
+  }
   if (m.includes('decipher') || m.includes('n transform') || m.includes('player-script') || m.includes('Could not parse')) {
-    const e = new Error('O YouTube mudou e o motor reserva (ytdl-core) não consegue extrair.\n▸ No Termux: pkg install yt-dlp — e reinicie o bot.');
+    const e = new Error(
+      'O YouTube mudou e o motor reserva (ytdl-core) não consegue extrair.\n' +
+        '▸ Instale o motor principal: pkg install python && pip install -U yt-dlp — e reinicie o bot.'
+    );
     e.code = 'DOWNLOAD_FAILED';
     return e;
   }
@@ -475,6 +499,7 @@ function streamToFile(stream, dest, maxBytes, timeoutMs = 180000) {
 /* ------------------------- downloads principais ---------------------- */
 
 async function downloadAudio(url, suggestedName) {
+  ensureTmp();
   if (!validateUrl(url)) {
     const e = new Error('URL inválida');
     e.code = 'INVALID_URL';
@@ -535,6 +560,7 @@ async function downloadAudio(url, suggestedName) {
 }
 
 async function downloadVideo(url, suggestedName) {
+  ensureTmp();
   if (!validateUrl(url)) {
     const e = new Error('URL inválida');
     e.code = 'INVALID_URL';
@@ -597,6 +623,7 @@ async function downloadVideo(url, suggestedName) {
 }
 
 module.exports = {
+  ensureTmp,
   search,
   validateUrl,
   getInfo,

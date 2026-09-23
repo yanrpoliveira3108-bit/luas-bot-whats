@@ -184,7 +184,14 @@ const CONFIG = {
       mediaMultiplier: Math.max(1, envInt('SEND_MEDIA_MULTIPLIER', 2)),
       // número recém-pareado: limites mais duros nas primeiras horas
       warmupHours: envInt('SEND_WARMUP_HOURS', 48),
+      // Meses de limite: quanto MENOS mensagens por minuto um número recém
+      // pareado pode mandar (volume). 3 = um terço do teto normal.
       warmupFactor: Math.max(1, envInt('SEND_WARMUP_FACTOR', 3)),
+      // Efeito do warmup no ESPAÇAMENTO entre mensagens. 1 (padrão) = nenhum:
+      // multiplicar o espaçamento fazia o arquivo de um download chegar ~62s
+      // depois do comando, o que parece "download quebrado".
+      // Ex.: 2 = dobra o intervalo entre mensagens durante o warmup.
+      warmupIntervalFactor: Math.max(1, envInt('SEND_WARMUP_INTERVAL_FACTOR', 1)),
       // trava de mensagem IDÊNTICA repetida em vários chats (broadcast).
       // 0 = desligado (padrão): o !broadcast do dono passa normalmente, só
       // respeitando o ritmo do freio. Ative (ex.: 3) se quiser o bloqueio.
@@ -374,8 +381,19 @@ const CONFIG = {
     useAria2c: envBool('USE_ARIA2C', false),
     // Concorrência global de downloads
     maxConcurrentDownloads: Math.min(5, Math.max(1, envInt('MAX_CONCURRENT_DOWNLOADS', 3))),
+    // Teto de tempo por download na fila (ms). Evita que um download travado
+    // ocupe uma vaga para sempre e deixe o bot sem baixar nada.
+    queueTimeoutMs: Math.max(30000, envInt('DOWNLOAD_QUEUE_TIMEOUT_MS', 180000)),
     // Preferir yt-dlp sempre que disponível (mais rápido e estável que ytdl-core)
     preferYtdlp: envBool('PREFER_YTDLP', true),
+    // Arquivo de cookies do YouTube (formato Netscape). Conserta o
+    // "Sign in to confirm you are not a bot" nos vídeos que exigem sessão.
+    // Gerar com a extensão "Get cookies.txt" (navegador logado no YouTube).
+    ytCookies: (() => {
+      const v = String(envStr('YT_COOKIES', '') || '').trim();
+      if (!v) return '';
+      return path.isAbsolute(v) ? v : path.resolve(ROOT, v);
+    })(),
   },
 
   external: {

@@ -129,3 +129,7 @@ coverage/
 # HutaoBot-MD-main era um projeto externo copiado — removido
 # Nova pasta continha conteúdo não relacionado — removida
 # lua/ era duplicata do projeto — removida
+
+# cookies do YouTube (contém sua sessão logada — NUNCA versione)
+cookies*.txt
+*.cookies

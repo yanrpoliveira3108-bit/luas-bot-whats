@@ -403,6 +403,58 @@ async function main() {
     fail('11: padrão liberado', e);
   }
 
+
+  /* ══════════ 12. DOWNLOAD não pode demorar 1 minuto ══════════
+   *
+   * Regressão real: o warmup multiplicava os INTERVALOS (até 12s por mensagem
+   * na mesma conversa) e o teto por conversa caía para 2/min. Um comando de
+   * download responde "baixando...", o título e o arquivo — três mensagens na
+   * mesma conversa — e o ARQUIVO só chegava ~62s depois. Para o dono, isso é
+   * "nenhum download funciona".
+   *
+   * Aqui: com warmup ATIVO (número recém-pareado), o arquivo tem que sair em
+   * menos de 20s, e mídia não pode consumir a cota de mensagens da conversa.
+   */
+  try {
+    sendGuard.reset();
+    sendGuard.__test.state.firstSeen = new Date().toISOString();
+    sendGuard.__test.config.warmupHours = 48;
+    sendGuard.__test.config.warmupFactor = 3;
+    assert.strictEqual(sendGuard.warmupActive(), true, 'warmup ativo para o teste');
+
+    const chat = '5511977777777@g.us';
+    const antes = sent.filter((s) => s.jid === chat).length;
+    const t0 = Date.now();
+    const tempos = {};
+
+    const textos = await Promise.all([
+      sock.sendMessage(chat, { text: '⏳ Baixando áudio...' }).then(() => (tempos.aviso = Date.now() - t0)),
+      sock.sendMessage(chat, { text: '🎵 Título — Canal' }).then(() => (tempos.titulo = Date.now() - t0)),
+    ]);
+    const midia = await sock.sendMessage(chat, { audio: { url: '/tmp/nao-existe-9f3a.m4a' } });
+    tempos.arquivo = Date.now() - t0;
+
+    assert.ok(!(midia && midia.guardBlocked), 'o arquivo NÃO pode ser barrado pelo freio');
+    assert.strictEqual(sent.filter((s) => s.jid === chat).length - antes, 3, 'as 3 mensagens do download saíram');
+    assert.ok(textos.every((r) => !(r && r.guardBlocked)), 'os textos do download saíram');
+    assert.ok(
+      tempos.arquivo < 20000,
+      `o ARQUIVO saiu rápido mesmo em warmup (${(tempos.arquivo / 1000).toFixed(1)}s)`
+    );
+
+    // a cota da conversa conta só mensagens de texto/interativas: mídia não consome
+    const janela = sendGuard.__test.chatWindow.get(chat) || [];
+    assert.strictEqual(janela.length, 2, `mídia não entra na cota de texto da conversa (${janela.length} contadas)`);
+
+    // warmup continua reduzindo o TETO POR MINUTO (o volume segue protegido)
+    const st = sendGuard.stats();
+    assert.strictEqual(st.warmup.factor, 3, 'fator de volume do warmup aplicado');
+    assert.strictEqual(st.warmup.intervalFactor, 1, 'warmup NÃO multiplica mais o espaçamento');
+    ok(`12: arquivo do download sai em ${(tempos.arquivo / 1000).toFixed(1)}s mesmo com warmup ativo`);
+  } catch (e) {
+    fail('12: download em warmup', e);
+  }
+
   /* ------------------------------- fim ------------------------------- */
   sendGuard.reset();
   database.close();

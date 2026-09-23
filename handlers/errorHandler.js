@@ -64,11 +64,15 @@ async function handle(ctx, err, command) {
   if (!ctx || typeof ctx.reply !== 'function') return;
 
   try {
+    // Mensagem que já traz o "o que fazer" (linhas com ▸, escritas pelos
+    // downloaders) vale mais que o texto genérico do mapa: mostra o conserto.
+    const msg = err && typeof err.message === 'string' ? err.message : '';
+    const acionavel = msg.includes('▸') || msg.includes('pkg install') || msg.includes('pip install');
     const friendly = FRIENDLY[code];
-    if (friendly) {
+    if (acionavel) {
+      await ctx.reply(msg);
+    } else if (friendly) {
       await ctx.reply(friendly);
-    } else if (code === 'GENERIC') {
-      await ctx.reply(CONFIG.messages.error);
     } else {
       await ctx.reply(CONFIG.messages.error);
     }
