@@ -11,6 +11,11 @@
  *     categorias na faixa (#lua-tabs). Cada toque anda PASSO × área visível.
  *     A página e a conversa do WhatsApp não se movem: quem rola é sempre um
  *     contêiner interno, com `overflow` próprio;
+ *   - ALTURA: o CSS entrega px FIXO (nunca `vh`/`min()`: a altura de viewport
+ *     deste WebView não é confiável — ver templates.travarAltura). Aqui, em
+ *     runtime, o card pode ENCOLHER se a área disponível medida for plausível
+ *     (>=240px) e menor que a desenhada; medida degenerada ou ausente deixa o
+ *     card exatamente como a versão que renderiza bem;
  *   - TOQUES RÁPIDOS: o destino dos toques é ACUMULADO — enquanto a rolagem
  *     anterior ainda está animando, o toque seguinte conta a partir do destino
  *     já pedido (não da posição animada) e é aplicado NA HORA, sem animação. Sem
@@ -63,6 +68,7 @@ function buildJs(initialCategory, opts = {}) {
   const initial = JSON.stringify(String(initialCategory || ''));
   const informado = Number(opts && opts.passo);
   const passo = Number.isFinite(informado) && informado > 0 && informado <= 1 ? informado : PASSO_PADRAO;
+  const alturaCss = Math.max(240, Math.min(900, Math.round(Number(opts && opts.altura) || 520)));
   return `
 (function(){
 "use strict";
@@ -83,10 +89,30 @@ m:"Para mencionar alguém use @ no chat depois de colar: digitar @nome não marc
 md:"Usa mídia enviada ou respondida no chat."};
 var st={tela:"list",cat:inicial,busca:"",rol:{},faixa:0,campos:{},cmd:"",pilha:[]};
 var timer=null,copiouEm=0,alvo=null,alvoEm=0;
+var ALTURA_CSS=${alturaCss},alturaAtual=0;
 /* PASSO = fração da área visível por toque (único ponto de ajuste). */
 var PASSO=${passo};
 
 function reduz(){try{return !!(window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches)}catch(e){return false}}
+
+/* Encaixe de altura em RUNTIME (CSS fica em px fixo — ver templates.js):
+   só encolhe, só com medida PLAUSÍVEL (>=240px) e volta ao CSS se a janela
+   folgar. Medida de 0/1px é ignorada de propósito: foi com uma medida dessas
+   que a altura presa à viewport virou uma faixa de 1px (ver MENUS-HTML.md). */
+function encaixar(){
+  var h=0;
+  try{h=document.documentElement.clientHeight||0}catch(e){h=0}
+  var alvo=(h>=240&&h<ALTURA_CSS)?h:ALTURA_CSS;
+  if(alvo===alturaAtual)return;
+  alturaAtual=alvo;
+  var px=alvo+"px",raiz=document.documentElement;
+  [raiz,document.body,document.getElementById("__wrap")].forEach(function(el){
+    if(!el)return;
+    el.style.height=px;el.style.maxHeight=px;
+  });
+  if(document.body)document.body.classList.toggle("curto",alvo<380);
+  setas();
+}
 function chave(){return st.tela==="panel"?"panel":"cat:"+st.cat}
 function elV(){return st.tela==="panel"?painel:lista}
 function maxV(el){return el?Math.max(0,(el.scrollHeight||0)-(el.clientHeight||0)):0}
@@ -458,17 +484,19 @@ raiz.addEventListener("change",function(ev){
 });
 /* Setas: recalcula em rolagem (passivo), resize e trocas de tela. */
 [lista,painel,faixa].forEach(function(el){if(el)el.addEventListener("scroll",setas,{passive:true})});
-window.addEventListener("resize",function(){setas();setTimeout(setas,120)},{passive:true});
-window.addEventListener("orientationchange",function(){setTimeout(setas,200)});
+window.addEventListener("resize",function(){encaixar();setas();setTimeout(function(){encaixar();setas()},120)},{passive:true});
+window.addEventListener("orientationchange",function(){setTimeout(function(){encaixar();setas()},200)});
 window.addEventListener("pagehide",function(){if(timer){clearTimeout(timer);timer=null}});
 
 if(!st.cat||!aba(st.cat))aba(inicial);
 tela("list");
+encaixar();
 setas();
 
 window.__luaMenu={campos:camposDoUso,validar:validar,montar:montar,esc:esc,estado:st,abrir:abrir,
   copiar:acaoCopiar,voltar:voltar,fechar:fechar,categoria:porCategoria,filtrar:filtrar,requisitos:REQ,
-  rolarVertical:rolarV,rolarHorizontal:rolarF,atualizarSetas:pintar,passo:PASSO,
+  rolarVertical:rolarV,rolarHorizontal:rolarF,atualizarSetas:pintar,encaixar:encaixar,
+  altura:function(){return alturaAtual||ALTURA_CSS},passo:PASSO,
   rolavel:function(){return {vertical:maxV(elV()),horizontal:maxH(faixa)}}};
 })();
 `.trim();

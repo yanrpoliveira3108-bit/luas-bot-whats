@@ -10,6 +10,14 @@ removido: o HTML é um formato alternativo que o dono liga quando quiser.
 > link `wa.me` (que **não navegava** — ver §5) e passou a **montar o comando no
 > próprio card, com campos, validação e avisos, para você copiar**. Leia §5
 > antes de estranhar: é a limitação do formato, não uma escolha de estilo.
+>
+> **Corrigido no patch seguinte (altura do card):** a versão com as setas
+> declarava a altura como `height:min(520px,100vh)`. No WebView do card a
+> viewport acompanha o **conteúdo**, então `100vh` resolve para ~0 e, como a
+> segunda declaração **sobrescreve** a primeira, o card inteiro virava uma faixa
+> de 1px de altura (o “quadradinho”). A altura voltou a ser **px fixo** e o
+> encaixe em janela mais baixa passou a ser feito **em runtime**, com guarda —
+> §2.1 e §7 explicam como isso está travado por teste.
 
 ---
 
@@ -92,11 +100,22 @@ Motivo: arrastar o dedo dentro da mensagem briga com os gestos do WhatsApp
   fazia o item ser dimensionado pelo **conteúdo** (~640 px) e, num WebView de
   360 px, a barra das setas e a seta `→` eram desenhadas **fora da tela** — o
   mesmo tipo de defeito do corte vertical, só que no eixo X.
-- **A altura do card é o menor entre `MENU_HTML_HEIGHT` e o WebView**
-  (`height:min(520px,100vh)`). Sem isso o documento se declarava com 520 px
-  fixos: num WebView mais baixo, o rodapé — e o fim da lista — ficavam fora da
-  área visível, sem como alcançar (era o “comandos cortados”). A declaração em
-  px continua antes, como fallback para motor sem `min()`.
+- **A altura do card é px FIXO** (`MENU_HTML_HEIGHT`, padrão 520 px), declarada
+  em `html`, `body` e `#__wrap`, com `overflow:hidden` — nada de `vh`, `min()`
+  ou `calc()` em altura. **Regra aprendida na prática:** o WebView do card
+  dimensiona a viewport pelo **conteúdo**, então `100vh` resolve para ~0 lá
+  dentro; declarar `height:520px;height:min(520px,100vh)` fazia a **segunda**
+  declaração vencer e o card inteiro colapsar numa faixa de 1px. Não use unidade
+  de viewport em altura de card.
+- **Quem encaixa em janela baixa é o cliente, em runtime:** `encaixar()` mede
+  `document.documentElement.clientHeight` e **só encolhe** (nunca estica) — e só
+  quando a medida é **plausível (≥ 240 px)**. Medida absurda (0/1 px, que foi
+  exatamente o que produziu o colapso) é ignorada: o card mantém o px do CSS. Se
+  a janela folgar de novo, ele volta à altura do CSS. Com altura < 380 px o
+  cliente liga `body.curto` (aperto do topo), substituindo as antigas
+  `@media (max-height:)` — que dependiam da mesma viewport não confiável.
+  **Onde ajustar a altura:** `MENU_HTML_HEIGHT` (§3); a guarda de 240 px vive em
+  `menus/html/client.js`, dentro de `encaixar()`.
 - As setas (e o atalho **`⇱` topo**) ficam na barra lateral, **fora** da área
   que rola: nunca cobrem um comando, nunca saem de vista e não se movem quando
   o conteúdo anda. `←`/`→` ficam nas pontas da faixa, com a faixa correndo
@@ -126,11 +145,16 @@ Motivo: arrastar o dedo dentro da mensagem briga com os gestos do WhatsApp
   para o painel) e voltar devolve a lista na mesma altura. Ao escolher a
   categoria, a faixa anda **só o necessário** para deixá-la visível — e é a
   seleção que troca o menu; rolar a faixa apenas revela categorias.
-- **No fim da lista** vem só um rodapé curto (~58 px, antes eram ~154 px) — ele
-  é o último nó do conteúdo, então a rolagem termina deixando o **último
-  comando e o botão “Usar” inteiros** na tela. O texto completo sobre o “Usar”
-  só copiar continua no painel (`.pn-tip`). Em cards muito baixos
-  (`max-height:360px`) o rodapé é omitido para não comer a área rolável.
+- **No fim da lista** vem só um rodapé curto (~58 px, antes eram ~154 px). Numa
+  janela de 520 px a rolagem termina com o **último comando e o botão “Usar”
+  inteiros** na tela. Numa janela **bem baixa** (ex.: 430 px ajustado pelo
+  `encaixar()`), o que aparece no fim é o rodapé: o último comando continua
+  **inteiro e alcançável**, rolando um toque para cima (o cartão tem ~104 px e a
+  área útil ~168 px). Se o cartão for **mais alto que a área útil** (janelas de
+  ~300 px), ele não cabe inteiro por definição — a verificação cobra que ele
+  esteja visível e alcançável, não inteiro. O texto completo sobre o “Usar” só
+  copiar continua no painel (`.pn-tip`). Em janela baixa (`body.curto`) o rodapé
+  é omitido para não comer a área rolável.
 - O antigo botão “↑ Voltar ao topo”, que ficava no fim do conteúdo (só
   aparecia depois de rolar tudo), virou o atalho **`⇱`** na barra — sempre
   acessível de qualquer ponto.
@@ -273,8 +297,8 @@ mensagem saiu, o desenho do card depende do aparelho e da versão do WhatsApp
 
 ## 7. O que foi testado aqui × o que depende do aparelho
 
-**Testado em sandbox** (`node --check`, `test/menuhtml.test.js` **35/35**,
-suíte completa `npm test` **326 ✅ / 0 ❌** — inclui auditoria, smokes,
+**Testado em sandbox** (`node --check`, `test/menuhtml.test.js` **36/36**,
+suíte completa `npm test` **327 ✅ / 0 ❌** — inclui auditoria, smokes,
 phone, downloads, fila de envio):
 
 - padrão desligado quando a chave não existe;
@@ -287,8 +311,12 @@ phone, downloads, fila de envio):
   registro (nenhuma lista paralela) e com nomes/aliases atuais;
 - payload no formato correto (`richResponseMessage` → `unifiedResponse`,
   primitiva `GenAIaeacdsnwHtmlPrimitive`), dentro do teto
-  (menu principal: **103,9 KB**, 265 de 371 comandos, com aviso de corte);
-  admin 67,0 KB / 100 comandos; membros 29,1 KB / 19; uma categoria 27,5 KB / 13;
+  (menu principal: **114,1 KB**, 265 de 371 comandos, com aviso de corte);
+  admin 77,1 KB / 100 comandos; membros 39,1 KB / 19; uma categoria 37,5 KB / 13;
+- **altura do card em px fixo, sem unidade de viewport** (a declaração é lida e
+  recusada se aparecer `vh`/`min()`/`calc()`), e **nenhuma `@media` de altura**
+  no CSS gerado — a regra do “quadradinho de 1px” ficou cravada no teste 8 e no
+  20j, além da guarda estática do `menu:check`;
 - **dois** `<style>` (trava de altura + tema) e **dois** `<script>` (envolver o
   corpo + menu), **zero** subresource remoto;
 - nenhuma API morta no card (`fetch`, `XMLHttpRequest`, `WebSocket`, storage,
@@ -329,14 +357,24 @@ phone, downloads, fila de envio):
   áreas roláveis.
 
 **Testado em navegador de verdade** (`node scripts/menu-scroll-check.js`, com
-Chromium/`puppeteer` instalado — sem ele o script avisa e sai sem falhar):
-em **520 px, 430 px e 300 px** de altura, com o card principal (265 comandos):
+Chromium/`puppeteer` instalado — sem ele a guarda estática roda igual e o script
+avisa e sai sem falhar): **41 verificações, 0 falhas**, com o card principal
+(265 comandos):
 
-- a lista cabe no WebView e **rola de verdade** (conteúdo > área visível);
+- **guarda estática** (roda sempre, sem navegador): altura do card em px fixo,
+  sem `vh`/`min()`/`calc()`; nenhuma `@media` de altura de viewport; altura
+  declarada ≥ 240 px;
+- em **520 px, 430 px e 300 px** de altura: a lista cabe no WebView e **rola de
+  verdade** (conteúdo > área visível);
 - **nada passa da largura da tela** (`document.scrollWidth == innerWidth`): a
   barra das setas fica visível e o conteúdo não é empurrado para fora;
 - descendo com `↓` até o fim, a seta **desativa** e o **último comando + botão
-  “Usar” ficam inteiros** na tela;
+  “Usar” ficam inteiros** na tela (em 430 px: inteiros e alcançáveis, com o
+  rodapé fechando a rolagem — ver §2.1);
+- **viewport degenerada (60 px e 1 px)**: é o cenário que reproduziu o
+  “quadradinho” — o card mantém os 520 px declarados e a lista continua com
+  264 px de área útil (a versão com `min(520px,100vh)` media 60 px de card e
+  6 px de lista);
 - “Usar” e **copiar funcionam depois de rolar tudo** (a cópia foi conferida com
   a área de transferência interceptada);
 - o atalho `⇱` volta ao início e `↑` desativa; o primeiro comando aparece
@@ -345,7 +383,7 @@ em **520 px, 430 px e 300 px** de altura, com o card principal (265 comandos):
 - as setas **horizontais** continuam movendo a faixa.
 
 **Não verificado em aparelho** (jsdom não tem layout): os testes de rolagem da
-suíte (`20a`–`20k`) usam **geometria simulada** — altura/largura visível e total
+suíte (`20a`–`20m`) usam **geometria simulada** — altura/largura visível e total
 definidas à mão, `scrollTo` que aplica o destino (opcionalmente “animado”). Eles
 provam a **lógica** — passo, limites, estados das setas, rajada, alvo certo —,
 **não** o CSS; é justamente aí que nasceu o defeito do corte, e é por isso que
@@ -363,9 +401,11 @@ existe o `npm run menu:check`.
    antigo se ela não existir);
 5. velocidade de abertura em celular fraco e comportamento em conversa de grupo
    grande / WhatsApp Web;
-6. quanto o WebView do WhatsApp dá de **altura real** ao card: o layout se adapta
-   (`min(520px,100vh)`), mas é esse valor que define quantos comandos cabem na
-   tela por vez.
+6. quanto o WebView do WhatsApp dá de **altura real** ao card: é esse valor que
+   define quantos comandos cabem na tela por vez. O layout **não** depende de
+   unidade de viewport (a altura é px fixo); se a medida vier plausível e menor
+   que 520 px, o cliente encolhe em runtime para caber — comportamento medido só
+   em navegador, não no WebView do WhatsApp.
 
 Se o card não aparecer bonito no seu aparelho: `!modohtml off` volta tudo ao
 menu tradicional na hora — e `!menu --texto` é a saída por chamada, sem mexer
@@ -396,13 +436,13 @@ na configuração.
 | `menus/html/index.js` | monta e envia o documento; altura fixa, teto de tamanho e corte adaptativo |
 | `menus/html/data.js` | categorias e comandos vindos do registro |
 | `menus/html/actions.js` | **regras do “Usar”**: lê os argumentos do `usage`, valida, monta o comando, deriva requisitos e avisos (funções puras, testáveis sem DOM) |
-| `menus/html/templates.js` | templates: principal, admin, membros, categoria + as duas telas (lista/painel), os contêineres de rolagem com as setas e a trava de altura |
+| `menus/html/templates.js` | templates: principal, admin, membros, categoria + as duas telas (lista/painel), os contêineres de rolagem com as setas e a trava de altura (px fixo, sem unidade de viewport) |
 | `menus/html/components.js` | cartões, abas, seções, cabeçalho/rodapé, escapagem |
 | `menus/html/styles.js` | CSS (usa as variáveis do tema atual do bot; alvos de toque ≥ 44 px; transições curtas) |
-| `menus/html/client.js` | JS do card: abas, busca, painel do “Usar”, validação, prévia, cópia, “Voltar” com estado preservado e a **rolagem programática** das setas (limites, estados, passo) |
+| `menus/html/client.js` | JS do card: abas, busca, painel do “Usar”, validação, prévia, cópia, “Voltar” com estado preservado, a **rolagem programática** das setas (limites, estados, passo) e o **encaixe de altura em runtime** (`encaixar()`, com guarda de 240 px) |
 | `commands/general/modohtml.js` | comando `!modohtml` |
-| `test/menuhtml.test.js` | 35 verificações desta funcionalidade (18 sem navegador + 17 de DOM com jsdom: “Usar”, navegação e as setas de rolagem) |
-| `scripts/menu-scroll-check.js` | verificação OPCIONAL de layout num navegador de verdade (`npm run menu:check`; pula sem `puppeteer`) — foi ela que pegou o corte do fim da lista e a barra de setas fora da tela |
+| `test/menuhtml.test.js` | 36 verificações desta funcionalidade (18 sem navegador + 18 de DOM com jsdom: “Usar”, navegação, as setas de rolagem e o encaixe de altura com guarda) |
+| `scripts/menu-scroll-check.js` | verificação OPCIONAL de layout num navegador de verdade (`npm run menu:check`): **guarda estática** (sempre roda: altura em px fixo, sem `vh`, sem `@media` de altura) + 3 alturas de janela + **viewport degenerada (60 px/1 px)**; foi ela que pegou o corte do fim da lista, a barra de setas fora da tela e o colapso do card |
 
 **Alterados (mudanças mínimas)**
 

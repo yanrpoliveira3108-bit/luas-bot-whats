@@ -198,18 +198,20 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
   .vnav,.vtop{width:44px}}
 /* Card baixo (MENU_HTML_HEIGHT pequeno): aperta o topo para sobrar área de
    comandos — as setas nunca encolhem. */
-@media (max-height:430px){.head{padding:8px 0 5px}.tabs{padding:6px 0}.searchbar{padding:2px 0 6px}
-  .logo{width:32px;height:32px;font-size:17px}.vnav{min-height:46px}}
-/* Card MUITO baixo: tudo o que não é lista encolhe, para sobrar área rolável. */
-@media (max-height:360px){.head{padding:5px 0 4px}
-  .logo{width:26px;height:26px;font-size:15px}.bot-meta{font-size:11px}.cat-name{font-size:11.5px}
-  .tabs{padding:4px 0}.tab{min-height:38px;padding:6px 11px;font-size:12.5px}
-  .snav{min-height:38px}.searchbar{padding:0 0 4px}.searchbar input{min-height:38px;font-size:14px}
-  .vnav{min-height:42px}.sec{margin:10px 0 4px}.sec-title{font-size:12.5px;margin-bottom:2px}
-  /* Num card deste tamanho o rodapé comeria metade da área rolável (e o
-     último comando não caberia): aqui ele sai — o aviso de que "Usar" só
-     copia continua no painel (.pn-tip) e no rodapé dos cards normais. */
-  .foot{display:none}}
+/* Card baixo: nada de @media de altura de viewport por aqui (não é confiável
+   neste WebView). O client.js mede em runtime e liga body.curto. */
+body.curto .head{padding:8px 0 5px}
+body.curto .logo{width:32px;height:32px;font-size:17px}
+body.curto .bot-meta{font-size:11px}
+body.curto .tabs{padding:6px 0}
+body.curto .searchbar{padding:2px 0 6px}
+body.curto .vnav{min-height:46px}
+body.curto .sec{margin:12px 0 4px}
+body.curto .sec-title{font-size:12.5px}
+/* Card muito baixo: o rodapé comeria boa parte da área rolável e o último
+   comando não caberia — ele sai. O aviso de que "Usar" só copia continua no
+   painel (.pn-tip) e no rodapé dos cards normais. */
+body.curto .foot{display:none}
 `.trim();
 }
 

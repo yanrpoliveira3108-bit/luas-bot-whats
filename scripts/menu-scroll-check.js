@@ -29,13 +29,43 @@ const path = require('path');
 const RAIZ = path.resolve(__dirname, '..');
 process.chdir(RAIZ);
 
-let puppeteer;
-try {
-  puppeteer = require('puppeteer');
-} catch (_) {
-  console.log('⏭  menu-scroll-check: puppeteer não instalado — verificação de layout pulada.');
-  console.log('   Para rodar: npm i --no-save puppeteer   (ou defina CHROME_PATH)');
-  process.exit(0);
+function carregarPuppeteer() {
+  try {
+    return require('puppeteer');
+  } catch (_) {
+    return null;
+  }
+}
+const SEM_PUPPETEER =
+  '⏭  sem puppeteer: as checagens de layout real foram puladas (a guarda estática rodou acima).\n' +
+  '   Para rodar tudo: npm i --no-save puppeteer   (ou defina CHROME_PATH)';
+
+/**
+ * Guarda estática — roda SEMPRE, mesmo sem navegador. Protege a classe exata
+ * do defeito do "quadradinho de 1px" (42d8c35): altura do card declarada com
+ * unidade de viewport. No WebView do card a viewport acompanha o conteúdo, então
+ * `100vh` resolve para ~0 e `min(520px,100vh)` (2ª declaração) sobrescreve o px.
+ * Aqui a regra fica cravada na própria verificação, não só num comentário.
+ */
+function guardaEstatica(html) {
+  const bloco = html.match(/html,body\{margin:0;padding:0;height[^}]*\}/);
+  const declarado = bloco && bloco[0].match(/height:\s*(\d+)px/);
+  if (bloco && declarado && !/(?:^|[^a-z])vh\b/.test(bloco[0]) && !/min\(|max\(|calc\(/.test(bloco[0])) {
+    ok(`altura do card em px fixo (${declarado[1]}px) — sem vh/min()/calc()`);
+  } else {
+    erro(`altura do card com vh/min()/calc() ou ausente: ${bloco ? bloco[0] : 'bloco html,body não encontrado'}`);
+  }
+
+  // Só regras de verdade contam: comentários que EXPLICAM a regra (por que não
+  // usar @media de altura) não podem ser confundidos com uso dela.
+  const semComentarios = html.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  if (!/@media[^{;]*\(\s*(?:max|min)-height\s*:[^{)]*\)\s*\{/.test(semComentarios)) ok('CSS sem @media de altura de viewport (usa body.curto em runtime)');
+  else erro('CSS tem @media (max-height/min-height) — altura de viewport não é confiável neste WebView');
+
+  const altura = declarado ? Number(declarado[1]) : 0;
+  if (altura >= 240) ok(`altura declarada utilizável (${altura}px ≥ 240px)`);
+  else erro(`altura declarada pequena demais (${altura}px)`);
+  return altura;
 }
 
 const TMP = path.join(RAIZ, 'tmp');
@@ -91,8 +121,17 @@ const ROTEIRO = async () => {
   await dorme(900);
   const lr = cx(lista);
   const ultimo = visiveis().at(-1);
-  r.cartaoMaiorQueJanela = Math.max(...visiveis().map((c) => cx(c).height)) > lista.clientHeight + 1;
+  // Área ÚTIL = caixa da lista menos o padding: é o espaço em que um cartão
+  // cabe inteiro. Usar só clientHeight dava falso positivo quando o padding
+  // (aqui, o rodapé no fim do conteúdo) comia alguns px do último cartão.
+  const css = getComputedStyle(lista);
+  const areaUtil = lista.clientHeight - parseFloat(css.paddingTop || 0) - parseFloat(css.paddingBottom || 0);
+  r.cartaoMaiorQueJanela = Math.max(...visiveis().map((c) => cx(c).height)) > areaUtil + 1;
   r.fim = {
+    areaUtil: Math.round(areaUtil),
+    alturaUltimo: Math.round(cx(ultimo).height),
+    // Cabe inteiro em alguma posição de rolagem? (basta a área útil comportar o cartão)
+    alcancavelInteiro: cx(ultimo).height <= areaUtil + 1,
     toques: n,
     noFim: Math.abs(lista.scrollTop - max()) < 2,
     setaBaixoDesativada: document.getElementById('lua-down').disabled,
@@ -167,6 +206,15 @@ const ROTEIRO = async () => {
   fs.writeFileSync(arquivo, html);
   console.log(`card: ${grupo.titulo} (${grupo.total} comandos) — ${(Buffer.byteLength(html, 'utf8') / 1024).toFixed(1)} KB\n`);
 
+  const alturaDeclarada = guardaEstatica(html);
+
+  const puppeteer = carregarPuppeteer();
+  if (!puppeteer) {
+    console.log('\n' + (falhas ? `❌ ${falhas} problema(s)` : '✅ guarda estática OK'));
+    console.log(SEM_PUPPETEER);
+    process.exit(falhas ? 1 : 0);
+  }
+
   const navegador = await puppeteer.launch({
     executablePath: process.env.CHROME_PATH || undefined,
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
@@ -204,6 +252,8 @@ const ROTEIRO = async () => {
       else erro(`${tag} não chegou ao fim (scrollTop ≠ máximo) ou ↓ seguiu ativa`);
 
       if (r.fim.ultimoInteiro && r.fim.usarInteiro) ok(`${tag} último comando e botão "Usar" inteiros no fim`);
+      else if (r.fim.alcancavelInteiro)
+        ok(`${tag} último comando inteiro é alcançável (${r.fim.alturaUltimo}px em ${r.fim.areaUtil}px de área útil; no fim da rolagem aparece o rodapé)`);
       else if (r.cartaoMaiorQueJanela) ok(`${tag} cartão mais alto que a janela (${r.alturaLista}px): não há como caber inteiro — visível e alcançável`);
       else erro(`${tag} último comando/botão "Usar" cortados no fim`);
 
@@ -227,6 +277,31 @@ const ROTEIRO = async () => {
       await pg.close();
     }
   } finally {
+    // Viewport DEGENERADA (1px e 60px): é o cenário que reproduziu o
+    // "quadradinho". A versão com min(520px,100vh) media 60px de card aqui;
+    // a correta mantém a altura declarada porque nada depende de viewport.
+    for (const altura of [60, 1]) {
+      const pg = await navegador.newPage();
+      await pg.setViewport({ width: 360, height: altura, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
+      await pg.goto('file://' + arquivo, { waitUntil: 'load' });
+      await new Promise((r) => setTimeout(r, 300));
+      const d = await pg.evaluate(() => {
+        const wrap = document.getElementById('__wrap') || document.querySelector('.wrap');
+        const lista = document.getElementById('lua-list');
+        return {
+          card: Math.round(wrap.getBoundingClientRect().height),
+          lista: Math.round(lista.getBoundingClientRect().height),
+          curto: document.body.classList.contains('curto'),
+        };
+      });
+      const tag = `[viewport ${altura}px]`;
+      if (d.card >= alturaDeclarada - 1 && d.card >= 240) ok(`${tag} card NÃO colapsou: ${d.card}px (declarado ${alturaDeclarada}px)`);
+      else erro(`${tag} card colapsou: ${d.card}px com ${alturaDeclarada}px declarados — altura presa à viewport?`);
+      if (d.lista >= 90) ok(`${tag} área dos comandos utilizável (${d.lista}px, curto: ${d.curto})`);
+      else erro(`${tag} área dos comandos inutilizável (${d.lista}px)`);
+      await pg.close();
+    }
+
     await navegador.close();
   }
 

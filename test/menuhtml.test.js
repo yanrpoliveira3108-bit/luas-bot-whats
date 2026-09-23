@@ -256,15 +256,17 @@ async function main() {
     assert.ok(html.includes('id="lua-view-panel"'), 'tela do painel do Usar');
     assert.ok(html.includes('data-voltar="raiz"'), 'Voltar do painel');
     assert.ok(html.includes('id="__wrap"') || html.includes('w.id="__wrap"'), 'contêiner injetado');
-    // A altura é o MENOR entre o valor pedido e o WebView real: sem isso, um
-    // card mais baixo que o documento corta o fim da lista sem como alcançar.
+    // A altura é px FIXO, de propósito. A versão 42d8c35 usou
+    // `height:min(520px,100vh)`: no WebView do card a viewport acompanha o
+    // conteúdo, o `100vh` resolveu para ~0 e a 2ª declaração sobrescreveu o px
+    // — o card inteiro virou uma faixa de 1px. Quem encaixa em janela mais baixa
+    // é o client.js, em runtime, com guarda (ver 20m).
+    const blocoAltura = (html.match(/html,body\{margin:0;padding:0;height[^}]*\}/) || [''])[0];
+    assert.ok(/^html,body\{margin:0;padding:0;height:\d+px;max-height:\d+px;overflow:hidden\}$/.test(blocoAltura), 'html/body com altura em px fixo e sem rolagem própria');
+    assert.ok(!/vh|min\(|max\(|calc\(/.test(blocoAltura), 'altura do card SEM unidade de viewport (vh/min()/calc())');
     assert.ok(
-      /html,body\{margin:0;padding:0;height:\d+px;height:min\(\d+px,100vh\);max-height:\d+px;max-height:min\(\d+px,100vh\);overflow:hidden\}/.test(html),
-      'html/body cabem no WebView (min(altura,100vh)) e não rolam'
-    );
-    assert.ok(
-      /#__wrap\{height:\d+px;height:min\(\d+px,100vh\);[^}]*overflow:hidden;display:flex;flex-direction:column/.test(html),
-      '#__wrap idem (flex em coluna, sem rolagem própria)'
+      /#__wrap\{height:\d+px;[^}]*overflow:hidden;display:flex;flex-direction:column/.test(html),
+      '#__wrap idem (px fixo, flex em coluna, sem rolagem própria)'
     );
     assert.ok(html.includes('prefers-reduced-motion'), 'respeita movimento reduzido');
     // contêineres de rolagem: um por eixo, cada um com overflow próprio
@@ -1165,14 +1167,17 @@ async function main() {
       fail('20h: DOM movimento reduzido/resize', e);
     }
 
-    /* 20j) cabe no WebView: altura = min(pedido, viewport) */
+    /* 20j) cabe no WebView: altura pedida em px FIXO (encaixe é no runtime) */
     try {
       const ctxAltura = fakeCtx();
       const antes = process.env.MENU_HTML_HEIGHT;
       process.env.MENU_HTML_HEIGHT = '600';
       const card600 = htmlMenu.montarDocumento(ctxAltura, { kind: 'categoria', categoria: 'downloads' }).html;
-      assert.ok(card600.includes('height:min(600px,100vh)'), 'valor pedido entra no min() com 100vh');
-      assert.ok(card600.includes('height:600px;height:min(600px,100vh)'), 'a declaração antiga fica como fallback');
+      assert.ok(card600.includes('html,body{margin:0;padding:0;height:600px;max-height:600px;overflow:hidden}'), 'valor pedido entra como px fixo');
+      // olha a DECLARAÇÃO (comentários que explicam o defeito citam o vh de propósito)
+      const bloco600 = (card600.match(/html,body\{margin:0;padding:0;height[^}]*\}/) || [''])[0];
+      assert.ok(!/vh|min\(|calc\(/.test(bloco600), 'declaração sem vh/min() — foi o min(...,100vh) que colapsou o card no aparelho');
+      assert.strictEqual(typeof (montarDom(card600).window.__luaMenu || {}).encaixar, 'function', 'o client recebe encaixar() para ajustar a altura em runtime');
       if (antes === undefined) delete process.env.MENU_HTML_HEIGHT;
       else process.env.MENU_HTML_HEIGHT = antes;
 
@@ -1192,10 +1197,53 @@ async function main() {
         'a rolagem termina exatamente no fim do conteúdo'
       );
       assert.ok(rodapeAltura < 90, 'rodapé enxuto (o antigo tinha 154px e cortava o último comando)');
-      ok('20j: [DOM] rodapé enxuto no fim da lista e altura limitada pelo WebView');
+      ok('20j: [DOM] rodapé enxuto no fim da lista e altura pedida em px fixo');
       dom.window.close();
     } catch (e) {
       fail('20j: DOM fim da lista/altura', e);
+    }
+
+    /** Finge a altura que o WebView reporta — é o que `encaixar()` mede. */
+    function alturaDoWebView(w, px) {
+      Object.defineProperty(w.document.documentElement, 'clientHeight', {
+        get: () => px,
+        set: () => {},
+        configurable: true,
+      });
+    }
+
+    /* 20m) altura: px fixo no CSS + encaixe em runtime com guarda (regressão 42d8c35) */
+    try {
+      const dom = montarDom(card);
+      const w = dom.window;
+      const d = w.document;
+      const alturaCss = w.__luaMenu.altura();
+      const wrap = d.getElementById('__wrap');
+      assert.ok(alturaCss >= 240, `altura do CSS utilizável (${alturaCss}px)`);
+      assert.strictEqual(typeof w.__luaMenu.encaixar, 'function', 'encaixar() exposto');
+
+      // 1) medição DEGENERADA (1px): foi assim que o card colapsou no aparelho
+      alturaDoWebView(w, 1);
+      w.__luaMenu.encaixar();
+      assert.strictEqual(w.__luaMenu.altura(), alturaCss, 'medição de 1px NÃO encolhe o card (guarda >= 240px)');
+      assert.strictEqual(wrap.style.height, alturaCss + 'px', '__wrap mantém a altura do CSS');
+
+      // 2) medição plausível e menor: encolhe só o necessário para caber
+      alturaDoWebView(w, 320);
+      w.__luaMenu.encaixar();
+      assert.strictEqual(w.__luaMenu.altura(), 320, 'medida plausível (320px) encaixa o card na janela');
+      assert.strictEqual(wrap.style.height, '320px', '__wrap recebe a altura encaixada');
+      assert.ok(d.body.classList.contains('curto'), 'janela baixa liga body.curto (aperto do topo)');
+
+      // 3) medição normal: volta à altura do CSS, sem esticar além dela
+      alturaDoWebView(w, 900);
+      w.__luaMenu.encaixar();
+      assert.strictEqual(w.__luaMenu.altura(), alturaCss, 'medição maior que o CSS não estica o card');
+      assert.ok(!d.body.classList.contains('curto'), 'sem body.curto quando a janela é folgada');
+      ok('20m: [DOM] altura px fixo + encaixe em runtime (medição de 1px não colapsa o card)');
+      dom.window.close();
+    } catch (e) {
+      fail('20m: DOM altura/encaixe', e);
     }
 
     /* 20k) rajada: toques rápidos andam um passo cada, sem fila de animações */

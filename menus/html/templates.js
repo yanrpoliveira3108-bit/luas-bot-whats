@@ -53,32 +53,32 @@ function emojiDeComando(cmd) {
 }
 
 /**
- * Altura do card: o MENOR entre o valor pedido e a altura REAL do WebView.
+ * Altura do card: valor FIXO em px (igual à versão que renderizava bem).
  *
- * Por que assim (isto foi a causa dos comandos cortados): antes o documento se
- * declarava com `height:520px` fixos. Quando o WebView entregue pelo WhatsApp é
- * mais baixo que isso, o rodapé do card — justamente o fim da lista de comandos
- * — ficava FORA da área visível e, como html/body/#__wrap têm `overflow:hidden`,
- * não havia como alcançá-lo: os últimos comandos ficavam cortados e
- * inacessíveis, mesmo com as setas (elas movem a lista, mas a caixa da própria
- * lista terminava abaixo do corte).
+ * REGRESSÃO (não repetir): uma tentativa anterior usou
+ * `height:min(520px,100vh)` para o card encolher em WebView baixo. Como a
+ * segunda declaração SOBREPÕE a primeira, bastou o `100vh` resolver para um
+ * valor degenerado — o WebView do card é dimensionado pelo próprio conteúdo,
+ * então a janela de layout mede ~0-1px no primeiro layout — para o card
+ * INTEIRO colapsar numa faixa de ~1px, mesmo com a declaração em px na frente.
+ * Medido: com viewport de 60px, o html/body/#__wrap iam para 60px e a lista
+ * para 6px (antes: 520px/520px/309px).
  *
- * `min(<n>px, 100vh)` mantém o teto de `<n>` px (o card não cresce sem
- * controle) e encolhe quando o WebView é menor. A declaração em px fica ANTES
- * de propósito: motor sem suporte a `min()` usa o valor antigo, sem quebrar.
+ * Conclusão: este WebView NÃO oferece medida de viewport confiável. Portanto
+ * aqui só entra medida absoluta (`${n}px`), sem `vh`, sem `min()`, sem
+ * `@media (max-height:)`. Quem trata WebView mais baixo é o client.js, em
+ * runtime, com guardas (só encolhe se a medida for plausível — ver `encaixar`).
  *
- * `overflow:hidden` no html/body/#__wrap também é proposital: a página NÃO
- * rola. Toda rolagem acontece nos contêineres internos (#lua-tabs, #lua-list,
+ * `overflow:hidden` no html/body/#__wrap é proposital: a página NÃO rola. Toda
+ * rolagem acontece nos contêineres internos (#lua-tabs, #lua-list,
  * #lua-panel-body), o que evita o gesto de arrastar virar "responder" no
  * WhatsApp.
  */
 function travarAltura(px) {
   const n = Math.max(240, Math.min(900, Number(px) || 520));
-  const h = `height:${n}px;height:min(${n}px,100vh)`;
-  const mh = `max-height:${n}px;max-height:min(${n}px,100vh)`;
   return (
-    `<style>html,body{margin:0;padding:0;${h};${mh};overflow:hidden}` +
-    `#__wrap{${h};${mh};overflow:hidden;display:flex;flex-direction:column;` +
+    `<style>html,body{margin:0;padding:0;height:${n}px;max-height:${n}px;overflow:hidden}` +
+    `#__wrap{height:${n}px;max-height:${n}px;overflow:hidden;display:flex;flex-direction:column;` +
     'overscroll-behavior:contain}</style>'
   );
 }
@@ -199,7 +199,7 @@ function documento(info, grupo, opts = {}) {
     `<div class="screens" id="lua-screens">${telaLista}${telaPainel}</div>` +
     barraVertical +
     '</div>' +
-    `${ENVOLVER}<script>${buildJs(inicial, { passo: info.passo })}</script></body></html>`
+    `${ENVOLVER}<script>${buildJs(inicial, { passo: info.passo, altura: info.altura })}</script></body></html>`
   );
 }
 
