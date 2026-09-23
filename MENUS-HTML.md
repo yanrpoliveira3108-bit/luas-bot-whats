@@ -224,6 +224,14 @@ altura declarada):
 porcentagem e altura em `vh`. O tamanho é resolvido em dimensões reais do
 layout, com `flex` (cabeçalho/faixa/busca fixos, lista com o resto) e px.
 
+**Como medir a área REAL que o seu WhatsApp dá ao card (sem editar nada):**
+envie `!menu` e **toque no título da seção** (“GERAL 30 COMANDOS”). O rodapé
+troca o texto por `📐 512px de área; card desenhado 512px`. Esse número é o que
+decide se o card pode ser ainda maior **no seu aparelho** — me diga o valor e eu
+ajusto a altura para o máximo que couber. O card nunca pede mais do que a área
+que o aplicativo desenha; quando a área é menor, ele encolhe para caber (§2.2,
+item 5).
+
 **Onde ajustar depois:** `menus/html/dimensoes.js` → `ESCALA` (texto e toque:
 `1.0` volta ao tamanho anterior, `1.3` é bem grande), `altura` (padrão 640),
 `alturaCurta` (quando o topo aperta), `larguraMax`, `toque`, `snav`,
@@ -360,8 +368,8 @@ mensagem saiu, o desenho do card depende do aparelho e da versão do WhatsApp
 
 ## 7. O que foi testado aqui × o que depende do aparelho
 
-**Testado em sandbox** (`node --check`, `test/menuhtml.test.js` **37/37**,
-suíte completa `npm test` **328 ✅ / 0 ❌** — inclui auditoria, smokes,
+**Testado em sandbox** (`node --check`, `test/menuhtml.test.js` **38/38**,
+suíte completa `npm test` **329 ✅ / 0 ❌** — inclui auditoria, smokes,
 phone, downloads, fila de envio):
 
 - padrão desligado quando a chave não existe;
@@ -456,7 +464,7 @@ avisa e sai sem falhar): **81 verificações, 0 falhas**, com o card principal
 - as setas **horizontais** continuam movendo a faixa.
 
 **Não verificado em aparelho** (jsdom não tem layout): os testes de rolagem e de
-tamanho da suíte (`20a`–`20n`) usam **geometria simulada** — altura/largura visível e total
+tamanho da suíte (`20a`–`20o`) usam **geometria simulada** — altura/largura visível e total
 definidas à mão, `scrollTo` que aplica o destino (opcionalmente “animado”). Eles
 provam a **lógica** — passo, limites, estados das setas, rajada, alvo certo —,
 **não** o CSS; é justamente aí que nasceu o defeito do corte, e é por isso que
@@ -517,7 +525,7 @@ na configuração.
 | `menus/html/styles.js` | CSS (variáveis do tema atual do bot; fontes e alvos de toque vindos de `dimensoes.js`; transições curtas) |
 | `menus/html/client.js` | JS do card: abas, busca, painel do “Usar”, validação, prévia, cópia, “Voltar” com estado preservado, a **rolagem programática** das setas (limites, estados, passo) e o **encaixe de altura em runtime** (`encaixar()`, com guarda de 240 px) |
 | `commands/general/modohtml.js` | comando `!modohtml` |
-| `test/menuhtml.test.js` | 37 verificações desta funcionalidade (18 sem navegador + 19 de DOM com jsdom: “Usar”, navegação, setas de rolagem, encaixe de altura com guarda e os tamanhos centralizados) |
+| `test/menuhtml.test.js` | 38 verificações desta funcionalidade (18 sem navegador + 20 de DOM com jsdom: “Usar”, navegação, setas de rolagem, encaixe de altura com guarda e os tamanhos centralizados) |
 | `scripts/menu-scroll-check.js` | verificação OPCIONAL de layout num navegador de verdade (`npm run menu:check`): **guarda estática** (sempre roda: altura em px fixo, sem `vh`, sem `@media` de altura) + 4 alturas de janela + **viewport degenerada (60 px/1 px)** + **tamanho/legibilidade** (área de comandos, fontes, alvos de toque, categorias visíveis, botões dentro da lista); foi ela que pegou o corte do fim da lista, a barra de setas fora da tela e o colapso do card |
 
 **Alterados (mudanças mínimas)**

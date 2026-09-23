@@ -96,7 +96,7 @@ m:"Para mencionar alguém use @ no chat depois de colar: digitar @nome não marc
 md:"Usa mídia enviada ou respondida no chat."};
 var st={tela:"list",cat:inicial,busca:"",rol:{},faixa:0,campos:{},cmd:"",pilha:[]};
 var timer=null,copiouEm=0,alvo=null,alvoEm=0;
-var ALTURA_CSS=${alturaCss},ALTURA_MIN=${alturaMin},CURTO=${alturaCurta},alturaAtual=0;
+var ALTURA_CSS=${alturaCss},ALTURA_MIN=${alturaMin},CURTO=${alturaCurta},alturaAtual=0,medido=0;
 /* PASSO = fração da área visível por toque (único ponto de ajuste). */
 var PASSO=${passo};
 
@@ -110,6 +110,7 @@ function encaixar(){
   var h=0;
   try{h=document.documentElement.clientHeight||0}catch(e){h=0}
   var alvo=(h>=ALTURA_MIN&&h<ALTURA_CSS)?h:ALTURA_CSS;
+  medido=h||0;
   if(alvo===alturaAtual)return;
   alturaAtual=alvo;
   var px=alvo+"px",raiz=document.documentElement;
@@ -500,7 +501,20 @@ tela("list");
 encaixar();
 setas();
 
+/* DIAGNÓSTICO de tamanho: sem editar nada, o card diz o tamanho que recebeu.
+   Primeiro toque no título da seção mostra a medida aqui no rodapé. É o número
+   que decide se o card pode ser ainda maior no SEU aparelho (ver MENUS-HTML.md
+   §2.2) — o card nunca pede mais do que a área que o WhatsApp desenha. */
+function amostra(){
+  var f=document.querySelector(".foot");if(!f)return;
+  var h=medido||0;
+  var txt=h?(h+"px de área; card desenhado "+alturaAtual+"px"):"sem medida de área";
+  f.textContent="📐 "+txt;
+}
+var titulo=document.querySelector(".sec-title");
+if(titulo)titulo.addEventListener("click",amostra);
 window.__luaMenu={campos:camposDoUso,validar:validar,montar:montar,esc:esc,estado:st,abrir:abrir,
+  amostra:amostra,medida:function(){return medido},
   copiar:acaoCopiar,voltar:voltar,fechar:fechar,categoria:porCategoria,filtrar:filtrar,requisitos:REQ,
   rolarVertical:rolarV,rolarHorizontal:rolarF,atualizarSetas:pintar,encaixar:encaixar,
   altura:function(){return alturaAtual||ALTURA_CSS},passo:PASSO,

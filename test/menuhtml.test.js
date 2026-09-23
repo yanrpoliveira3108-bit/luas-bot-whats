@@ -1271,6 +1271,22 @@ async function main() {
       fail('20n: dimensões centralizadas', e);
     }
 
+    /* 20o) diagnóstico de tamanho: fn existe e não quebra o card */
+    try {
+      const dom = montarDom(card);
+      const w = dom.window;
+      assert.strictEqual(typeof w.__luaMenu.amostra, 'function', 'amostra() exposto');
+      assert.strictEqual(typeof w.__luaMenu.medida, 'function', 'medida() exposto');
+      const titulo = w.document.querySelector('.sec-title');
+      assert.ok(titulo, 'há título de seção para tocar');
+      titulo.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+      assert.ok(/área|medida/.test(w.document.querySelector('.foot').textContent), 'o rodapé mostra o diagnóstico depois do toque');
+      ok('20o: [DOM] diagnóstico de tamanho não interfere no card');
+      dom.window.close();
+    } catch (e) {
+      fail('20o: diagnóstico de tamanho', e);
+    }
+
     /* 20k) rajada: toques rápidos andam um passo cada, sem fila de animações */
     try {
       const dom = montarDom(card, { animacao: true, movimento: 'full' });
