@@ -96,7 +96,7 @@ m:"Para mencionar alguém use @ no chat depois de colar: digitar @nome não marc
 md:"Usa mídia enviada ou respondida no chat."};
 var st={tela:"list",cat:inicial,busca:"",rol:{},faixa:0,campos:{},cmd:"",pilha:[]};
 var timer=null,copiouEm=0,alvo=null,alvoEm=0;
-var ALTURA_CSS=${alturaCss},ALTURA_MIN=${alturaMin},CURTO=${alturaCurta},alturaAtual=0,medido=0;
+var ALTURA_CSS=${alturaCss},ALTURA_MIN=${alturaMin},CURTO=${alturaCurta},alturaAtual=0,medido=0,pedido=0;
 /* PASSO = fração da área visível por toque (único ponto de ajuste). */
 var PASSO=${passo};
 
@@ -119,7 +119,32 @@ function encaixar(){
     el.style.height=px;el.style.maxHeight=px;
   });
   if(document.body)document.body.classList.toggle("curto",alvo<CURTO);
+  notaMedida();
+  pedirAltura();
   setas();
+}
+/* Pede ao HOST a altura declarada, pela ponte nativa do WebView
+   (AndroidBridge.updateSize — a mesma que o helper de referência do formato usa
+   para auto-altura). Enviamos SEMPRE o px que o HTML já declara, então não há
+   laço de medição: um pedido por valor, dentro de try/catch. Se o host não
+   tiver a ponte ou ignorar o pedido, nada muda. */
+function pedirAltura(){
+  if(pedido===ALTURA_CSS)return;
+  pedido=ALTURA_CSS;
+  try{
+    if(window.AndroidBridge&&typeof window.AndroidBridge.updateSize==="function"){
+      window.AndroidBridge.updateSize(ALTURA_CSS);
+    }
+  }catch(e){}
+}
+function notaMedida(){
+  var el=document.getElementById("lua-medida");if(!el)return;
+  if(medido>=ALTURA_MIN&&medido<ALTURA_CSS){
+    el.textContent="▸ área do card aqui: "+medido+"px (pedido "+ALTURA_CSS+"px) — é o que o aplicativo desenha";
+    el.hidden=false;
+  }else{
+    el.hidden=true;
+  }
 }
 function chave(){return st.tela==="panel"?"panel":"cat:"+st.cat}
 function elV(){return st.tela==="panel"?painel:lista}
@@ -506,13 +531,17 @@ setas();
    que decide se o card pode ser ainda maior no SEU aparelho (ver MENUS-HTML.md
    §2.2) — o card nunca pede mais do que a área que o WhatsApp desenha. */
 function amostra(){
-  var f=document.querySelector(".foot");if(!f)return;
-  var h=medido||0;
-  var txt=h?(h+"px de área; card desenhado "+alturaAtual+"px"):"sem medida de área";
-  f.textContent="📐 "+txt;
+  var el=document.getElementById("lua-medida");if(!el)return;
+  var h=medido||ALTURA_CSS;
+  el.textContent="📐 área do card aqui: "+h+"px (pedido "+ALTURA_CSS+"px; desenhado "+alturaAtual+"px)";
+  el.hidden=false;
 }
+/* O toque que revela a medida fica em dois pontos que SEMPRE existem: o título
+   da seção (que some em card baixo) e o nome da categoria no cabeçalho. */
 var titulo=document.querySelector(".sec-title");
 if(titulo)titulo.addEventListener("click",amostra);
+var rotuloTopo=document.getElementById("lua-cat-label");
+if(rotuloTopo)rotuloTopo.addEventListener("click",amostra);
 window.__luaMenu={campos:camposDoUso,validar:validar,montar:montar,esc:esc,estado:st,abrir:abrir,
   amostra:amostra,medida:function(){return medido},
   copiar:acaoCopiar,voltar:voltar,fechar:fechar,categoria:porCategoria,filtrar:filtrar,requisitos:REQ,

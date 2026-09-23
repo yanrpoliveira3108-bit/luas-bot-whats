@@ -1287,6 +1287,55 @@ async function main() {
       fail('20o: diagnóstico de tamanho', e);
     }
 
+    /* 20p) densidade: "Usar" na linha do nome, descrição limitada, rodapé com o aviso de corte */
+    try {
+      const ctxD = fakeCtx();
+      const doc = htmlMenu.montarDocumento(ctxD, { kind: 'main' }).html;
+      assert.ok(/<div class="top"><code>[^<]*<\/code>(<span class="tag[\s\S]*?)?<button[^>]*class="go"/.test(doc),
+        'o botão "Usar" fica na MESMA linha do nome do comando (cartão baixo)');
+      assert.ok(/\.cmd \.top \.go\{margin-left:auto\}/.test(doc), 'o "Usar" é empurrado para a direita da linha');
+      assert.ok(/-webkit-line-clamp:2/.test(doc), 'a descrição do comando é limitada a 2 linhas');
+      assert.ok(/\.sec-title\{[^}]*-?[^}]*\}/.test(doc), 'a seção tem título');
+      assert.ok(/<span class="pill">\d+<\/span>/.test(doc), 'a contagem da categoria fica no título (uma linha só)');
+      // o aviso de corte NÃO fica mais antes do primeiro comando
+      const iSec = doc.indexOf('<section class="sec"');
+      const iPrimeiroCmd = doc.indexOf('<article class="cmd"', iSec);
+      const entre = doc.slice(iSec, iPrimeiroCmd);
+      assert.ok(!/Mostrando \d+ de/.test(entre), 'nada de aviso de corte antes do primeiro comando');
+      assert.ok(!/<p class="sec-desc">/.test(doc), 'a descrição da categoria não é mais um parágrafo próprio');
+      ok('20p: [DOM] cartão compacto (Usar na linha do nome) e topo da lista sem aviso');
+    } catch (e) {
+      fail('20p: densidade do cartão', e);
+    }
+
+    /* 20q) aviso de corte no rodapé + pedido de altura ao host */
+    try {
+      const ctxQ = fakeCtx();
+      // força corte: teto minúsculo → limitarCategorias reduz e marca avisoCorte
+      const antesTeto = process.env.MENU_HTML_MAX_BYTES;
+      process.env.MENU_HTML_MAX_BYTES = '20000';
+      const doc = htmlMenu.montarDocumento(ctxQ, { kind: 'main' }).html;
+      if (antesTeto === undefined) delete process.env.MENU_HTML_MAX_BYTES;
+      else process.env.MENU_HTML_MAX_BYTES = antesTeto;
+      assert.ok(/class="foot-corte"/.test(doc), 'o aviso de corte vai para o rodapé');
+      assert.ok(/Mostrando \d+ de \d+/.test(doc), 'o aviso continua dizendo quanto ficou de fora');
+      assert.ok(/menucompleto|menuadm|menucat/.test(doc), 'e ensina o comando da lista completa');
+
+      const dom = montarDom(doc);
+      const w = dom.window;
+      let pedido = null;
+      w.AndroidBridge = { updateSize: (px) => { pedido = px; } };
+      w.__luaMenu.encaixar();
+      assert.ok(pedido === null || typeof pedido === 'number', 'updateSize é chamado com um número (ou não existe na ponte)');
+      w.__luaMenu.encaixar();
+      w.__luaMenu.encaixar();
+      assert.ok(pedido === null || pedido === w.__luaMenu.altura(), 'o pedido ao host usa a altura declarada (sem laço de medição)');
+      ok('20q: [DOM] aviso de corte no rodapé e pedido único de altura ao host');
+      dom.window.close();
+    } catch (e) {
+      fail('20q: rodapé/altura do host', e);
+    }
+
     /* 20k) rajada: toques rápidos andam um passo cada, sem fila de animações */
     try {
       const dom = montarDom(card, { animacao: true, movimento: 'full' });

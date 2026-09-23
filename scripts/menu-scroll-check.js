@@ -122,6 +122,23 @@ const ROTEIRO = async () => {
     const el = document.querySelector(sel);
     return el ? Math.round(cx(el).height) : 0;
   };
+  // DENSIDADE logo ao ABRIR (sem rolar): é o que o usuário vê primeiro.
+  r.abertura = (() => {
+    const c = visiveis()[0];
+    const l = cx(lista);
+    const passo = (() => {
+      const cartoes = visiveis();
+      const alturas = cartoes.slice(0, 10).map((x) => cx(x).height + 8);
+      return alturas.length ? alturas.reduce((a, b) => a + b, 0) / alturas.length : 0;
+    })();
+    return {
+      primeiroInteiro: cx(c).top >= l.top - 1 && cx(c).bottom <= l.bottom + 1,
+      primeiroTopo: Math.round(cx(c).top - l.top),
+      cartao: Math.round(cx(c).height),
+      porTela: passo ? Math.floor(l.height / passo) : 0,
+    };
+  })();
+
   const faixaCats = document.getElementById('lua-tabs');
   const fr = cx(faixaCats);
   const abas = [...document.querySelectorAll('.tab')];
@@ -321,9 +338,9 @@ const ROTEIRO = async () => {
       // No card na altura declarada (a que o aparelho recebe), a área de
       // comando tem de ser a maior parte da interface.
       if (r.tamanho.card === alturaDeclarada) {
-        if (r.tamanho.fatiaLista >= 55)
-          ok(`${tag} área de comandos = ${r.tamanho.lista}px, ${r.tamanho.fatiaLista}% do card de ${r.tamanho.card}px`);
-        else erro(`${tag} área de comandos pequena: ${r.tamanho.lista}px (${r.tamanho.fatiaLista}% do card)`);
+        if (r.tamanho.fatiaLista >= 55 && r.abertura.porTela >= 3)
+          ok(`${tag} área de comandos = ${r.tamanho.lista}px, ${r.tamanho.fatiaLista}% do card; ~${r.abertura.porTela} comandos por tela`);
+        else erro(`${tag} área/densidade pequena: ${r.tamanho.lista}px (${r.tamanho.fatiaLista}% do card), ~${r.abertura.porTela} comandos por tela`);
       }
 
       if (r.tamanho.fontes.corpo >= 16 && r.tamanho.fontes.comando >= 15 && r.tamanho.fontes.descricao >= 14 && r.tamanho.fontes.aba >= 14)
@@ -333,6 +350,15 @@ const ROTEIRO = async () => {
       if (Math.min(...Object.values(r.tamanho.toques)) >= 44)
         ok(`${tag} áreas de toque confortáveis (Usar ${r.tamanho.toques.usar}px, setas ${r.tamanho.toques.vnav}/${r.tamanho.toques.snav}px, categoria ${r.tamanho.toques.aba}px)`);
       else erro(`${tag} alvo de toque pequeno: ${JSON.stringify(r.tamanho.toques)}`);
+
+      // densidade: o primeiro comando aparece inteiro AO ABRIR (sem rolar) e a
+      // tela comporta pelo menos um comando completo + boa parte de outro
+      if (r.abertura.primeiroInteiro)
+        ok(`${tag} primeiro comando inteiro ao abrir (topo da lista em ${r.abertura.primeiroTopo}px; cartão ${r.abertura.cartao}px)`);
+      else erro(`${tag} primeiro comando cortado ao abrir (topo ${r.abertura.primeiroTopo}px, cartão ${r.abertura.cartao}px, área ${r.alturaLista}px)`);
+
+      if (r.abertura.cartao <= 120) ok(`${tag} cartão de comando compacto (${r.abertura.cartao}px — antes tinha 163px)`);
+      else erro(`${tag} cartão de comando alto demais (${r.abertura.cartao}px): cabe pouco por tela`);
 
       if (r.tamanho.botoesDentro) ok(`${tag} todos os botões "Usar" cabem dentro da área da lista`);
       else erro(`${tag} botão "Usar" passando da borda da lista`);

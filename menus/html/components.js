@@ -110,11 +110,15 @@ function cartaoDeComando(cmd, opts = {}) {
     `<article class="cmd" data-cat="${escapeAttr(opts.categoria || '')}">` +
     `<div class="ico">${escapeHtml(emoji)}</div>` +
     '<div class="body">' +
-    `<div class="top"><code>${escapeHtml(linha)}</code>${tags.join('')}</div>` +
+    // "Usar" fica NA MESMA LINHA do nome (empurrado para a direita): assim a
+    // descrição ocupa a largura inteira e o cartão fica bem mais baixo — o que
+    // aumenta quantos comandos aparecem por tela (ver MENUS-HTML.md §2.2).
+    `<div class="top"><code>${escapeHtml(linha)}</code>${tags.join('')}` +
+    botaoUsar(cmd, { prefix }) +
+    '</div>' +
     `<p class="desc">${escapeHtml(cmd.description || 'Sem descrição.')}</p>` +
     (compacto ? '' : `<p class="ex">Ex.: <code>${escapeHtml(exemplos)}</code></p>`) +
     '</div>' +
-    botaoUsar(cmd, { prefix }) +
     '</article>'
   );
 }
@@ -132,19 +136,12 @@ function abaDeCategoria(cat) {
 
 /** Seção de uma categoria com seus comandos. */
 function secaoDeCategoria(cat, comandos, opts = {}) {
-  // Aviso honesto quando o card foi cortado por tamanho: diz quanto ficou de
-  // fora e ensina o comando do menu completo (sem link: link não navega aqui).
-  let avisoCorte = '';
-  if (opts.avisoCorte) {
-    const atalho = opts.avisoCorte.atalho || '';
-    avisoCorte =
-      `<p class="sec-desc">▸ Mostrando ${escapeHtml(String(opts.avisoCorte.mostrados))} de ` +
-      `${escapeHtml(String(opts.avisoCorte.total))} comandos (limite do card). ` +
-      (atalho
-        ? `Para a lista completa, envie <code>${escapeHtml(opts.prefix + atalho)}</code> no chat.`
-        : `Envie <code>${escapeHtml(opts.prefix)}menucompleto</code> no chat para a lista completa.`) +
-      '</p>';
-  }
+  // UMA linha de identificação por categoria. Antes esta seção trazia título,
+  // descrição e aviso de corte — três blocos que empurravam o primeiro comando
+  // ~120px para baixo (num WebView baixo, era o bastante para não aparecer
+  // nenhum comando inteiro). O aviso de corte mudou para o rodapé (fim da
+  // lista) e continua dizendo a mesma coisa; a categoria também aparece no
+  // cabeçalho e na aba ativa.
   const cartoes = comandos.map((c) =>
     cartaoDeComando(c, {
       prefix: opts.prefix,
@@ -157,9 +154,9 @@ function secaoDeCategoria(cat, comandos, opts = {}) {
   return (
     `<section class="sec" data-cat="${escapeAttr(cat.id)}">` +
     `<h2 class="sec-title"><span>${escapeHtml(cat.emoji)}</span><span>${escapeHtml(cat.title)}</span>` +
-    `<span class="pill">${escapeHtml(String(comandos.length))} comandos</span></h2>` +
-    (cat.description ? `<p class="sec-desc">${escapeHtml(cat.description)}</p>` : '') +
-    avisoCorte +
+    `<span class="pill">${escapeHtml(String(comandos.length))}</span>` +
+    (cat.description ? `<span class="sec-desc">${escapeHtml(cat.description)}</span>` : '') +
+    '</h2>' +
     (cartoes.length ? cartoes.join('') : vazio) +
     '</section>'
   );
@@ -171,10 +168,14 @@ function cabecalho(info) {
     '<header class="head">' +
     `<div class="logo">${escapeHtml(info.emoji || '🌙')}</div>` +
     '<div class="head-txt">' +
-    `<div class="bot-name">${escapeHtml(info.botName)} <span class="bot-meta">v${escapeHtml(info.version)}</span></div>` +
+    // duas linhas (nome + categoria na mesma; prefixo/comandos embaixo): cada
+    // linha a mais aqui é um pedaço de comando a menos na tela.
+    '<div class="head-line">' +
+    `<span class="bot-name">${escapeHtml(info.botName)} <span class="bot-meta">v${escapeHtml(info.version)}</span></span>` +
+    `<span class="cat-name" id="lua-cat-label">${escapeHtml(info.categoriaLabel || 'Menu principal')}</span>` +
+    '</div>' +
     `<div class="bot-meta">Prefixo <b>${escapeHtml(info.prefix)}</b> • ${escapeHtml(String(info.total))} comandos • ` +
     `${escapeHtml(info.escopoTexto || 'preferências do bot')}</div>` +
-    `<div class="cat-name" id="lua-cat-label">${escapeHtml(info.categoriaLabel || 'Menu principal')}</div>` +
     '</div>' +
     '</header>'
   );
@@ -189,10 +190,20 @@ function rodape(info) {
   // Curto de propósito: o rodapé fica no FIM da lista, e cada pixel dele é um
   // pixel a menos para o último comando aparecer inteiro quando a rolagem
   // chega ao fim. O texto detalhado continua no painel do "Usar" (.pn-tip).
+  // Corte por tamanho (quando existe): o aviso honesto vive AQUI, no fim da
+  // lista, para não empurrar o primeiro comando para fora da tela.
+  const corte = info && info.avisoCorte;
+  const linhaCorte = corte
+    ? '<span class="foot-corte">▸ Mostrando ' +
+      `${escapeHtml(String(corte.mostrados))} de ${escapeHtml(String(corte.total))}: ` +
+      `<code>${escapeHtml(p + (corte.atalho || 'menucompleto'))}</code> traz a lista completa.</span>`
+    : '';
   return (
     '<footer class="foot">' +
     '▸ <b>Usar</b> só <b>copia</b> o comando (o card não envia): o bot confere permissão, ' +
     `limites e confirmações ao executar. Menu em texto: <code>${p}menucompleto</code>.` +
+    linhaCorte +
+    '<span class="foot-medida" id="lua-medida" hidden></span>' +
     '</footer>'
   );
 }

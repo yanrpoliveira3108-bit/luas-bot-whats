@@ -80,15 +80,17 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
 }
 
 /* ---------- cabeçalho ---------- */
-.head{flex:0 0 auto;min-width:0;display:flex;align-items:center;gap:11px;padding:10px 0 6px;
+.head{flex:0 0 auto;min-width:0;display:flex;align-items:center;gap:9px;padding:8px 0 6px;
   border-bottom:1px solid rgba(255,255,255,.10)}
-.logo{width:44px;height:44px;border-radius:13px;display:grid;place-items:center;font-size:${s(20)};
+.logo{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-size:${s(20)};
   background:linear-gradient(135deg,var(--lua-primary,#8B5CF6),var(--lua-primary-dark,#4C1D95));
   box-shadow:0 0 14px var(--lua-glow,rgba(139,92,246,.5))}
 .head-txt{flex:1;min-width:0}
+.head-line{display:flex;align-items:baseline;justify-content:space-between;gap:8px;min-width:0}
 .bot-name{font-weight:700;font-size:${s(16)};letter-spacing:.3px}
 .bot-meta{font-size:${s(12)};color:var(--lua-text-secondary,#B8A9D9)}
-.cat-name{font-size:${s(13)};font-weight:600;color:var(--lua-neon,#C084FC);margin-top:2px}
+.cat-name{font-size:${s(13)};font-weight:600;color:var(--lua-neon,#C084FC);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:52%}
 
 /* ---------- abas de categoria (faixa rolável entre as setas) ---------- */
 .tabsrow{flex:0 0 auto;display:flex;align-items:center;gap:4px}
@@ -112,8 +114,8 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
 .tab .count{display:none}
 
 /* ---------- busca (fixa) ---------- */
-.searchbar{flex:0 0 auto;min-width:0;padding:2px 0 8px}
-.searchbar input{width:100%;min-width:0;min-height:${DIM.toque}px;padding:11px 16px;border-radius:var(--lua-radius);
+.searchbar{flex:0 0 auto;min-width:0;padding:0 0 6px}
+.searchbar input{width:100%;min-width:0;min-height:${DIM.busca}px;padding:9px 15px;border-radius:var(--lua-radius);
   border:1px solid rgba(255,255,255,.14);background:var(--lua-bg-secondary,#0B0614);color:var(--lua-text,#fff);
   font-size:${s(15)};outline:none}
 .searchbar input:focus{border-color:var(--lua-primary,#8B5CF6)}
@@ -125,24 +127,35 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
 .vnav{width:${DIM.rail}px;min-height:${dim.tam(52)}px;font-size:${s(19)}}
 
 /* ---------- seção ---------- */
-.sec{margin:14px 0 6px}
-.sec-title{display:flex;align-items:center;gap:8px;font-size:${s(14)};font-weight:700;text-transform:uppercase;
-  letter-spacing:.6px;color:var(--lua-primary-light,#A78BFA);margin-bottom:4px}
+.sec{margin:10px 0 4px}
+.sec-title{display:flex;align-items:center;gap:7px;font-size:${s(13)};font-weight:700;text-transform:uppercase;
+  letter-spacing:.5px;color:var(--lua-primary-light,#A78BFA);margin:6px 0 6px;min-width:0}
+/* a descrição da categoria entra na MESMA linha do título, com reticências:
+   antes era um parágrafo próprio e, com o aviso de corte, empurrava o primeiro
+   comando ~120px para baixo (num WebView baixo, nenhum comando inteiro aparecia) */
+.sec-desc{font-size:${s(12)};font-weight:400;text-transform:none;letter-spacing:0;
+  color:var(--lua-text-secondary,#B8A9D9);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.foot-corte{display:block;margin-top:4px;color:#FDE68A}
 .sec-desc{font-size:${s(12.5)};color:var(--lua-text-secondary,#B8A9D9);margin:0 0 10px}
 .pill{font-size:${s(11)};padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.08);font-weight:600}
 
 /* ---------- comando ---------- */
-.cmd{display:flex;gap:11px;align-items:flex-start;padding:13px;margin-bottom:9px;border-radius:var(--lua-radius);
+.cmd{display:flex;gap:9px;align-items:flex-start;padding:${DIM.cartaoPadding}px;margin-bottom:8px;border-radius:var(--lua-radius);
   background:var(--lua-card,#120A1F);border:1px solid rgba(255,255,255,.08)}
-.cmd .ico{font-size:${s(19)};line-height:1.2;flex:0 0 26px;text-align:center}
+.cmd .ico{font-size:${s(17)};line-height:1.3;flex:0 0 ${DIM.icone}px;text-align:center}
 .cmd .body{flex:1;min-width:0}
 .cmd .top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .cmd code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:${s(14)};font-weight:700;
   color:var(--lua-neon,#C084FC);word-break:break-all}
-.cmd .desc{margin:4px 0 0;font-size:${s(13)};color:var(--lua-text-secondary,#B8A9D9)}
-.cmd .ex{margin:6px 0 0;font-size:${s(12)};color:var(--lua-text-secondary,#B8A9D9);opacity:.85}
+/* A descrição é limitada a ${DIM.descLinhas} linhas e o texto completo aparece no painel do "Usar":
+   é isso que mantém o cartão baixo e vários comandos visíveis por tela. */
+.cmd .desc{margin:3px 0 0;font-size:${s(13)};line-height:1.3;color:var(--lua-text-secondary,#B8A9D9);
+  display:-webkit-box;-webkit-line-clamp:${DIM.descLinhas};-webkit-box-orient:vertical;overflow:hidden}
+.cmd .ex{margin:4px 0 0;font-size:${s(12)};color:var(--lua-text-secondary,#B8A9D9);opacity:.85;
+  display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
 .cmd .ex code{font-size:${s(12)};font-weight:500;color:var(--lua-text-secondary,#B8A9D9)}
-.go{flex:0 0 auto;min-height:${DIM.toque}px;display:inline-flex;align-items:center;padding:0 18px;border:0;
+.cmd .top .go{margin-left:auto}
+.go{flex:0 0 auto;min-height:${DIM.botaoUsar}px;display:inline-flex;align-items:center;padding:0 15px;border:0;
   border-radius:999px;font-size:${s(13)};font-weight:700;color:#fff;cursor:pointer;
   background:linear-gradient(135deg,var(--lua-primary,#8B5CF6),var(--lua-primary-dark,#4C1D95))}
 .go:active{transform:translateY(1px)}
@@ -191,9 +204,11 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
 .pn-tip{margin:10px 0 0;font-size:${s(12)};color:var(--lua-text-secondary,#B8A9D9)}
 
 /* ---------- rodapé ---------- */
-.foot{margin-top:14px;padding-top:10px;border-top:1px solid rgba(255,255,255,.10);font-size:${s(11.5)};
+.foot{margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.10);font-size:${s(11.5)};
   line-height:1.35;color:var(--lua-text-secondary,#B8A9D9)}
 .foot code{color:var(--lua-neon,#C084FC);font-weight:700}
+/* diagnóstico de área: aparece SÓ quando o host deu menos altura que a pedida */
+.foot-medida{display:block;margin-top:4px;color:var(--lua-neon,#C084FC)}
 .empty{padding:26px 8px;text-align:center;color:var(--lua-text-secondary,#B8A9D9);font-size:${s(13.5)}}
 /* atalho "topo": mora na barra (fora da área que rola), por isso nunca some no
    meio da lista — antes ele ficava no fim do conteúdo e só aparecia no final */
@@ -209,12 +224,17 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
    comandos — as setas nunca encolhem. */
 /* Card baixo: nada de @media de altura de viewport por aqui (não é confiável
    neste WebView). O client.js mede em runtime e liga body.curto. */
-body.curto .head{padding:8px 0 5px}
-body.curto .logo{width:38px;height:38px;font-size:${s(17)}}
+body.curto .head{padding:6px 0 4px}
+body.curto .logo{width:32px;height:32px;font-size:${s(15)}}
 body.curto .bot-meta{display:none}
 body.curto .sec-desc{display:none}
-body.curto .tabs{padding:6px 0}
-body.curto .searchbar{padding:2px 0 6px}
+body.curto .tabs{padding:4px 0}
+body.curto .searchbar{padding:0 0 4px}
+body.curto .searchbar input{min-height:${DIM.botaoUsar}px}
+body.curto .cmd{padding:8px;margin-bottom:6px}
+body.curto .cmd .desc{-webkit-line-clamp:${DIM.descLinhasCurto}}
+body.curto .sec{margin:0}
+body.curto .sec-title{display:none}
 body.curto .vnav{min-height:${dim.tam(46)}px}
 body.curto .sec{margin:12px 0 4px}
 body.curto .sec-title{font-size:${s(12.5)}}

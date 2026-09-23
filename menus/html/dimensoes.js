@@ -48,13 +48,33 @@ const DIM = {
   /** Faixa aceita para a altura (evita card minúsculo ou absurdo). */
   alturaMin: 240,
   alturaMax: 900,
-  /** Abaixo disso o cliente aperta o topo e esconde o rodapé (body.curto). */
-  alturaCurta: 420,
+  /**
+   * Abaixo disso o cliente aperta o topo (body.curto): o cabeçalho fica com uma
+   * linha, a linha da categoria na lista sai (ela já aparece no cabeçalho e na
+   * aba ativa), a descrição fica com 1 linha e o rodapé some. Tudo isso é
+   * espaço que vai para a lista de comandos — é o caso em que o card recebe
+   * menos área do que pedimos.
+   */
+  alturaCurta: 480,
   /** Limite de largura em tela larga; no celular o card usa 100% da bolha. */
   larguraMax: 720,
   /** Respiro do card dentro da moldura do WebView (antes: 12px / 28px). */
   folgaLateral: 8,
   folgaInferior: 8,
+
+  // ---- densidade (quantos comandos cabem na tela) --------------------------
+  /** Altura do botão "Usar" dentro do cartão (o toque mais usado do card). */
+  botaoUsar: 46,
+  /** Altura do campo de busca (fica no topo fixo; cada px aqui é um px de comando). */
+  busca: 50,
+  /** Respiro interno do cartão de comando. */
+  cartaoPadding: 10,
+  /** Coluna do emoji do comando. */
+  icone: 22,
+  /** Linhas da descrição no cartão (o texto completo fica no painel do "Usar"). */
+  descLinhas: 2,
+  /** Linhas da descrição quando a área é pequena (`body.curto`). */
+  descLinhasCurto: 1,
 
   // ---- alvos de toque ------------------------------------------------------
   /** Área mínima de toque (recomendação de acessibilidade: ≥ 48px). */

@@ -163,7 +163,9 @@ function documento(info, grupo, opts = {}) {
     '<main id="lua-list" tabindex="-1" aria-label="Comandos da categoria">' +
     (secoes || '<p class="empty">Nenhum comando carregado.</p>') +
     '<p class="empty" id="lua-empty" hidden>🔎 Nada encontrado. Tente outro termo.</p>' +
-    comp.rodape({ prefix: info.prefix }) +
+    // o aviso de corte (se houver) vai para o RODAPÉ: no topo ele empurrava o
+    // primeiro comando para fora da área visível em WebView baixo
+    comp.rodape({ prefix: info.prefix, avisoCorte: (categorias.find((c) => c.avisoCorte) || {}).avisoCorte }) +
     '</main>' +
     '</div>';
 

@@ -11,11 +11,12 @@ removido: o HTML é um formato alternativo que o dono liga quando quiser.
 > próprio card, com campos, validação e avisos, para você copiar**. Leia §5
 > antes de estranhar: é a limitação do formato, não uma escolha de estilo.
 >
-> **Menu maior (esta versão):** o card passou de 520 px para **640 px** de
-> altura, com fonte e áreas de toque ~15% maiores, e a lista de comandos ficou
-> com **396 px** (62% do card, antes 264 px / 51%). O que limitava o tamanho, o
-> que dá e o que não dá para aumentar estão em **§2.2** — inclusive o limite que
-> é do aplicativo, não do bot.
+> **Menu maior e mais denso (esta versão):** o card passou de 520 px para
+> **640 px** de altura, com fonte ~15% maior — e, o que mais importa, cada
+> cartão de comando caiu de **163 px para 110 px**: aparecem **~3 comandos por
+> tela** (antes 1 e meio) e o **primeiro comando fica inteiro ao abrir**, sem
+> precisar rolar. O que limitava, o que dá e o que não dá para aumentar estão em
+> **§2.2** — inclusive o limite que é do aplicativo, não do bot.
 >
 > **Corrigido no patch seguinte (altura do card):** a versão com as setas
 > declarava a altura como `height:min(520px,100vh)`. No WebView do card a
@@ -186,13 +187,20 @@ altura declarada):
 | Medida | Antes | Agora |
 |---|---|---|
 | altura do card | 520 px | **640 px** |
-| área de comandos (`#lua-list`) | 264 px (51% do card) | **396 px (62%)** |
-| moldura (cabeçalho + faixa + busca + respiro) | 256 px | **244 px** |
+| área de comandos (`#lua-list`) | 264 px (51% do card) | **430 px (67%)** |
+| **cartão de comando** | 163 px | **110 px** |
+| **comandos visíveis por tela** | ~1,3 | **~3** |
+| moldura (cabeçalho + faixa + busca) | 256 px | **202 px** |
 | fontes (corpo / comando / descrição / categoria) | 15 / 14 / 13 / 13 px | **17 / 16 / 15 / 14 px** |
-| alvo de toque (Usar, abas, busca) | 44 px | **55 px** |
+| alvo de toque (Usar, abas, busca) | 44 px | **55 px** (Usar no cartão: 53 px) |
 | setas ↑↓ / ← → | 48×56 / 44 px | **48×60 / 46 px** |
 | largura máxima (tela grande) | 640 px | **720 px** (no celular: 100% da bolha) |
 | respiro da moldura (`#__wrap`) | 12 px lateral / 28 px fundo | **8 px / 8 px** |
+
+Numa área menor (quando o aplicativo dá menos que os 640 px pedidos), o card
+entra em **modo denso** (`alturaCurta = 480`) e mantém o comando inteiro visível:
+com 430 px de área, a lista fica com 273 px e o cartão com 87 px; com 300 px, a
+lista fica com 143 px e o cartão com 87 px (capacidade de toque preservada).
 
 **O que LIMITAVA o tamanho (e o que dá para fazer):**
 
@@ -207,6 +215,16 @@ altura declarada):
    lista.
 3. **A fonte e os toques eram pequenos para o dedo**: 13 px de descrição e 44 px
    de alvo. Subiram para 15 px e 55 px com a `ESCALA`.
+3b. **O que mais pesava (e a queixa “nem 1 comando direito”): o cartão e o topo
+   da lista.** Cada cartão tinha 163 px — um botão “Usar” de 55 px numa coluna
+   própria, descrição de várias linhas — e, antes do primeiro comando, vinham
+   **120 px** de título da categoria + descrição + aviso de corte. Junto, isso
+   dava um comando e meio por tela. Agora: o “Usar” fica **na linha do nome** (a
+   descrição usa a largura toda), a descrição é limitada a **2 linhas** (o texto
+   completo aparece no painel do “Usar”), a categoria virou **uma linha**
+   (título + contagem + descrição com reticências), o **aviso de corte mudou para
+   o rodapé** (fim da lista) e o cabeçalho ficou em **duas linhas**. Cartão:
+   163 → **110 px**. Topo da lista: 120 → **46 px**.
 4. **Só uma categoria cabia na faixa.** O contador por aba (`34`) ocupava a
    largura de meia aba; ele saiu da faixa (o número continua no título da seção,
    “GERAL **30 COMANDOS**”). Com abas mais justas, **duas categorias inteiras**
@@ -224,13 +242,20 @@ altura declarada):
 porcentagem e altura em `vh`. O tamanho é resolvido em dimensões reais do
 layout, com `flex` (cabeçalho/faixa/busca fixos, lista com o resto) e px.
 
-**Como medir a área REAL que o seu WhatsApp dá ao card (sem editar nada):**
-envie `!menu` e **toque no título da seção** (“GERAL 30 COMANDOS”). O rodapé
-troca o texto por `📐 512px de área; card desenhado 512px`. Esse número é o que
-decide se o card pode ser ainda maior **no seu aparelho** — me diga o valor e eu
-ajusto a altura para o máximo que couber. O card nunca pede mais do que a área
-que o aplicativo desenha; quando a área é menor, ele encolhe para caber (§2.2,
-item 5).
+**A área real aparece sozinha quando o aplicativo limita o card:** se o WebView
+der menos que os 640 px pedidos, o **rodapé mostra** `▸ área do card aqui: 512px
+(pedido 640px) — é o que o aplicativo desenha`. Para ver o número a qualquer
+momento (e também quando a área for igual à pedida), **toque no nome da
+categoria no cabeçalho** (ex.: “⚙️ Geral”) ou no título da seção: aparece
+`📐 área do card aqui: …`. Me diga esse valor e eu ajusto a altura para o máximo
+que couber **no seu aparelho** — o card nunca pede mais do que a área que o
+aplicativo desenha (§2.2, item 5).
+
+**O card também PEDE a altura ao host**, pela ponte nativa do WebView
+(`AndroidBridge.updateSize`, a mesma que o formato usa para auto-altura), sem
+laço de medição: um pedido por valor, sempre com o px que o HTML já declara. Se
+o host não tiver a ponte ou ignorar, nada muda — e é por isso que o layout não
+depende disso.
 
 **Onde ajustar depois:** `menus/html/dimensoes.js` → `ESCALA` (texto e toque:
 `1.0` volta ao tamanho anterior, `1.3` é bem grande), `altura` (padrão 640),
@@ -368,8 +393,8 @@ mensagem saiu, o desenho do card depende do aparelho e da versão do WhatsApp
 
 ## 7. O que foi testado aqui × o que depende do aparelho
 
-**Testado em sandbox** (`node --check`, `test/menuhtml.test.js` **38/38**,
-suíte completa `npm test` **329 ✅ / 0 ❌** — inclui auditoria, smokes,
+**Testado em sandbox** (`node --check`, `test/menuhtml.test.js` **40/40**,
+suíte completa `npm test` **331 ✅ / 0 ❌** — inclui auditoria, smokes,
 phone, downloads, fila de envio):
 
 - padrão desligado quando a chave não existe;
@@ -392,6 +417,10 @@ phone, downloads, fila de envio):
   altura declarada, as fontes escaladas, o alvo de toque e a largura máxima do
   card são exatamente os valores daquele arquivo (mexer no tamanho em outro
   lugar não passa);
+- **densidade**: teste **20p** exige o “Usar” na mesma linha do nome (cartão
+  baixo), a descrição limitada por CSS, a categoria em uma linha e **nenhum
+  aviso de corte antes do primeiro comando**; **20q** confere o aviso de corte
+  no rodapé e que o pedido de altura ao host é único e usa a altura declarada;
 - **dois** `<style>` (trava de altura + tema) e **dois** `<script>` (envolver o
   corpo + menu), **zero** subresource remoto;
 - nenhuma API morta no card (`fetch`, `XMLHttpRequest`, `WebSocket`, storage,
@@ -433,16 +462,20 @@ phone, downloads, fila de envio):
 
 **Testado em navegador de verdade** (`node scripts/menu-scroll-check.js`, com
 Chromium/`puppeteer` instalado — sem ele a guarda estática roda igual e o script
-avisa e sai sem falhar): **81 verificações, 0 falhas**, com o card principal
+avisa e sai sem falhar): **89 verificações, 0 falhas**, com o card principal
 (265 comandos), nas alturas **640 px (a declarada), 520, 430 e 300**:
 
 - **guarda estática** (roda sempre, sem navegador): altura do card em px fixo,
   sem `vh`/`min()`/`calc()`; nenhuma `@media` de altura de viewport; altura
   declarada ≥ 240 px;
 - **tamanho/legibilidade** (o pedido “menu maior”): moldura ≤ 260 px de
-  orçamento (medido: 244 px), **área de comandos = 396 px / 62% do card**,
+  orçamento (medido: 202 px), **área de comandos = 430 px / 67% do card**,
   fontes 17/16/15/14 px, alvos de toque ≥ 46 px, **2 categorias inteiras** na
   faixa, nenhum botão “Usar” passando da borda da lista;
+- **densidade** (o pedido “ver os comandos”): **primeiro comando inteiro ao
+  abrir** (sem rolar) em **todas** as alturas testadas — inclusive 430 e 300 px —,
+  cartão ≤ 120 px (medido 110 px; 87 px em modo denso) e **~3 comandos por tela**
+  no card de 640 px;
 - **faixa de categorias de ponta a ponta**: `→` até a **última categoria**
   (inteira, seta desativa) e `←` de volta à primeira (inteira, seta desativa);
 - em **640, 520, 430 e 300 px** de altura: a lista cabe no WebView e **rola de
@@ -464,7 +497,7 @@ avisa e sai sem falhar): **81 verificações, 0 falhas**, com o card principal
 - as setas **horizontais** continuam movendo a faixa.
 
 **Não verificado em aparelho** (jsdom não tem layout): os testes de rolagem e de
-tamanho da suíte (`20a`–`20o`) usam **geometria simulada** — altura/largura visível e total
+tamanho da suíte (`20a`–`20q`) usam **geometria simulada** — altura/largura visível e total
 definidas à mão, `scrollTo` que aplica o destino (opcionalmente “animado”). Eles
 provam a **lógica** — passo, limites, estados das setas, rajada, alvo certo —,
 **não** o CSS; é justamente aí que nasceu o defeito do corte, e é por isso que
