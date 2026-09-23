@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * test/menuhtml.test.js — menus em HTML + `!modohtml`.
+ * test/menuhtml.test.js — menus em HTML, `!modohtml` e o botão "Usar".
  *
  * Cobre (o que dá para verificar sem aparelho):
  *  1) padrão DESLIGADO quando a chave não existe no banco
@@ -11,30 +11,47 @@
  *  6) templates por categoria (menu principal / admin / membros / categoria)
  *     gerados a partir do REGISTRO (sem lista duplicada)
  *  7) payload: estrutura richResponseMessage correta + teto de tamanho
- *  8) navegação (abas) e busca presentes no card
+ *  8) documento: duas telas (lista/painel), altura fixa, 1 CSS + 2 <script>
+ *     (o que envolve o corpo em #__wrap e o menu), nada de recurso remoto
  *  9) argumento inválido não altera nada
  * 10) fallback: erro no envio → menu tradicional (sem repetir envio)
  * 11) `!menu --texto` força o tradicional mesmo com o modo ligado
  * 12) modo seguro bloqueia o card e o modo volta ao tradicional
- * 13) nenhum botão decorativo: comando só-de-grupo não vira link
- * 14) escapagem de conteúdo dinâmico (descrição com HTML)
- * 15) modo desligado NÃO carrega menus/html (require preguiçoso)
+ * 13) botão "Usar": é BOTÃO (nunca link — link não navega no WebView), existe
+ *     para todo comando e carrega o `usage`/requisitos do registro
+ * 14) regras do ambiente do card (medidas no aparelho): sem subresource remoto,
+ *     sem fetch/XHR/WebSocket, sem storage, sem crypto.subtle, sem timers soltos
+ * 15) escapagem de conteúdo dinâmico (descrição com HTML)
+ * 16) modo desligado NÃO carrega menus/html (require preguiçoso)
+ * 17) integração: `!menu` e `!menuadm` entregam o card pelo pipeline real
+ * 18) actions.js: campos a partir do `usage`, validação, montagem e requisitos
+ * 19) [jsdom, opcional] o JS do card roda de verdade: painel do "Usar", campos,
+ *     validação, cópia (sucesso/queda), toque repetido, busca, "Voltar" com
+ *     estado preservado, troca rápida de categoria e `prefers-reduced-motion`
+ *
+ * Sem jsdom instalado, os testes 19 são PULADOS com aviso (o resto roda igual).
  */
 
 'use strict';
 
 const assert = require('assert');
 const fs = require('fs');
+const path = require('path');
 
 const DB = require('./dbtmp').tmpFile('lua-menuhtml-test.db');
 
-let failures = 0;
+let falhas = 0;
+let feitos = 0;
 function ok(l) {
+  feitos++;
   console.log('✅ ' + l);
 }
 function fail(l, e) {
-  failures++;
+  falhas++;
   console.log('❌ ' + l + ' — ' + (e && e.message));
+}
+function skip(l, motivo) {
+  console.log('⏭  ' + l + ' — pulado: ' + motivo);
 }
 
 /** ctx falso com socket que registra o que foi enviado. */
@@ -66,6 +83,12 @@ function fakeCtx(opts = {}) {
   return ctx;
 }
 
+/** Extrai o HTML do card de um envio fake. */
+function htmlDoEnvio(enviado) {
+  const rich = enviado.message.botForwardedMessage.message.richResponseMessage;
+  return JSON.parse(rich.unifiedResponse.data.toString('utf8')).sections[0].view_model.primitive.payload;
+}
+
 async function main() {
   try {
     fs.rmSync(DB, { force: true });
@@ -80,6 +103,7 @@ async function main() {
   const settings = require('../database/settings');
   const menuFormat = require('../utils/menuFormat');
   const htmlMenu = require('../menus/html');
+  const actions = require('../menus/html/actions');
   const cmdModohtml = require('../commands/general/modohtml').find((c) => c.name === 'modohtml');
 
   /* 1) padrão desligado */
@@ -114,12 +138,8 @@ async function main() {
     const ctx = fakeCtx({ isGroup: true, isAdmin: true, isOwner: false, args: ['on'] });
     await cmdModohtml.execute(ctx);
     assert.strictEqual(settings.menuHtmlEnabled(), false, 'admin não alterou');
-    assert.ok(
-      ctx.replies.some((r) => /dono/i.test(r)),
-      'recebeu a negativa de dono'
-    );
+    assert.ok(ctx.replies.some((r) => /dono/i.test(r)), 'recebeu a negativa de dono');
 
-    // sem argumento, qualquer pessoa consulta o estado
     const consulta = fakeCtx({ isGroup: true, isOwner: false, args: [] });
     await cmdModohtml.execute(consulta);
     assert.ok(consulta.replies.some((r) => /MENUS EM HTML/i.test(r)), 'status liberado para consulta');
@@ -142,7 +162,7 @@ async function main() {
           "const m=require('./utils/menuFormat');" +
           'console.log("PERSIST:" + JSON.stringify(m.status()));',
       ],
-      { cwd: require('path').resolve(__dirname, '..'), timeout: 30000 }
+      { cwd: path.resolve(__dirname, '..'), timeout: 30000 }
     ).toString();
     const linha = saida.split('\n').find((l) => l.startsWith('PERSIST:'));
     const st = JSON.parse(linha.replace('PERSIST:', ''));
@@ -158,10 +178,10 @@ async function main() {
     settings.set('prefix', '#');
     const ctx = fakeCtx({ isOwner: true });
     const { html } = htmlMenu.montarDocumento(ctx, { kind: 'categoria', categoria: 'downloads' });
-    assert.ok(html.includes('>#menucompleto<'), 'rodapé usa o prefixo real');
     assert.ok(html.includes('<code>#'), 'cartões usam o prefixo real');
-    assert.ok(!html.includes('>!menu<'), 'não sobrou prefixo fixo');
+    assert.ok(html.includes('data-prefix="#"'), 'documento informa o prefixo ao JS');
     assert.ok(html.includes('Prefixo <b>#</b>'), 'cabeçalho mostra o prefixo real');
+    assert.ok(!html.includes('>!menu<'), 'não sobrou prefixo fixo');
     settings.set('prefix', '!');
     ok('5: prefixo vem da configuração real (testado com "#")');
   } catch (e) {
@@ -171,7 +191,6 @@ async function main() {
   /* 6) templates por menu, gerados do registro */
   try {
     const { registry } = require('../engine/plugins');
-    const data = require('../menus/html/data');
     const ctx = fakeCtx();
 
     const main = htmlMenu.montarDocumento(ctx, { kind: 'main' });
@@ -185,22 +204,20 @@ async function main() {
     assert.strictEqual(membros.grupo.categorias[0].id, 'members', 'menumembros = categoria members');
     assert.strictEqual(download.grupo.categorias[0].id, 'downloads', 'menu de categoria');
 
-    // contagem bate com o registro (fonte única)
     const noRegistro = (registry.byCategory().get('downloads') || []).filter((c) => !c.hidden).length;
     assert.strictEqual(download.grupo.categorias[0].count, noRegistro, 'contagem vem do registro');
 
-    // nomes/aliases atuais preservados: o primeiro trigger do comando aparece
     const alvo = (registry.byCategory().get('downloads') || [])[0];
     const trigger = (alvo.commands && alvo.commands[0]) || alvo.name;
     assert.ok(download.html.includes(`!${trigger}`), `comando ${trigger} listado pelo trigger atual`);
 
-    // comando novo no registro aparece sozinho no HTML (nada de lista paralela)
     registry.registerCommand(
       { name: 'testehtmlxyz', commands: ['testehtmlxyz'], category: 'downloads', description: 'Comando de teste.', usage: '!testehtmlxyz', execute: async () => {} },
       'downloads'
     );
     const depois = htmlMenu.montarDocumento(ctx, { kind: 'categoria', categoria: 'downloads' });
     assert.ok(depois.html.includes('!testehtmlxyz'), 'comando novo aparece sem editar template');
+    assert.ok(depois.html.includes('data-usar="testehtmlxyz"'), 'e já ganha o botão Usar');
     registry.unregisterCommand('testehtmlxyz');
     ok('6: templates por menu usando o registro como fonte única');
   } catch (e) {
@@ -212,10 +229,9 @@ async function main() {
     const ctx = fakeCtx();
     const { html } = htmlMenu.montarDocumento(ctx, { kind: 'main' });
     const bytes = Buffer.byteLength(html, 'utf8');
-    assert.ok(bytes < 100000, `payload dentro do teto (${(bytes / 1024).toFixed(1)} KB)`);
-    assert.ok(html.includes('Mostrando '), 'card avisa quando cortou comandos');
+    const teto = Number(process.env.MENU_HTML_MAX_BYTES) || 120000;
+    assert.ok(bytes < teto, `payload dentro do teto (${(bytes / 1024).toFixed(1)} KB < ${(teto / 1024) | 0} KB)`);
 
-    // estrutura do card (mesmo caminho do !ping2/!tigrinho)
     const msg = require('../utils/richHtml').buildHtmlMessage(html, { title: 'teste' });
     const rich = msg.botForwardedMessage.message.richResponseMessage;
     assert.ok(rich, 'botForwardedMessage → richResponseMessage');
@@ -225,27 +241,30 @@ async function main() {
     const json = JSON.parse(rich.unifiedResponse.data.toString('utf8'));
     const prim = json.sections[0].view_model.primitive;
     assert.strictEqual(prim.__typename, 'GenAIaeacdsnwHtmlPrimitive', 'primitiva de HTML');
+    assert.ok(Array.isArray(prim.trusted_sources), 'trusted_sources presente (não libera rede: medido)');
     assert.ok(prim.payload.includes('<!doctype html>'), 'payload leva o documento');
     ok(`7: payload correto e limitado (${(bytes / 1024).toFixed(1)} KB)`);
   } catch (e) {
     fail('7: payload', e);
   }
 
-  /* 8) navegação e busca no card */
+  /* 8) documento: telas, altura fixa, scripts */
   try {
     const ctx = fakeCtx();
-    const { html, grupo } = htmlMenu.montarDocumento(ctx, { kind: 'main' });
-    const abas = (html.match(/class="tab"/g) || []).length;
-    const secoes = (html.match(/class="sec"/g) || []).length;
-    assert.strictEqual(abas, grupo.categorias.length, 'uma aba por categoria');
-    assert.strictEqual(secoes, grupo.categorias.length, 'uma seção por categoria');
-    assert.ok(html.includes('id="lua-q"'), 'campo de busca presente');
-    assert.ok(html.includes('showTab'), 'JS de navegação presente');
-    assert.ok(html.includes('__find'), 'JS de busca presente');
-    assert.ok(html.includes('id="lua-top"'), 'botão de voltar ao topo');
-    ok('8: abas, busca e retorno ao topo no mesmo card');
+    const { html } = htmlMenu.montarDocumento(ctx, { kind: 'main' });
+    assert.ok(html.includes('id="lua-view-list"'), 'tela da lista');
+    assert.ok(html.includes('id="lua-view-panel"'), 'tela do painel do Usar');
+    assert.ok(html.includes('data-voltar="raiz"'), 'Voltar do painel');
+    assert.ok(html.includes('id="__wrap"') || html.includes('w.id="__wrap"'), 'contêiner de rolagem injetado');
+    assert.ok(/#__wrap\{height:\d+px;overflow-y:auto/.test(html), 'altura fixa com rolagem interna');
+    assert.ok(html.includes('prefers-reduced-motion'), 'respeita movimento reduzido');
+    assert.ok(html.includes('[hidden]{display:none!important}'), 'hidden vence o display dos componentes');
+    assert.strictEqual((html.match(/<style>/g) || []).length, 2, '2 blocos de CSS (trava de altura + tema)');
+    assert.strictEqual((html.match(/<script>/g) || []).length, 2, '2 scripts (envolver + menu)');
+    assert.ok(html.includes('lua-entra'), 'transição definida no CSS');
+    ok('8: duas telas, altura fixa e CSS/JS embutidos sem recurso externo');
   } catch (e) {
-    fail('8: navegação', e);
+    fail('8: documento', e);
   }
 
   /* 9) argumento inválido */
@@ -275,13 +294,9 @@ async function main() {
   /* 11) `!menu --texto` (alternativa tradicional com o modo ligado) */
   try {
     const menuCmd = require('../commands/general/menu').find((c) => c.name === 'menu');
-    const ctx = fakeCtx({ isOwner: true, args: ['--texto'], socket: null });
-    ctx.socket = fakeCtx().socket;
+    const ctx = fakeCtx({ isOwner: true, args: ['--texto'] });
     await menuCmd.execute(ctx);
-    assert.ok(
-      ctx.replies.some((r) => /MENU PRINCIPAL|menu/i.test(r)),
-      'respondeu o menu tradicional em texto'
-    );
+    assert.ok(ctx.replies.some((r) => /MENU PRINCIPAL|menu/i.test(r)), 'respondeu o menu tradicional em texto');
     assert.ok(!ctx.enviados.length, 'não tentou o card HTML com --texto');
     ok('11: !menu --texto força o menu tradicional');
   } catch (e) {
@@ -308,35 +323,60 @@ async function main() {
     fail('12: modo seguro', e);
   }
 
-  /* 13) sem botão decorativo: comando só-de-grupo não vira link */
+  /* 13) botão "Usar" — botão de verdade, com dados do registro */
   try {
     const { registry } = require('../engine/plugins');
-    const ctx = fakeCtx({ botId: '5511977776666:3@s.whatsapp.net' });
+    const ctx = fakeCtx();
     const admin = htmlMenu.montarDocumento(ctx, { kind: 'categoria', categoria: 'admin' });
-    const semGrupo = (registry.byCategory().get('admin') || []).filter((c) => !c.groupOnly && !c.adminOnly && !c.botAdmin);
-    const soGrupo = (registry.byCategory().get('admin') || []).filter((c) => c.groupOnly || c.adminOnly || c.botAdmin);
-    assert.ok(soGrupo.length > 0, 'a categoria admin tem comandos só-de-grupo');
+    const downloads = htmlMenu.montarDocumento(ctx, { kind: 'categoria', categoria: 'downloads' });
 
-    // um comando só-de-grupo NÃO pode ter link
-    const alvo = soGrupo[0];
-    const trigger = (alvo.commands && alvo.commands[0]) || alvo.name;
-    const idx = admin.html.indexOf(`!${trigger}<`);
-    assert.ok(idx > 0, 'comando listado');
-    const artigo = admin.html.slice(admin.html.lastIndexOf('<article', idx), admin.html.indexOf('</article>', idx));
-    assert.ok(!/wa\.me/.test(artigo), `${trigger} (só no grupo) não tem link`);
-    assert.ok(/contexto do grupo/.test(artigo), `${trigger} explica que roda no grupo`);
+    assert.ok(!/href\s*=\s*["']https?:/i.test(admin.html), 'nenhum link http(s) no card (não navega no WebView)');
+    assert.ok(admin.html.includes('<button class="go" data-usar="'), 'Usar é <button>');
+    assert.ok(!/<a class="go"/.test(admin.html), 'o link morto antigo não existe mais');
 
-    // e um comando do privado TEM link com o número do BOT
-    if (semGrupo.length) {
-      const t2 = (semGrupo[0].commands && semGrupo[0].commands[0]) || semGrupo[0].name;
-      assert.ok(admin.html.includes(`https://wa.me/5511977776666?text=`), 'link wa.me usa o número do bot');
+    const comandos = (registry.byCategory().get('admin') || []).filter((c) => !c.hidden);
+    const botoes = (admin.html.match(/data-usar="/g) || []).length;
+    assert.strictEqual(botoes, comandos.length, 'todo comando da categoria tem botão (inclusive só-de-grupo)');
+
+    // comando só-de-grupo: botão existe E carrega o requisito
+    const soGrupo = comandos.find((c) => c.groupOnly || c.adminOnly || c.botAdmin);
+    if (soGrupo) {
+      const trig = (soGrupo.commands && soGrupo.commands[0]) || soGrupo.name;
+      const re = new RegExp(`<button class="go" data-usar="${trig}"[^>]*data-req="[^"]*"`);
+      assert.ok(re.test(admin.html), `${trig} carrega data-req (o painel explica o contexto)`);
     }
-    ok('13: nada de botão decorativo — só link quando o comando funciona no privado');
+
+    // comando com argumentos: o padrão do usage vai junto
+    const comArgs = (registry.byCategory().get('downloads') || []).find((c) => actions.camposDoUso(c.usage, (c.commands || [])[0]).length);
+    if (comArgs) {
+      const trig = (comArgs.commands && comArgs.commands[0]) || comArgs.name;
+      assert.ok(downloads.html.includes(`data-uso="`), 'comando com argumentos leva data-uso');
+      assert.ok(new RegExp(`data-usar="${trig}"`).test(downloads.html), `${trig} tem botão`);
+    }
+    ok('13: Usar é botão real com usage/requisitos do registro (nada de link morto)');
   } catch (e) {
-    fail('13: links', e);
+    fail('13: botão Usar', e);
   }
 
-  /* 14) escapagem de conteúdo dinâmico */
+  /* 14) regras do ambiente medido (sem recursos/APIs que morrem no WebView) */
+  try {
+    const ctx = fakeCtx();
+    const { html } = htmlMenu.montarDocumento(ctx, { kind: 'main' });
+    const js = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).join('\n');
+    const remotos = html.match(/\b(?:src|href)\s*=\s*["']?(?:https?:)?\/\//gi) || [];
+    assert.strictEqual(remotos.length, 0, `0 subresource remoto (achou ${remotos.length})`);
+    for (const api of ['fetch(', 'XMLHttpRequest', 'sendBeacon', 'EventSource', 'new WebSocket', 'localStorage', 'sessionStorage', 'indexedDB', 'document.cookie', 'crypto.subtle', 'setInterval']) {
+      assert.ok(!js.includes(api), `JS sem ${api} (medido como morto/indisponível no WebView)`);
+    }
+    assert.ok(!/location\.href\s*=/.test(js), 'JS não tenta navegar (o WebView bloqueia)');
+    assert.ok(!/window\.open\s*\(/.test(js), 'JS não abre janela (bloqueado)');
+    assert.ok(js.includes('setTimeout'), 'usa setTimeout só para a transição curta');
+    ok('14: nada de recurso remoto nem API morta no WebView');
+  } catch (e) {
+    fail('14: ambiente do card', e);
+  }
+
+  /* 15) escapagem de conteúdo dinâmico */
   try {
     const { registry } = require('../engine/plugins');
     registry.registerCommand(
@@ -345,7 +385,7 @@ async function main() {
         commands: ['testexss'],
         category: 'downloads',
         description: '"><script>alert(1)</script>',
-        usage: '!testexss',
+        usage: '!testexss <link>',
         execute: async () => {},
       },
       'downloads'
@@ -354,60 +394,352 @@ async function main() {
     const { html } = htmlMenu.montarDocumento(ctx, { kind: 'categoria', categoria: 'downloads' });
     assert.ok(!html.includes('<script>alert(1)</script>'), 'script injetado não aparece cru');
     assert.ok(html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'), 'descrição escapada');
-    // o único <script> real é o do menu
-    assert.strictEqual((html.match(/<script>/g) || []).length, 1, 'apenas o script do menu');
     assert.ok(!/"><script/.test(html), 'atributo não é quebrado pelo conteúdo');
+    assert.ok(html.includes('data-usar="testexss"'), 'e o botão Usar continua íntegro');
     registry.unregisterCommand('testexss');
-    ok('14: conteúdo dinâmico escapado por contexto');
+    ok('15: conteúdo dinâmico escapado por contexto');
   } catch (e) {
-    fail('14: escapagem', e);
+    fail('15: escapagem', e);
   }
 
-  /* 15) modo desligado não carrega menus/html */
+  /* 16) modo desligado não carrega menus/html */
   try {
     settings.setMenuHtmlEnabled(false);
     for (const k of Object.keys(require.cache)) {
-      if (k.includes(`${require('path').sep}menus${require('path').sep}html`)) delete require.cache[k];
+      if (k.includes(`${path.sep}menus${path.sep}html`)) delete require.cache[k];
     }
     const ctx = fakeCtx();
     const enviado = await menuFormat.abrir(ctx, { kind: 'main' });
     assert.strictEqual(enviado, false, 'desligado: não envia');
-    const carregou = Object.keys(require.cache).some((k) => k.includes(`${require('path').sep}menus${require('path').sep}html`));
+    const carregou = Object.keys(require.cache).some((k) => k.includes(`${path.sep}menus${path.sep}html`));
     assert.strictEqual(carregou, false, 'menus/html NÃO foi carregado com o modo desligado');
-    ok('15: com o modo desligado os templates HTML nem são carregados');
+    ok('16: com o modo desligado os templates HTML nem são carregados');
   } catch (e) {
-    fail('15: carregamento preguiçoso', e);
+    fail('16: carregamento preguiçoso', e);
   }
 
-  /* 16) integração: `!menu` e `!menuadm` entregam o card (nada de texto junto) */
+  /* 17) integração: `!menu` e `!menuadm` entregam o card (nada de texto junto) */
   try {
     settings.setMenuHtmlEnabled(true);
     const menuCmd = require('../commands/general/menu').find((c) => c.name === 'menu');
     const ctxMenu = fakeCtx({ isOwner: true });
     await menuCmd.execute(ctxMenu);
     assert.strictEqual(ctxMenu.enviados.length, 1, '!menu enviou UM card');
-    const msg = ctxMenu.enviados[0].message;
-    assert.ok(msg.botForwardedMessage, 'usa o caminho de card HTML');
-    const html = JSON.parse(
-      msg.botForwardedMessage.message.richResponseMessage.unifiedResponse.data.toString('utf8')
-    ).sections[0].view_model.primitive.payload;
+    const html = htmlDoEnvio(ctxMenu.enviados[0]);
     assert.ok(html.includes('🌙'), 'card tem a identidade do bot');
     assert.ok(/Geral|MENU/i.test(html), 'card tem a categoria');
     assert.ok(!ctxMenu.replies.some((r) => /MENU PRINCIPAL/.test(r)), 'não mandou o menu de texto junto');
 
-    // atalho !menuadm abre direto a categoria admin
     const adm = require('../commands/general/menus').find((c) => c.name === 'menuadm');
     const ctxAdm = fakeCtx({ isOwner: true });
     await adm.execute(ctxAdm);
     assert.strictEqual(ctxAdm.enviados.length, 1, '!menuadm enviou UM card');
-    const htmlAdm = JSON.parse(
-      ctxAdm.enviados[0].message.botForwardedMessage.message.richResponseMessage.unifiedResponse.data.toString('utf8')
-    ).sections[0].view_model.primitive.payload;
+    const htmlAdm = htmlDoEnvio(ctxAdm.enviados[0]);
     assert.ok(htmlAdm.includes('data-cat="admin"'), 'menuadm abre a categoria admin');
     assert.ok(!htmlAdm.includes('data-cat="downloads"'), 'menuadm não traz outras categorias');
-    ok('16: !menu e !menuadm entregam o card pelo pipeline real do comando');
+    ok('17: !menu e !menuadm entregam o card pelo pipeline real do comando');
   } catch (e) {
-    fail('16: integração', e);
+    fail('17: integração', e);
+  }
+
+  /* 18) actions.js — campos, validação, montagem, requisitos */
+  try {
+    const campos = actions.camposDoUso('!ytmp3 <link>', 'ytmp3');
+    assert.deepStrictEqual(campos.map((c) => [c.nome, c.obrigatorio, c.tipo]), [['link', true, 'link']], '<link> obrigatório');
+
+    const dois = actions.camposDoUso('!abrirempresa <tipo> [nome]', 'abrirempresa');
+    assert.strictEqual(dois.length, 2, 'dois campos');
+    assert.strictEqual(dois[0].obrigatorio, true, 'primeiro obrigatório');
+    assert.strictEqual(dois[1].obrigatorio, false, 'segundo opcional');
+
+    const mencao = actions.camposDoUso('!advertir @usuario [motivo]', 'advertir');
+    assert.strictEqual(mencao.length, 2, '@usuario é campo');
+    assert.strictEqual(mencao[0].tipo, 'mencao', 'tipo menção');
+    assert.strictEqual(mencao[0].obrigatorio, true, 'menção obrigatória');
+
+    const escolha = actions.camposDoUso('!sticker <imagem|texto>', 'sticker');
+    assert.deepStrictEqual(escolha[0].opcoes, ['imagem', 'texto'], 'escolhas extraídas');
+
+    const alternativo = actions.camposDoUso('!apagar @user [quantidade] | !apagar [quantidade] (apaga do bot)', 'apagar');
+    assert.strictEqual(alternativo.length, 2, 'só a PRIMEIRA variante do usage conta');
+
+    const semArgs = actions.camposDoUso('!menuadm', 'menuadm');
+    assert.deepStrictEqual(semArgs, [], 'comando sem argumentos não pede nada');
+
+    const erros = actions.validarCampos(campos, ['']);
+    assert.ok(erros.erros.link, 'obrigatório vazio acusa erro');
+    assert.ok(actions.validarCampos(campos, ['https://youtu.be/x']).ok, 'valor preenchido passa');
+    assert.ok(actions.validarCampos(mencao, ['joao', 'x']).erros['@usuario'], 'menção sem @ acusa erro');
+    assert.ok(actions.validarCampos(escolha, ['audio']).erros['imagem|texto'], 'valor fora das opções acusa');
+
+    assert.strictEqual(actions.montarComando('!', 'ytmp3', campos, ['https://youtu.be/x']), '!ytmp3 https://youtu.be/x', 'comando montado');
+    assert.strictEqual(actions.montarComando('!', 'ytmp3', campos, ['']), '!ytmp3', 'sem valor → só o comando');
+    assert.strictEqual(
+      actions.montarComando('#', 'abrirempresa', dois, ['padaria', '']),
+      '#abrirempresa padaria',
+      'opcional vazio não entra (argumentos posicionais)'
+    );
+
+    const reqBan = actions.requisitosDe({ usage: '!banir @usuario', description: 'Bane do grupo.' });
+    assert.strictEqual(reqBan.mencao, true, 'menção detectada');
+    const reqToimg = actions.requisitosDe({ usage: '!toimg', description: 'Responda um sticker para converter em imagem.' });
+    assert.strictEqual(reqToimg.resposta, true, 'resposta detectada');
+    assert.strictEqual(reqToimg.midia, true, 'mídia detectada');
+    const reqSimples = actions.requisitosDe({ usage: '!menu', description: 'Mostra o menu.' });
+    assert.strictEqual(actions.flagsCompactas(reqSimples), '', 'comando simples não carrega requisito');
+    assert.ok(actions.avisosDe(reqToimg).length >= 2, 'avisos prontos para o painel');
+    ok('18: actions.js — campos, validação, montagem e requisitos');
+  } catch (e) {
+    fail('18: actions.js', e);
+  }
+
+  /* 19) DOM de verdade (jsdom opcional) */
+  let JSDOM = null;
+  try {
+    JSDOM = require('jsdom').JSDOM;
+  } catch (_) {
+    skip('19: comportamento no DOM (Usar, navegação, cópia)', 'jsdom não instalado (npm i --no-save jsdom)');
+  }
+
+  if (JSDOM) {
+    const card = htmlMenu.montarDocumento(fakeCtx(), { kind: 'categoria', categoria: 'downloads' }).html;
+    const cardAdmin = htmlMenu.montarDocumento(fakeCtx(), { kind: 'categoria', categoria: 'admin' }).html;
+    const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    function montarDom(html, opts = {}) {
+      return new JSDOM(html, {
+        runScripts: 'dangerously',
+        pretendToBeVisual: true,
+        beforeParse(w) {
+          w.__copiados = [];
+          w.__exec = [];
+          w.matchMedia = (q) => ({ matches: opts.movimento !== 'full', media: q, addEventListener() {}, removeEventListener() {} });
+          w.Element.prototype.scrollTo = function () {};
+          w.Element.prototype.scrollIntoView = function () {};
+          if (opts.clipboard === 'falha') {
+            Object.defineProperty(w.navigator, 'clipboard', {
+              value: {
+                writeText: () => {
+                  w.__exec.push('clipboard');
+                  return Promise.reject(new Error('negado'));
+                },
+              },
+              configurable: true,
+            });
+          } else if (opts.clipboard) {
+            Object.defineProperty(w.navigator, 'clipboard', {
+              value: {
+                writeText: (t) => {
+                  w.__exec.push('clipboard');
+                  w.__copiados.push(t);
+                  return Promise.resolve();
+                },
+              },
+              configurable: true,
+            });
+          }
+          if (opts.execCommand) {
+            w.document.execCommand = () => {
+              w.__exec.push('execCommand');
+              return !!opts.execCommand;
+            };
+          }
+        },
+      });
+    }
+
+    const comArgs = (() => {
+      const { registry } = require('../engine/plugins');
+      const cmds = (registry.byCategory().get('downloads') || []).filter((c) => !c.hidden);
+      return cmds.find((c) => actions.camposDoUso(c.usage, (c.commands || [])[0]).some((f) => f.tipo === 'link'));
+    })();
+    const semArgs = (() => {
+      const { registry } = require('../engine/plugins');
+      const cmds = (registry.byCategory().get('downloads') || []).filter((c) => !c.hidden);
+      return cmds.find((c) => actions.camposDoUso(c.usage, (c.commands || [])[0]).length === 0);
+    })();
+
+    /* 19a) Usar em comando sem argumentos: painel abre com o comando pronto */
+    try {
+      const dom = montarDom(card);
+      const w = dom.window;
+      const d = w.document;
+      const trigger = (semArgs.commands && semArgs.commands[0]) || semArgs.name;
+      const btn = d.querySelector(`[data-usar="${trigger}"]`);
+      assert.ok(btn, `botão do ${trigger} existe`);
+      btn.click();
+      assert.strictEqual(d.getElementById('lua-view-panel').hidden, false, 'painel visível');
+      assert.strictEqual(d.getElementById('lua-view-list').hidden, true, 'lista escondida (sem tela sobreposta)');
+      assert.strictEqual(d.getElementById('lua-cmd').textContent, `!${trigger}`, 'comando pronto no painel');
+      assert.ok(d.querySelector('.pn-tip'), 'painel diz que o card não envia mensagens');
+      ok('19a: [DOM] "Usar" sem argumentos abre o painel com o comando montado');
+      dom.window.close();
+    } catch (e) {
+      fail('19a: DOM sem argumentos', e);
+    }
+
+    /* 19b) Usar em comando com argumentos: campos, validação, prévia e cópia */
+    try {
+      const dom = montarDom(card, { clipboard: true });
+      const w = dom.window;
+      const d = w.document;
+      const trigger = (comArgs.commands && comArgs.commands[0]) || comArgs.name;
+      const btn = d.querySelector(`[data-usar="${trigger}"]`);
+      assert.ok(btn, `botão do ${trigger} existe`);
+      assert.ok(btn.getAttribute('data-uso'), `${trigger} carrega o padrão de argumentos`);
+      btn.click();
+
+      const campo = d.querySelector('.pn-field input');
+      assert.ok(campo, 'campo renderizado');
+      assert.strictEqual(d.querySelectorAll('.pn-field').length, actions.camposDoUso(comArgs.usage, trigger).length, 'um campo por argumento');
+
+      d.getElementById('lua-copy').click();
+      assert.strictEqual(d.getElementById('lua-status').textContent, 'Falta preencher o comando.', 'valida antes de copiar');
+      assert.strictEqual(w.__copiados.length, 0, 'não copiou com campo obrigatório vazio');
+
+      campo.value = 'https://youtu.be/abc123';
+      campo.dispatchEvent(new w.Event('input', { bubbles: true }));
+      assert.strictEqual(d.getElementById('lua-cmd').textContent, `!${trigger} https://youtu.be/abc123`, 'prévia atualiza ao digitar');
+
+      d.getElementById('lua-copy').click();
+      await esperar(20);
+      assert.deepStrictEqual(w.__copiados, [`!${trigger} https://youtu.be/abc123`], 'copiou o comando completo');
+      assert.ok(/Copiado/.test(d.getElementById('lua-status').textContent), 'status confirma a cópia (não a execução)');
+      assert.ok(!/enviad|executad/i.test(d.getElementById('lua-status').textContent), 'não promete execução');
+
+      // toque repetido não dispara outra cópia
+      d.getElementById('lua-copy').click();
+      d.getElementById('lua-copy').click();
+      await esperar(20);
+      assert.strictEqual(w.__copiados.length, 1, 'toque repetido não duplica a ação');
+      ok('19b: [DOM] campos, validação, prévia e cópia sem duplicar');
+      dom.window.close();
+    } catch (e) {
+      fail('19b: DOM argumentos/cópia', e);
+    }
+
+    /* 19c) sem clipboard: cai no legado e, falhando, orienta a copiar na mão */
+    try {
+      const dom = montarDom(card, { clipboard: 'falha', execCommand: false });
+      const w = dom.window;
+      const d = w.document;
+      const trigger = (semArgs.commands && semArgs.commands[0]) || semArgs.name;
+      d.querySelector(`[data-usar="${trigger}"]`).click();
+      d.getElementById('lua-copy').click();
+      await esperar(30);
+      const st = d.getElementById('lua-status').textContent;
+      assert.ok(/não deu para copiar/i.test(st), 'avisa que não conseguiu copiar');
+      assert.ok(/Copiar/i.test(st), 'diz o que fazer (copiar manualmente)');
+      assert.ok(w.__exec.includes('execCommand') || w.__exec.includes('clipboard'), 'tentou os dois caminhos');
+      ok('19c: [DOM] falha de cópia orienta o usuário (sem prometer nada)');
+      dom.window.close();
+    } catch (e) {
+      fail('19c: DOM falha de cópia', e);
+    }
+
+    /* 19d) navegação: busca, Voltar com estado preservado, categorias */
+    try {
+      const dom = montarDom(cardAdmin);
+      const w = dom.window;
+      const d = w.document;
+      const wrap = d.getElementById('__wrap');
+
+      const primeiro = d.querySelector('[data-usar]');
+      wrap.scrollTop = 12; // marca a rolagem da lista
+      primeiro.click();
+      assert.strictEqual(d.getElementById('lua-view-list').hidden, true, 'painel aberto');
+      d.querySelector('[data-voltar="raiz"]').click();
+      assert.strictEqual(d.getElementById('lua-view-list').hidden, false, 'Voltar devolve a lista');
+      assert.strictEqual(wrap.scrollTop, 12, 'rolagem da lista restaurada');
+
+      // campos preenchidos sobrevivem a sair e voltar
+      const campo = d.querySelector('.pn-field input');
+      if (campo) {
+        primeiro.click();
+        const c2 = d.querySelector('.pn-field input');
+        c2.value = 'valor guardado';
+        c2.dispatchEvent(new w.Event('input', { bubbles: true }));
+        d.querySelector('[data-voltar="raiz"]').click();
+        primeiro.click();
+        assert.strictEqual(d.querySelector('.pn-field input').value, 'valor guardado', 'campos preenchidos preservados');
+        assert.ok(d.querySelector('.pn-req'), 'requisitos aparecem no painel do comando só-de-grupo');
+        d.querySelector('[data-voltar="raiz"]').click();
+      }
+
+      // busca
+      const q = d.getElementById('lua-q');
+      q.value = 'modo';
+      q.dispatchEvent(new w.Event('input', { bubbles: true }));
+      assert.ok(/🔎/.test(d.getElementById('lua-cat-label').textContent), 'rótulo mostra a busca');
+      q.value = '';
+      q.dispatchEvent(new w.Event('input', { bubbles: true }));
+
+      // troca de categoria preserva e volta para a última escolhida
+      const abas = [...d.querySelectorAll('.tab')];
+      if (abas.length > 1) {
+        abas[1].click();
+        assert.strictEqual(w.__luaMenu.estado.cat, abas[1].getAttribute('data-cat'), 'categoria ativa é a tocada');
+      }
+      ok('19d: [DOM] busca, Voltar com estado (rolagem + campos) e categorias');
+      dom.window.close();
+    } catch (e) {
+      fail('19d: DOM navegação', e);
+    }
+
+    /* 19e) toques rápidos + transição com movimento habilitado */
+    try {
+      const dom = montarDom(cardAdmin, { movimento: 'full' });
+      const w = dom.window;
+      const d = w.document;
+      const alvos = [...d.querySelectorAll('[data-usar]')].slice(0, 3);
+      alvos.forEach((b) => b.click()); // toques em sequência, sem esperar
+      await esperar(420); // deixa as transições terminarem
+      const telas = ['lua-view-list', 'lua-view-panel'].filter((id) => !d.getElementById(id).hidden);
+      assert.strictEqual(telas.length, 1, 'exatamente UMA tela visível (nada sobreposto)');
+      assert.strictEqual(d.getElementById('lua-view-panel').hidden, false, 'a última tela é a do último toque');
+      assert.strictEqual(w.__luaMenu.estado.cmd, ((alvos[2].getAttribute('data-usar')) || ''), 'estado é do último comando tocado');
+      assert.ok(!d.querySelector('.screen.sai') && !d.querySelector('.screen.entra'), 'nenhuma classe de transição pendente');
+      ok('19e: [DOM] toques rápidos convergem para o último, sem tela sobreposta');
+      dom.window.close();
+    } catch (e) {
+      fail('19e: DOM toques rápidos', e);
+    }
+
+    /* 19f) paridade parser do card × actions.js + movimento reduzido */
+    try {
+      const dom = montarDom(card, { movimento: 'reduzido' });
+      const w = dom.window;
+      const d = w.document;
+      const casos = [
+        '!ytmp3 <link>',
+        '!abrirempresa <tipo> [nome]',
+        '!advertir @usuario [motivo]',
+        '!sticker <imagem|texto>',
+        '!aimemory on|off|clear|status',
+        '!apagar @user [quantidade] | !apagar [quantidade]',
+      ];
+      for (const uso of casos) {
+        const trigger = uso.replace(/^!/, '').split(' ')[0];
+        const noNode = actions.camposDoUso(uso, trigger).map((c) => `${c.nome}|${c.obrigatorio}|${c.opcoes.join('/')}|${c.tipo}`);
+        // Array.from: o array vem do realm do jsdom, e deepStrictEqual compara
+        // protótipos (array de outro realm reprovaria mesmo com o mesmo conteúdo).
+        const noCard = Array.from(
+          w.__luaMenu.campos(uso.replace(/^\S+\s*/, '')),
+          (c) => `${c.nome}|${c.obrigatorio}|${c.opcoes.join('/')}|${c.tipo}`
+        );
+        assert.deepStrictEqual(noCard, noNode, `parser do card == actions.js em "${uso}"`);
+      }
+      assert.strictEqual(w.__luaMenu.montar('ytmp3', [{ nome: 'link', obrigatorio: true, opcoes: [] }], ['x y']), '!ytmp3 x y', 'montagem idêntica');
+      assert.ok(w.__luaMenu.validar([{ nome: 'link', obrigatorio: true, opcoes: [], tipo: 'link' }], ['']).link, 'validação idêntica');
+
+      // com movimento reduzido a troca é imediata (sem timer pendente)
+      d.querySelector('[data-usar]').click();
+      assert.strictEqual(d.getElementById('lua-view-panel').hidden, false, 'troca imediata com prefers-reduced-motion');
+      ok('19f: [DOM] parser/validação do card == actions.js e movimento reduzido respeitado');
+      dom.window.close();
+    } catch (e) {
+      fail('19f: DOM paridade/movimento', e);
+    }
   }
 
   /* limpeza */
@@ -417,9 +749,9 @@ async function main() {
   } catch (_) {}
   database.close();
 
-  console.log(`\n=== MENU HTML TEST: ${16 - failures}/16 ✅ ===`);
-  if (failures) {
-    console.error(`❌ ${failures} falha(s)`);
+  console.log(`\n=== MENU HTML TEST: ${feitos}/${feitos + falhas} ✅ ===`);
+  if (falhas) {
+    console.error(`❌ ${falhas} falha(s)`);
     process.exit(1);
   }
   console.log('=== MENU HTML TEST: TUDO OK ===');

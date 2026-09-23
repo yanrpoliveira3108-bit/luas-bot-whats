@@ -1,27 +1,34 @@
 /**
  * menus/html/components.js — peças reutilizadas pelos templates HTML.
  *
- * Aqui ficam a escapagem (por contexto), o cartão de comando e a decisão de
- * quando um comando pode virar LINK.
+ * Aqui ficam a escapagem (por contexto), o cartão de comando e o botão "Usar".
  *
  * Sobre segurança (leia antes de mexer):
  *   - `escapeHtml`  → conteúdo de texto/atributo comum;
- *   - `escapeAttr`  → valores dentro de atributo (href, data-*), incluindo URL;
+ *   - `escapeAttr`  → valores dentro de atributo (data-*, href), incluindo URL;
  *   - nada de credenciais/sessão/número de pessoas no HTML: só dados públicos
  *     de comando (nome, descrição, exemplo) e o prefixo.
  *
- * Sobre as AÇÕES:
- *   O card HTML é renderizado pelo cliente e NÃO conversa de volta com o bot
- *   (o protocolo não expõe callback, e este vendor não trata `botInvokeMessage`
- *   recebido). A única ação confiável é um LINK `wa.me`: abre a conversa com o
- *   comando já escrito. O usuário toca em enviar e o bot processa pelo
- *   pipeline normal — com validação de permissão, cooldown e limites.
- *   Por isso: comando que NÃO funciona no privado (grupo/admin) NÃO ganha link
- *   bonito — ele é mostrado como texto, com a etiqueta do lugar certo. Nada de
- *   botão decorativo.
+ * Sobre a AÇÃO do botão "Usar" (o ponto que mudou):
+ *
+ *   O card roda num WebView sandboxed (origem opaca, sem secure context e sem
+ *   rede — ver o cabeçalho de menus/html/actions.js, com a origem de cada
+ *   afirmação). O "Usar" antigo era um `<a href="https://wa.me/...">`: no
+ *   aparelho do dono o toque não realizava a ação esperada, e não existe canal
+ *   comprovado do card para o bot para pedir execução.
+ *
+ *   Como não existe canal HTML→bot, o botão agora é um `<button>` que abre um
+ *   PAINEL no próprio card (JS local, permitido): ele monta o comando real
+ *   (campos vindos do `usage` do registro), valida, avisa os requisitos de
+ *   contexto (grupo/admin/mídia/resposta/menção) e deixa o comando pronto para
+ *   COPIAR e enviar. Quem executa continua sendo o pipeline de comandos, com a
+ *   identidade real de quem enviou a mensagem e todas as validações de sempre.
+ *   Nada de botão decorativo: todo "Usar" abre o painel e monta algo real.
  */
 
 'use strict';
+
+const actions = require('./actions');
 
 /** Escapa texto para conteúdo/atributo comum. */
 function escapeHtml(value) {
@@ -39,35 +46,7 @@ function escapeAttr(value) {
   return escapeHtml(value);
 }
 
-/** Só dígitos — usado no número do bot do link wa.me. */
-function onlyDigits(value) {
-  return String(value || '').replace(/\D/g, '');
-}
-
-/**
- * Um comando pode virar link `wa.me`?
- *
- * Só quando ele funciona no privado. `groupOnly`, `adminOnly` e `botAdmin`
- * dependem do contexto do grupo — abriria uma conversa onde o comando falharia
- * ("só funciona em grupos"), o que é pior que não ter botão.
- */
-function podeLinkar(cmd) {
-  if (!cmd) return false;
-  if (cmd.groupOnly) return false;
-  if (cmd.adminOnly) return false;
-  if (cmd.botAdmin) return false;
-  return true;
-}
-
-/** Link `wa.me` que abre a conversa do bot com o comando preenchido. */
-function linkDoComando(botDigits, prefix, trigger) {
-  const d = onlyDigits(botDigits);
-  if (!d) return '';
-  const texto = `${prefix}${trigger}`;
-  return `https://wa.me/${d}?text=${encodeURIComponent(texto)}`;
-}
-
-/** Etiquetas de permissão/contexto do comando. */
+/** Etiquetas de permissão/contexto do comando (as mesmas de antes). */
 function etiquetas(cmd) {
   const tags = [];
   if (cmd.ownerOnly) tags.push({ cls: 'dono', texto: 'dono' });
@@ -88,9 +67,29 @@ function textoDeBusca(cmd, prefix, categoria) {
 }
 
 /**
+ * Botão "Usar" — carrega no próprio botão o que o painel precisa:
+ *   data-usar → trigger real do registro
+ *   data-uso  → padrão de argumentos (só quando o comando tem argumentos)
+ *   data-req  → requisitos compactos (grupo/dono/admin/bot admin/pv/resposta/
+ *               menção/mídia) — só quando existem
+ */
+function botaoUsar(cmd, opts = {}) {
+  const pref = opts.prefix || '!';
+  const spec = actions.specDoComando(cmd, { prefix: pref });
+  if (!spec.trigger) return '';
+  // Enxuto de propósito: cada byte aqui é multiplicado por centenas de comandos
+  // e o payload inteiro viaja cifrado (sem compressão) no stanza. O nome do
+  // comando já está no cartão ao lado do botão, então o rótulo visível basta.
+  const attrs = ['class="go"', `data-usar="${escapeAttr(spec.trigger)}"`];
+  if (spec.args) attrs.push(`data-uso="${escapeAttr(spec.args)}"`);
+  if (spec.flags) attrs.push(`data-req="${escapeAttr(spec.flags)}"`);
+  return `<button ${attrs.join(' ')}>Usar</button>`;
+}
+
+/**
  * Cartão de um comando.
  * @param {object} cmd comando do registry
- * @param {object} opts { prefix, botDigits, categoria, emoji }
+ * @param {object} opts { prefix, categoria, emoji, compacto }
  */
 function cartaoDeComando(cmd, opts = {}) {
   const prefix = opts.prefix || '!';
@@ -106,25 +105,16 @@ function cartaoDeComando(cmd, opts = {}) {
   const tags = etiquetas(cmd).map(
     (t) => `<span class="tag ${escapeAttr(t.cls)}">${escapeHtml(t.texto)}</span>`
   );
-  const linkavel = podeLinkar(cmd);
-  const href = linkavel ? linkDoComando(opts.botDigits, prefix, trigger) : '';
-  const acao = href
-    ? `<a class="go" href="${escapeAttr(href)}" rel="noopener noreferrer">Usar</a>`
-    : '';
-  const dica = linkavel
-    ? ''
-    : '<p class="ex">▸ Este comando precisa do contexto do grupo — digite no grupo.</p>';
 
   return (
-    '<article class="cmd">' +
+    `<article class="cmd" data-cat="${escapeAttr(opts.categoria || '')}">` +
     `<div class="ico">${escapeHtml(emoji)}</div>` +
     '<div class="body">' +
     `<div class="top"><code>${escapeHtml(linha)}</code>${tags.join('')}</div>` +
     `<p class="desc">${escapeHtml(cmd.description || 'Sem descrição.')}</p>` +
     (compacto ? '' : `<p class="ex">Ex.: <code>${escapeHtml(exemplos)}</code></p>`) +
-    dica +
     '</div>' +
-    acao +
+    botaoUsar(cmd, { prefix }) +
     '</article>'
   );
 }
@@ -143,23 +133,21 @@ function abaDeCategoria(cat) {
 /** Seção de uma categoria com seus comandos. */
 function secaoDeCategoria(cat, comandos, opts = {}) {
   // Aviso honesto quando o card foi cortado por tamanho: diz quanto ficou de
-  // fora e oferece um LINK (wa.me) para o menu completo daquela categoria.
+  // fora e ensina o comando do menu completo (sem link: link não navega aqui).
   let avisoCorte = '';
   if (opts.avisoCorte) {
     const atalho = opts.avisoCorte.atalho || '';
-    const href = atalho ? linkDoComando(opts.botDigits, opts.prefix, atalho) : '';
     avisoCorte =
       `<p class="sec-desc">▸ Mostrando ${escapeHtml(String(opts.avisoCorte.mostrados))} de ` +
-      `${escapeHtml(String(opts.avisoCorte.total))} comandos (limite do card).` +
-      (href
-        ? ` Complete: <a href="${escapeAttr(href)}" rel="noopener noreferrer">${escapeHtml(opts.prefix + atalho)}</a>`
-        : ` Digite <code>${escapeHtml(opts.prefix)}menucompleto</code> para a lista completa.`) +
+      `${escapeHtml(String(opts.avisoCorte.total))} comandos (limite do card). ` +
+      (atalho
+        ? `Para a lista completa, envie <code>${escapeHtml(opts.prefix + atalho)}</code> no chat.`
+        : `Envie <code>${escapeHtml(opts.prefix)}menucompleto</code> no chat para a lista completa.`) +
       '</p>';
   }
   const cartoes = comandos.map((c) =>
     cartaoDeComando(c, {
       prefix: opts.prefix,
-      botDigits: opts.botDigits,
       categoria: cat.id,
       emoji: opts.emojiDe ? opts.emojiDe(c) : '▸',
       compacto: opts.compacto,
@@ -192,17 +180,19 @@ function cabecalho(info) {
   );
 }
 
-/** Rodapé: como usar + alternativa tradicional (sempre acessível). */
+/**
+ * Rodapé: como o "Usar" funciona + alternativa tradicional (sempre acessível).
+ * O texto tem que ser honesto: este card NÃO envia nada.
+ */
 function rodape(info) {
-  const tradicional = linkDoComando(info.botDigits, info.prefix, 'menucompleto');
+  const p = escapeHtml((info && info.prefix) || '!');
   return (
     '<footer class="foot">' +
-    `▸ Toque em <b>Usar</b> para abrir a conversa com o comando já escrito — depois é só enviar.<br>` +
-    `▸ As permissões (dono/admin/limites) são conferidas pelo bot <b>a cada execução</b>.<br>` +
-    `▸ Menu tradicional a qualquer momento: <code>${escapeHtml(info.prefix)}menucompleto</code>` +
-    (tradicional ? ` — <a href="${escapeAttr(tradicional)}" rel="noopener noreferrer">abrir no chat</a>` : '') +
-    '<br>▸ Este card precisa de um WhatsApp que renderize HTML. Se ele aparecer vazio/estranho, ' +
-    `use <code>${escapeHtml(info.prefix)}modohtml off</code> ou <code>${escapeHtml(info.prefix)}menucompleto</code>.` +
+    '▸ <b>Usar</b> monta o comando e deixa pronto para <b>copiar</b>: este card não tem como ' +
+    'enviar mensagens. Cole no chat e mande.<br>' +
+    '▸ Permissões (dono/admin), limites e confirmações continuam sendo conferidos pelo bot ' +
+    '<b>a cada execução</b>.<br>' +
+    `▸ Menu tradicional: <code>${p}menucompleto</code> • card não desenha? <code>${p}modohtml off</code>` +
     '</footer>'
   );
 }
@@ -210,11 +200,9 @@ function rodape(info) {
 module.exports = {
   escapeHtml,
   escapeAttr,
-  onlyDigits,
-  podeLinkar,
-  linkDoComando,
   etiquetas,
   textoDeBusca,
+  botaoUsar,
   cartaoDeComando,
   abaDeCategoria,
   secaoDeCategoria,

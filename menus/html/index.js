@@ -11,6 +11,14 @@
  *
  * Nunca lança para o chamador: devolve `true` (enviado) ou `false` (não deu).
  * Quem chama faz o fallback tradicional.
+ *
+ * Sobre as AÇÕES do card (mudou nesta versão): o WebView do card é um sandbox
+ * de origem opaca, sem rede, e não existe canal HTML→bot (ver o cabeçalho de
+ * menus/html/actions.js, com a origem de cada afirmação). Por isso o card não
+ * tem mais link `wa.me`: o botão "Usar" monta o comando no aparelho e deixa
+ * para copiar/enviar. Também injetamos uma ALTURA FIXA (ver
+ * templates.travarAltura) para o host parar de medir o conteúdo e evitar o
+ * card "tremendo" ao rolar (comportamento relatado no upstream).
  */
 
 'use strict';
@@ -18,22 +26,25 @@
 const logger = require('../../utils/logger').child('menuHtml');
 
 // O vendor NÃO comprime o stanza de saída (zlib só existe no decode.js), então
-// o tamanho do card é o que vai na rede. 100 KB é o teto conservador deste
-// projeto; passando disso, cortamos comandos por categoria e dizemos isso no
-// próprio card, com link para o menu completo da categoria.
-const MAX_BYTES_PADRAO = 100000;
+// o tamanho do card é o que vai na rede — e mensagem grande demais é descartada
+// em silêncio pelos clientes (relatado nos projetos que usam este formato, que
+// trabalham com a ordem de ~1 MB). 120 KB é o teto conservador deste projeto:
+// passando disso, cortamos comandos por categoria em passos e dizemos isso no
+// próprio card, com o atalho para o menu completo em texto.
+const MAX_BYTES_PADRAO = 120000;
+// Altura fixa default do card (px). Ver templates.travarAltura().
+const ALTURA_PADRAO = 520;
 const CAP_PADRAO = 30;
 
-/** Só dígitos do número do BOT (destino dos links `wa.me`). */
-function numeroDoBot(ctx) {
-  try {
-    const user = ctx && ctx.socket && ctx.socket.user;
-    const id = user && user.id;
-    if (!id) return '';
-    return String(id).split('@')[0].split(':')[0].replace(/\D/g, '');
-  } catch (_) {
-    return '';
-  }
+/**
+ * Altura fixa do card, em pixels (MENU_HTML_HEIGHT sobrescreve).
+ * Fixar evita o host medir o conteúdo a cada rolagem/troca de tela — o
+ * comportamento medido como "card tremendo" no upstream.
+ */
+function alturaDoCard() {
+  const bruto = Number(process.env.MENU_HTML_HEIGHT);
+  if (Number.isFinite(bruto) && bruto >= 240 && bruto <= 900) return Math.round(bruto);
+  return ALTURA_PADRAO;
 }
 
 /** Dados do bot/chat usados pelos templates (sem nada sensível). */
@@ -50,8 +61,8 @@ function montarInfo(ctx) {
     prefix: settings.effectivePrefix() || CONFIG.bot.prefix,
     botName: CONFIG.bot.name,
     version: CONFIG.bot.version,
-    botDigits: numeroDoBot(ctx),
     botEmoji: emoji,
+    altura: alturaDoCard(),
     escopoTexto: ctx && ctx.isGroup ? 'neste grupo' : 'no privado',
   };
 }
@@ -108,20 +119,26 @@ function montarDocumento(ctx, opts = {}) {
 
   const teto = Number(process.env.MENU_HTML_MAX_BYTES) || MAX_BYTES_PADRAO;
   if (Buffer.byteLength(html, 'utf8') > teto) {
-    const cap = Number(process.env.MENU_HTML_MAX_PER_CAT) || CAP_PADRAO;
+    // Corte ADAPTATIVO: reduz por categoria em passos até caber (o registro
+    // cresce com o tempo; um único passo de 30 não garante nada).
+    const base = Number(process.env.MENU_HTML_MAX_PER_CAT) || CAP_PADRAO;
+    const passos = [...new Set([base, 20, 14, 10, 6, 4])].filter((n) => n <= base);
+    for (const cap of passos) {
+      info.grupo = limitarCategorias(grupo, cap);
+      html =
+        kind === 'admin'
+          ? templates.menuAdmin(info)
+          : kind === 'membros'
+            ? templates.menuMembro(info)
+            : kind === 'categoria'
+              ? templates.menuCategoria(info, grupo.inicial)
+              : templates.menuPrincipal(info);
+      if (Buffer.byteLength(html, 'utf8') <= teto) break;
+    }
     logger.info(
-      { bytes: Buffer.byteLength(html, 'utf8'), teto, cap },
-      'menu HTML grande — limitando comandos por categoria'
+      { bytes: Buffer.byteLength(html, 'utf8'), teto, comandos: info.grupo.total },
+      'menu HTML grande — comandos limitados por categoria'
     );
-    info.grupo = limitarCategorias(grupo, cap);
-    html =
-      kind === 'admin'
-        ? templates.menuAdmin(info)
-        : kind === 'membros'
-          ? templates.menuMembro(info)
-          : kind === 'categoria'
-            ? templates.menuCategoria(info, grupo.inicial)
-            : templates.menuPrincipal(info);
   }
 
   return { html, grupo: info.grupo, info };
@@ -139,6 +156,10 @@ async function enviar(ctx, opts = {}) {
     // richHtml aplica o modo seguro (card é payload de "bot IA"): se estiver
     // bloqueado, ele lança e nós caímos no menu tradicional.
     const richHtml = require('../../utils/richHtml');
+    // `trustedSources` fica como está (é a atribuição desenhada sob o card).
+    // ATENÇÃO: pelos relatos de quem mediu o WebView, ele NÃO libera rede nem
+    // navegação (host dentro e fora da lista: os dois falhavam). Não conte com
+    // isso para link nenhum.
     await richHtml.sendHtml(ctx.socket, ctx.remoteJid, html, {
       title: `🌙 ${grupo.titulo}`,
       trustedSources: ['nixel.dev'],
@@ -154,4 +175,4 @@ async function enviar(ctx, opts = {}) {
   }
 }
 
-module.exports = { enviar, montarDocumento, montarInfo, numeroDoBot, limitarCategorias };
+module.exports = { enviar, montarDocumento, montarInfo, alturaDoCard, limitarCategorias, ALTURA_PADRAO };
