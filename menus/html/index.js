@@ -35,6 +35,10 @@ const MAX_BYTES_PADRAO = 120000;
 // Altura fixa default do card (px). Ver templates.travarAltura().
 const ALTURA_PADRAO = 520;
 const CAP_PADRAO = 30;
+// Fração da área visível deslocada por toque nas setas ↑↓ e ←→.
+// O número vive em UM lugar só: menus/html/client.js (PASSO_PADRAO = 0.7),
+// que é quem emite o JS do card. Aqui só lemos o valor (e o env pode trocar).
+const { PASSO_PADRAO } = require('./client');
 
 /**
  * Altura fixa do card, em pixels (MENU_HTML_HEIGHT sobrescreve).
@@ -48,6 +52,16 @@ function alturaDoCard() {
 }
 
 /** Dados do bot/chat usados pelos templates (sem nada sensível). */
+/**
+ * Passo das setas de rolagem (fração da área visível por toque).
+ * `MENU_HTML_STEP` sobrescreve; fora de 0.05–1 volta ao padrão.
+ */
+function passoDoCard() {
+  const bruto = Number(process.env.MENU_HTML_STEP);
+  if (Number.isFinite(bruto) && bruto >= 0.05 && bruto <= 1) return bruto;
+  return PASSO_PADRAO;
+}
+
 function montarInfo(ctx) {
   const CONFIG = require('../../config');
   const settings = require('../../database/settings');
@@ -63,6 +77,7 @@ function montarInfo(ctx) {
     version: CONFIG.bot.version,
     botEmoji: emoji,
     altura: alturaDoCard(),
+    passo: passoDoCard(),
     escopoTexto: ctx && ctx.isGroup ? 'neste grupo' : 'no privado',
   };
 }
@@ -175,4 +190,13 @@ async function enviar(ctx, opts = {}) {
   }
 }
 
-module.exports = { enviar, montarDocumento, montarInfo, alturaDoCard, limitarCategorias, ALTURA_PADRAO };
+module.exports = {
+  enviar,
+  montarDocumento,
+  montarInfo,
+  alturaDoCard,
+  passoDoCard,
+  limitarCategorias,
+  ALTURA_PADRAO,
+  PASSO_PADRAO,
+};

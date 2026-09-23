@@ -53,6 +53,7 @@ function gerar(nome, opts) {
   const usares = (out.html.match(/data-usar="/g) || []).length;
   const remotos = (out.html.match(/\b(?:href|src)\s*=\s*["']?(?:https?:)?\/\//gi) || []).length;
   const linksMortos = (out.html.match(/<a class="go"/g) || []).length;
+  const setas = (out.html.match(/class="(?:snav|vnav)"/g) || []).length;
   const mostrados = out.grupo.categorias.reduce((n, c) => n + c.comandos.length, 0);
   const total = out.grupo.categorias.reduce((n, c) => n + (c.count || c.comandos.length), 0);
   console.log(
@@ -60,6 +61,7 @@ function gerar(nome, opts) {
       ` | categorias ${out.grupo.categorias.length}` +
       ` | Usar ${usares}` +
       ` | comandos ${mostrados}/${total}` +
+      ` | setas ${setas}` +
       ` | remotos ${remotos}` +
       ` | links mortos ${linksMortos}`
   );

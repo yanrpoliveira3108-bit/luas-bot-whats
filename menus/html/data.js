@@ -36,6 +36,9 @@ function listarCategorias() {
       id: menu.id,
       title: menu.title || menu.id,
       emoji: menu.emoji || '📂',
+      // Rótulo usado no cabeçalho ("📥 Downloads"): sem ele o cabeçalho fica
+      // vazio depois que o JS ativa a categoria.
+      label: `${menu.emoji || '📂'} ${menu.title || menu.id}`,
       description: menu.description || '',
       count: comandos.length,
       comandos,
@@ -52,6 +55,7 @@ function listarCategorias() {
       id,
       title: id.charAt(0).toUpperCase() + id.slice(1),
       emoji: '📂',
+      label: `📂 ${id.charAt(0).toUpperCase() + id.slice(1)}`,
       description: 'Categoria detectada automaticamente.',
       count: visiveis.length,
       comandos: visiveis,

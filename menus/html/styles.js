@@ -9,10 +9,17 @@
  *     então `!tema` continua valendo também nos menus HTML.
  *   - Layout pensado para tela de celular: coluna única, alvos de toque ≥44px,
  *     contraste alto.
- *   - ALTURA FIXA: quem injeta o `height` e o contêiner `#__wrap` (rolagem
- *     interna) é menus/html/index.js — aqui só cuidamos do visual dele. Sem
- *     isso o host mede o conteúdo e o conteúdo mede o host, e o card "treme"
- *     (comportamento medido e documentado no upstream).
+ *   - ALTURA FIXA: quem injeta o `height` e o contêiner `#__wrap` é o
+ *     templates.travarAltura(); aqui só cuidamos do visual dele. Sem isso o
+ *     host mede o conteúdo e o conteúdo mede o host, e o card "treme"
+ *     (comportamento relatado no upstream).
+ *   - ROLAGEM: a página NÃO rola (html/body/#__wrap com overflow:hidden). Cada
+ *     área rolável é um contêiner próprio — #lua-tabs (horizontal),
+ *     #lua-list (comandos) e #lua-panel-body (painel do "Usar"). Todo
+ *     flex/grid que contém área rolável precisa de `min-height:0`/`min-width:0`,
+ *     senão o filho cresce e nunca rola.
+ *   - As setas (↑ ↓ ← →) são irmãs das áreas roláveis, com espaço reservado no
+ *     layout: ficam sempre visíveis e não cobrem conteúdo.
  *   - Transições curtas (opacity/transform) e `prefers-reduced-motion`.
  *
  * O CSS é uma string exportada (não um arquivo .css) porque o HTML precisa ir
@@ -32,6 +39,12 @@ function themeVars() {
   }
 }
 
+/**
+ * Contêineres de rolagem (ver templates.js): #lua-tabs (categorias, eixo X),
+ * #lua-list (comandos, eixo Y) e #lua-panel-body (painel do "Usar", eixo Y).
+ * A página não rola. As setas (.snav na faixa, .vnav na barra vertical) são
+ * irmãs dessas áreas, com espaço reservado — nunca posicionadas sobre elas.
+ */
 function buildCss() {
   return `
 :root{${themeVars()};--lua-radius:14px;--lua-gap:10px}
@@ -41,11 +54,13 @@ function buildCss() {
 [hidden]{display:none!important}
 html,body{margin:0;padding:0;background:var(--lua-bg,#05030A);color:var(--lua-text,#fff)}
 body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:15px;line-height:1.45}
-#__wrap{padding:0 12px 28px;overscroll-behavior:contain}
-.wrap{max-width:640px;margin:0 auto}
+#__wrap{padding:0 12px 28px}
+.wrap{flex:1 1 auto;min-height:0;min-width:0;max-width:640px;margin:0 auto;
+  display:flex;flex-direction:row;align-items:stretch;gap:8px}
+.screens{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column}
 
 /* ---------- telas (troca local, sem reenviar nada) ---------- */
-.screen{will-change:opacity,transform}
+.screen{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;will-change:opacity,transform}
 .screen.sai{opacity:0;transform:translateY(4px);transition:opacity .11s ease,transform .11s ease}
 .screen.entra{animation:lua-entra .17s ease both}
 @keyframes lua-entra{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -54,7 +69,8 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
 }
 
 /* ---------- cabeçalho ---------- */
-.head{display:flex;align-items:center;gap:10px;padding:14px 0 8px;border-bottom:1px solid rgba(255,255,255,.10)}
+.head{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:14px 0 8px;
+  border-bottom:1px solid rgba(255,255,255,.10)}
 .logo{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:20px;
   background:linear-gradient(135deg,var(--lua-primary,#8B5CF6),var(--lua-primary-dark,#4C1D95));
   box-shadow:0 0 14px var(--lua-glow,rgba(139,92,246,.5))}
@@ -63,9 +79,17 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
 .bot-meta{font-size:12px;color:var(--lua-text-secondary,#B8A9D9)}
 .cat-name{font-size:13px;font-weight:600;color:var(--lua-neon,#C084FC);margin-top:2px}
 
-/* ---------- abas de categoria ---------- */
-.tabs{display:flex;gap:8px;overflow-x:auto;padding:12px 0;scrollbar-width:none}
-.tabs::-webkit-scrollbar{display:none}
+/* ---------- abas de categoria (faixa rolável entre as setas) ---------- */
+.tabsrow{flex:0 0 auto;display:flex;align-items:center;gap:6px}
+.tabs{flex:1 1 auto;min-width:0;display:flex;gap:8px;overflow-x:auto;overflow-y:hidden;padding:12px 0;
+  scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;touch-action:pan-x}
+/* setas: fora das áreas que rolam (nunca cobrem conteúdo) */
+.snav,.vnav{display:inline-flex;align-items:center;justify-content:center;border-radius:13px;
+  border:1px solid rgba(255,255,255,.16);background:var(--lua-card,#120A1F);color:var(--lua-text,#fff);
+  font-weight:700;line-height:1;cursor:pointer}
+.snav{flex:0 0 auto;width:44px;min-height:44px;font-size:17px}
+.snav:active,.vnav:active{transform:translateY(1px)}
+.snav[disabled],.vnav[disabled]{opacity:.32;cursor:default;transform:none}
 .tab{flex:0 0 auto;min-height:44px;display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:999px;
   border:1px solid rgba(255,255,255,.14);background:var(--lua-card,#120A1F);color:var(--lua-text,#fff);
   font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
@@ -73,12 +97,18 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
   border-color:transparent;box-shadow:0 0 12px var(--lua-glow,rgba(139,92,246,.45))}
 .tab .count{font-size:11px;opacity:.75;font-weight:500}
 
-/* ---------- busca ---------- */
-.searchbar{position:sticky;top:0;z-index:5;background:var(--lua-bg,#05030A);padding:4px 0 10px}
+/* ---------- busca (fixa) ---------- */
+.searchbar{flex:0 0 auto;padding:4px 0 10px}
 .searchbar input{width:100%;min-height:44px;padding:10px 14px;border-radius:var(--lua-radius);
   border:1px solid rgba(255,255,255,.14);background:var(--lua-bg-secondary,#0B0614);color:var(--lua-text,#fff);
   font-size:15px;outline:none}
 .searchbar input:focus{border-color:var(--lua-primary,#8B5CF6)}
+
+/* ---------- área de rolagem dos comandos + barra de setas ---------- */
+#lua-list{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding:0 2px 6px 0;
+  -webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y;scrollbar-width:none}
+.vrail{flex:0 0 auto;display:flex;flex-direction:column;justify-content:center;gap:10px;width:48px}
+.vnav{width:48px;min-height:56px;font-size:20px}
 
 /* ---------- seção ---------- */
 .sec{margin:18px 0 6px}
@@ -102,7 +132,8 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
   border-radius:999px;font-size:13px;font-weight:700;color:#fff;cursor:pointer;
   background:linear-gradient(135deg,var(--lua-primary,#8B5CF6),var(--lua-primary-dark,#4C1D95))}
 .go:active{transform:translateY(1px)}
-.go:focus-visible,.tab:focus-visible,.pn-copy:focus-visible,.pn-back:focus-visible,#lua-top:focus-visible,#lua-q:focus-visible{
+.go:focus-visible,.tab:focus-visible,.pn-copy:focus-visible,.pn-back:focus-visible,#lua-top:focus-visible,
+#lua-q:focus-visible,.vnav:focus-visible,.snav:focus-visible{
   outline:2px solid var(--lua-neon,#C084FC);outline-offset:2px}
 .tag{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;text-transform:uppercase;letter-spacing:.4px}
 .tag.dono{background:rgba(250,204,21,.16);color:#FACC15}
@@ -111,7 +142,11 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
 .tag.pv{background:rgba(52,211,153,.16);color:#6EE7B7}
 
 /* ---------- painel do "Usar" ---------- */
-.pn-top{display:flex;align-items:center;gap:10px;padding:14px 0 8px;border-bottom:1px solid rgba(255,255,255,.10)}
+.pn-top{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:14px 0 8px;
+  border-bottom:1px solid rgba(255,255,255,.10)}
+#lua-panel-body{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding-right:2px;
+  -webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y;scrollbar-width:none}
+.tabs::-webkit-scrollbar,#lua-list::-webkit-scrollbar,#lua-panel-body::-webkit-scrollbar{width:0;display:none}
 .pn-title{font-size:15px;font-weight:700;flex:1;min-width:0}
 .pn-cmd{margin:12px 0 0}
 .pn-cmd code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:16px;font-weight:700;
@@ -149,7 +184,12 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
 .top{display:flex;justify-content:center;margin-top:16px}
 .top button{min-height:44px;padding:0 18px;border-radius:999px;border:1px solid rgba(255,255,255,.16);
   background:var(--lua-bg-secondary,#0B0614);color:var(--lua-text,#fff);font-size:13px;font-weight:600;cursor:pointer}
-@media (max-width:360px){body{font-size:14.5px}.cmd code{font-size:13px}}
+/* Telas estreitas: setas continuam com 44px de toque, só o resto encolhe. */
+@media (max-width:360px){body{font-size:14.5px}.cmd code{font-size:13px}.vrail{width:44px}.vnav{width:44px}}
+/* Card baixo (MENU_HTML_HEIGHT pequeno): aperta o topo para sobrar área de
+   comandos — as setas nunca encolhem. */
+@media (max-height:430px){.head{padding:8px 0 5px}.tabs{padding:6px 0}.searchbar{padding:2px 0 6px}
+  .logo{width:32px;height:32px;font-size:17px}.vnav{min-height:46px}}
 `.trim();
 }
 
