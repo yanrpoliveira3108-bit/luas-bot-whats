@@ -186,13 +186,13 @@ function cabecalho(info) {
  */
 function rodape(info) {
   const p = escapeHtml((info && info.prefix) || '!');
+  // Curto de propósito: o rodapé fica no FIM da lista, e cada pixel dele é um
+  // pixel a menos para o último comando aparecer inteiro quando a rolagem
+  // chega ao fim. O texto detalhado continua no painel do "Usar" (.pn-tip).
   return (
     '<footer class="foot">' +
-    '▸ <b>Usar</b> monta o comando e deixa pronto para <b>copiar</b>: este card não tem como ' +
-    'enviar mensagens. Cole no chat e mande.<br>' +
-    '▸ Permissões (dono/admin), limites e confirmações continuam sendo conferidos pelo bot ' +
-    '<b>a cada execução</b>.<br>' +
-    `▸ Menu tradicional: <code>${p}menucompleto</code> • card não desenha? <code>${p}modohtml off</code>` +
+    '▸ <b>Usar</b> só <b>copia</b> o comando (o card não envia): o bot confere permissão, ' +
+    `limites e confirmações ao executar. Menu em texto: <code>${p}menucompleto</code>.` +
     '</footer>'
   );
 }

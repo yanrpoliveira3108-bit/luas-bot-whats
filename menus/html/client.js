@@ -11,6 +11,12 @@
  *     categorias na faixa (#lua-tabs). Cada toque anda PASSO × área visível.
  *     A página e a conversa do WhatsApp não se movem: quem rola é sempre um
  *     contêiner interno, com `overflow` próprio;
+ *   - TOQUES RÁPIDOS: o destino dos toques é ACUMULADO — enquanto a rolagem
+ *     anterior ainda está animando, o toque seguinte conta a partir do destino
+ *     já pedido (não da posição animada) e é aplicado NA HORA, sem animação. Sem
+ *     isso, 5 toques seguidos andavam quase nada (cada um reiniciava a animação
+ *     de onde ela estava) e o fim da lista parecia inalcançável. Toque isolado
+ *     continua animando suave; pausa de 350ms volta ao modo suave;
  *   - painel do "Usar": campos vindos do `usage` real do comando, validação e
  *     o comando montado pronto para COPIAR (o card não envia mensagens);
  *   - busca/filtro instantâneo sobre os comandos já desenhados;
@@ -76,7 +82,7 @@ r:"Responda uma mensagem com este comando (o card não responde por você).",
 m:"Para mencionar alguém use @ no chat depois de colar: digitar @nome não marca ninguém.",
 md:"Usa mídia enviada ou respondida no chat."};
 var st={tela:"list",cat:inicial,busca:"",rol:{},faixa:0,campos:{},cmd:"",pilha:[]};
-var timer=null,copiouEm=0;
+var timer=null,copiouEm=0,alvo=null,alvoEm=0;
 /* PASSO = fração da área visível por toque (único ponto de ajuste). */
 var PASSO=${passo};
 
@@ -94,10 +100,16 @@ function rolar(el,top,left){
   if(el.scrollTo&&!reduz()){try{el.scrollTo({top:t,left:l,behavior:"smooth"});return}catch(e){}}
   try{el.scrollTop=t;el.scrollLeft=l}catch(e){}
 }
-function guardar(){var el=elV();if(el)st.rol[chave()]=el.scrollTop||0;if(faixa)st.faixa=faixa.scrollLeft||0}
+function guardar(){var el=elV();if(el)st.rol[chave()]=el.scrollTop||0;if(faixa)st.faixa=faixa.scrollLeft||0;alvo=null}
 function repor(){var el=elV();if(el){try{el.scrollTop=st.rol[chave()]||0}catch(e){}}if(faixa){try{faixa.scrollLeft=st.faixa||0}catch(e){}}}
+/* posição "efetiva": durante a animação vale o destino já pedido */
+function posicao(el){
+  if(!el)return 0;
+  if(alvo!=null&&Date.now()-alvoEm<350)return alvo;
+  return el.scrollTop||0;
+}
 function pintar(){
-  var el=elV(),mv=maxV(el),p=el?(el.scrollTop||0):0,mh=maxH(faixa),f=faixa?(faixa.scrollLeft||0):0;
+  var el=elV(),mv=maxV(el),p=posicao(el),mh=maxH(faixa),f=faixa?(faixa.scrollLeft||0):0;
   if(BT.up)BT.up.disabled=!(mv>1&&p>1);
   if(BT.down)BT.down.disabled=!(mv>1&&p<mv-1);
   if(BT.esq)BT.esq.disabled=!(mh>1&&f>1);
@@ -120,7 +132,19 @@ function tela(n){
 }
 function rolarV(dir){
   var el=elV();if(!el)return;
-  rolar(el,(el.scrollTop||0)+dir*Math.max(90,Math.round((el.clientHeight||0)*PASSO)),el.scrollLeft||0);
+  var agora=Date.now(),emCurso=(alvo!=null&&agora-alvoEm<350);
+  var passo=Math.max(90,Math.round((el.clientHeight||0)*PASSO));
+  var base=emCurso?alvo:(el.scrollTop||0);
+  var t=Math.max(0,Math.min(maxV(el),base+dir*passo));
+  alvo=t;alvoEm=agora;
+  if(emCurso){
+    /* rajada: a animação anterior ainda está rodando — aplica o novo destino
+       na hora, senão os toques entram numa fila de animações e a lista fica
+       "arrastando" atrás do dedo (e o fim parece inalcançável). */
+    try{el.scrollTop=t}catch(e){}
+  }else{
+    rolar(el,t,el.scrollLeft||0);
+  }
   setas();
 }
 function rolarF(dir){
@@ -174,6 +198,7 @@ function aba(id){
   });
   if(rotulo)rotulo.textContent=ativa?(ativa.getAttribute("data-label")||""):"";
   st.cat=id;
+  alvo=null; /* troca de categoria: destino acumulado não vale mais */
   /* cada categoria guarda a própria rolagem */
   if(lista){try{lista.scrollTop=st.rol["cat:"+id]||0}catch(e){}}
   mostrar(ativa);
@@ -203,6 +228,7 @@ function filtrar(termo){
     tabs.forEach(function(t){t.classList.remove("active");t.setAttribute("aria-selected","false")});
     if(rotulo)rotulo.textContent="🔎 "+q+" ("+total+")";
     /* resultado novo começa do topo; a posição da categoria volta ao limpar */
+    alvo=null;
     if(lista){try{lista.scrollTop=0}catch(e){}}
   }else{
     var a=tabs.filter(function(t){return t.classList.contains("active")})[0];
@@ -311,6 +337,7 @@ function abrir(btn){
   painel.__campos=campos;
   painel.__vals=vals;
   st.rol.panel=0; /* comando novo abre no topo */
+  alvo=null;
   if(painel){try{painel.scrollTop=0}catch(e){}}
   trocar("panel");
   setas(); /* conteúdo novo = altura nova: reavalia as setas do painel */
@@ -408,8 +435,14 @@ raiz.addEventListener("click",function(ev){
   var dir=a.closest("#lua-cat-next");if(dir){ev.preventDefault();rolarF(1);return}
   var u=a.closest("[data-usar]");if(u){ev.preventDefault();abrir(u);return}
   var c=a.closest("#lua-copy");if(c){ev.preventDefault();acaoCopiar();return}
-  var t=a.closest("#lua-top");
-  if(t){ev.preventDefault();rolar(lista,0,0);return}
+  var t=a.closest("#lua-top"); /* atalho "topo" (na barra, fora da rolagem) */
+  if(t){
+    /* salto longo: aqui o deslocamento imediato é o certo — animar 17 mil px
+       demora e parece travado (e o atalho existe justamente para encurtar). */
+    ev.preventDefault();alvo=0;alvoEm=Date.now();
+    if(lista){try{lista.scrollTop=0}catch(e){}}
+    setas();return
+  }
   var ab=a.closest(".tab");
   if(ab){ev.preventDefault();porCategoria(ab.getAttribute("data-cat"))}
 });

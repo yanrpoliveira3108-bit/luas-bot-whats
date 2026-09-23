@@ -70,8 +70,9 @@ variável de ambiente).
   transição curta (~110–170 ms, desligada em “movimento reduzido”).
 - **CSS e JS vão embutidos** no próprio card: nenhuma fonte, imagem ou script
   externo é carregado (isso é exigência do formato e também evita lentidão).
-- **Altura fixa** (`MENU_HTML_HEIGHT`, padrão 520 px) com rolagem interna: o
-  host não fica remedindo o conteúdo a cada rolagem (era o “card tremendo”).
+- **Altura do card**: no máximo `MENU_HTML_HEIGHT` (padrão 520 px) — mas sempre
+  **cabendo no WebView** (`min(520px, 100vh)`). Ver §2.1: era exatamente aí que
+  o fim da lista ficava cortado.
 
 ### 2.1 Rolagem por botões (↑ ↓ ← →)
 
@@ -86,35 +87,56 @@ Motivo: arrastar o dedo dentro da mensagem briga com os gestos do WhatsApp
 
 - A **página inteira não rola**: `html`, `body` e `#__wrap` ficam com
   `overflow:hidden` — é o que evita o gesto de arrastar virar “responder”.
-- As setas são **irmãs** dessas áreas (não filhas): o espaço delas é reservado
-  no layout, então nunca cobrem um comando nem o botão `Usar`, e ficam no lugar
-  enquanto o conteúdo anda (`←`/`→` nas pontas da faixa; `↑`/`↓` na barra).
-- Cada toque anda **70% da área visível** daquele contêiner — ou seja, sobra
-  uma faixa do que já estava na tela, para não perder o fio da leitura.
+- **A largura também é 100% do card** (`max-width:640px` para telas grandes, com
+  o conteúdo centrado). O bloco já teve `margin:0 auto` num flex em coluna: isso
+  fazia o item ser dimensionado pelo **conteúdo** (~640 px) e, num WebView de
+  360 px, a barra das setas e a seta `→` eram desenhadas **fora da tela** — o
+  mesmo tipo de defeito do corte vertical, só que no eixo X.
+- **A altura do card é o menor entre `MENU_HTML_HEIGHT` e o WebView**
+  (`height:min(520px,100vh)`). Sem isso o documento se declarava com 520 px
+  fixos: num WebView mais baixo, o rodapé — e o fim da lista — ficavam fora da
+  área visível, sem como alcançar (era o “comandos cortados”). A declaração em
+  px continua antes, como fallback para motor sem `min()`.
+- As setas (e o atalho **`⇱` topo**) ficam na barra lateral, **fora** da área
+  que rola: nunca cobrem um comando, nunca saem de vista e não se movem quando
+  o conteúdo anda. `←`/`→` ficam nas pontas da faixa, com a faixa correndo
+  entre elas.
+- Cada toque anda **70% da área visível** daquele contêiner — sobra um pedaço
+  do que já estava na tela, para não perder o fio da leitura.
   **Onde ajustar:** o número vive em um lugar só,
   `menus/html/client.js` → `const PASSO_PADRAO = 0.7` (é ele que emite o JS do
   card); sem editar código, use `MENU_HTML_STEP` (§3). O mesmo valor serve para
-  os dois eixos.
+  os dois eixos. Para passos mais finos (e nenhum cartão “pela metade”), `0.3`
+  é uma boa pedida.
+- **Toques rápidos não entram em fila**: o destino é acumulado e, quando a
+  animação anterior ainda está rodando (toque a menos de ~350 ms), o novo passo
+  é aplicado **na hora**. Primeiro toque anima suave; rajada anda um passo por
+  toque, exato; pausa volta ao modo suave. Sem isso, 5 toques seguidos andavam
+  quase nada e o fim da lista parecia inalcançável.
 - Movimento **suave** quando o WebView aceita `scrollTo({behavior:'smooth'})`;
-  se não aceitar (motor antigo) ou se o aparelho estiver com **movimento
-  reduzido**, o deslocamento é **imediato** — mesmo destino, sem animação.
-- **Sem fila**: toque rápido várias vezes e você anda vários passos, mas nunca
-  passa do fim (o limite é calculado antes de rolar) e nada fica animando
-  depois.
+  sem suporte (motor antigo) ou com **movimento reduzido**, o deslocamento é
+  **imediato** — mesmo destino, sem animação.
 - `↑`/`↓` e `←`/`→` **desativam** no começo e no fim (continuam visíveis, só
   apagadas — nada de sumir e empurrar o layout). Se todo o conteúdo couber, as
   quatro ficam desativadas.
-- Os estados são recalculados depois de **rolar** (evento passivo), **buscar**,
-  **trocar de categoria**, **abrir/fechar o painel** e **redimensionar** (resize
-  / rotação). Nada de consulta contínua: só rAF depois de um evento.
+- Estados recalculados em rAF depois de **rolar** (listener passivo), **buscar**,
+  **trocar de categoria**, **abrir/fechar painel** e **redimensionar**. Nada de
+  consulta contínua ao DOM.
 - A **posição de cada categoria é guardada**: sair para outra categoria (ou
   para o painel) e voltar devolve a lista na mesma altura. Ao escolher a
   categoria, a faixa anda **só o necessário** para deixá-la visível — e é a
   seleção que troca o menu; rolar a faixa apenas revela categorias.
+- **No fim da lista** vem só um rodapé curto (~58 px, antes eram ~154 px) — ele
+  é o último nó do conteúdo, então a rolagem termina deixando o **último
+  comando e o botão “Usar” inteiros** na tela. O texto completo sobre o “Usar”
+  só copiar continua no painel (`.pn-tip`). Em cards muito baixos
+  (`max-height:360px`) o rodapé é omitido para não comer a área rolável.
+- O antigo botão “↑ Voltar ao topo”, que ficava no fim do conteúdo (só
+  aparecia depois de rolar tudo), virou o atalho **`⇱`** na barra — sempre
+  acessível de qualquer ponto.
 - Nenhum `touchstart`/`touchmove` é interceptado e nenhum `preventDefault`
   global é usado: seleção de texto, cópia e os gestos do WhatsApp continuam
-  valendo. O que ajuda contra o arrastar-para-responder é a página não rolar
-  (`overflow:hidden`) e existirem os botões.
+  valendo.
 
 A lista de comandos **não é digitada à mão**: sai do registro de comandos
 (`engine/plugins.js` + `commands/loader.js`). Comando novo, alias novo ou
@@ -142,7 +164,7 @@ Variáveis opcionais (não precisam ser definidas):
 |---|---|---|
 | `MENU_HTML_MAX_BYTES` | `120000` | teto do documento enviado; se passar, o card corta comandos e avisa |
 | `MENU_HTML_MAX_PER_CAT` | `30` | máximo de comandos por categoria no card |
-| `MENU_HTML_HEIGHT` | `520` | altura fixa do card em px (240–900) |
+| `MENU_HTML_HEIGHT` | `520` | altura MÁXIMA do card em px (240–900); o card ainda encolhe se o WebView for menor |
 | `MENU_HTML_STEP` | `0.7` | quanto cada toque das setas anda, como fração da área visível (aceita 0.05–1) |
 
 O corte é adaptativo (reduz por categoria em passos até caber) e o card mostra
@@ -251,8 +273,8 @@ mensagem saiu, o desenho do card depende do aparelho e da versão do WhatsApp
 
 ## 7. O que foi testado aqui × o que depende do aparelho
 
-**Testado em sandbox** (`node --check`, `test/menuhtml.test.js` **33/33**,
-suíte completa `npm test` **324 ✅ / 0 ❌** — inclui auditoria, smokes,
+**Testado em sandbox** (`node --check`, `test/menuhtml.test.js` **35/35**,
+suíte completa `npm test` **326 ✅ / 0 ❌** — inclui auditoria, smokes,
 phone, downloads, fila de envio):
 
 - padrão desligado quando a chave não existe;
@@ -306,26 +328,44 @@ phone, downloads, fila de envio):
   reduzido; recálculo após resize; último comando e última categoria dentro das
   áreas roláveis.
 
-**Só no navegador / não verificado em aparelho** (jsdom não tem layout): os
-testes de rolagem usam **geometria simulada** (altura/largura visível e total
-definidas à mão, `scrollTo` que aplica o destino na hora). Eles provam a
-**lógica** — passo, limites, estados das setas, alvo certo —, **não** provam o
-CSS. Uma tabela de limites falsa é justamente onde nascem surpresas: por isso
-o item 3 da lista abaixo importa.
+**Testado em navegador de verdade** (`node scripts/menu-scroll-check.js`, com
+Chromium/`puppeteer` instalado — sem ele o script avisa e sai sem falhar):
+em **520 px, 430 px e 300 px** de altura, com o card principal (265 comandos):
+
+- a lista cabe no WebView e **rola de verdade** (conteúdo > área visível);
+- **nada passa da largura da tela** (`document.scrollWidth == innerWidth`): a
+  barra das setas fica visível e o conteúdo não é empurrado para fora;
+- descendo com `↓` até o fim, a seta **desativa** e o **último comando + botão
+  “Usar” ficam inteiros** na tela;
+- “Usar” e **copiar funcionam depois de rolar tudo** (a cópia foi conferida com
+  a área de transferência interceptada);
+- o atalho `⇱` volta ao início e `↑` desativa; o primeiro comando aparece
+  inteiro;
+- **rajada de 5 toques = 5,00 passos** (sem fila de animação);
+- as setas **horizontais** continuam movendo a faixa.
+
+**Não verificado em aparelho** (jsdom não tem layout): os testes de rolagem da
+suíte (`20a`–`20k`) usam **geometria simulada** — altura/largura visível e total
+definidas à mão, `scrollTo` que aplica o destino (opcionalmente “animado”). Eles
+provam a **lógica** — passo, limites, estados das setas, rajada, alvo certo —,
+**não** o CSS; é justamente aí que nasceu o defeito do corte, e é por isso que
+existe o `npm run menu:check`.
 
 **Depende do seu aparelho / do WhatsApp (não dá para verificar daqui):**
 
 1. se a sua versão do WhatsApp **renderiza** o card (envio ≠ renderização);
 2. o **toque real** no `Usar`: abrir o painel, digitar, copiar e colar — o
    sandbox não tem WebView do WhatsApp nem área de transferência de verdade;
-3. o **toque real nas setas** e o layout: se as áreas realmente rolam no
-   aparelho (o CSS de flex/overflow é o suspeito número um se algo não andar),
-   se as setas ficam sempre visíveis e se o gesto de arrastar dentro da lista
-   deixou de disparar o “responder” do WhatsApp;
+3. o **toque real nas setas** e o comportamento do gesto de arrastar dentro da
+   lista (se ele ainda dispara o “responder” do WhatsApp, no seu aparelho e na
+   sua versão do app);
 4. se a cópia funciona no aparelho (usa a Clipboard API e cai para o método
    antigo se ela não existir);
 5. velocidade de abertura em celular fraco e comportamento em conversa de grupo
-   grande / WhatsApp Web.
+   grande / WhatsApp Web;
+6. quanto o WebView do WhatsApp dá de **altura real** ao card: o layout se adapta
+   (`min(520px,100vh)`), mas é esse valor que define quantos comandos cabem na
+   tela por vez.
 
 Se o card não aparecer bonito no seu aparelho: `!modohtml off` volta tudo ao
 menu tradicional na hora — e `!menu --texto` é a saída por chamada, sem mexer
@@ -361,7 +401,8 @@ na configuração.
 | `menus/html/styles.js` | CSS (usa as variáveis do tema atual do bot; alvos de toque ≥ 44 px; transições curtas) |
 | `menus/html/client.js` | JS do card: abas, busca, painel do “Usar”, validação, prévia, cópia, “Voltar” com estado preservado e a **rolagem programática** das setas (limites, estados, passo) |
 | `commands/general/modohtml.js` | comando `!modohtml` |
-| `test/menuhtml.test.js` | 33 verificações desta funcionalidade (18 sem navegador + 15 de DOM com jsdom: “Usar”, navegação e as setas de rolagem) |
+| `test/menuhtml.test.js` | 35 verificações desta funcionalidade (18 sem navegador + 17 de DOM com jsdom: “Usar”, navegação e as setas de rolagem) |
+| `scripts/menu-scroll-check.js` | verificação OPCIONAL de layout num navegador de verdade (`npm run menu:check`; pula sem `puppeteer`) — foi ela que pegou o corte do fim da lista e a barra de setas fora da tela |
 
 **Alterados (mudanças mínimas)**
 
@@ -388,6 +429,9 @@ comando, alias, permissão ou função antiga foi removido.
    Usar em comando com argumentos    → campos + validação + prévia → Copiar
    trocar de aba, buscar, abrir/fechar o painel → abre na hora, sem recarregar
    setas ↑ ↓ na lista            → anda ~70% da tela, sem mexer no card/chat
+   segurar o dedo e tocar rápido → anda um passo por toque, sem "arrastar" atrás
+   ⇱ na barra                    → volta ao topo de qualquer ponto da lista
+   descer até o fim              → último comando + "Usar" inteiros na tela
    setas ← → nas categorias      → revelam categorias; o menu só troca ao tocar
    chegar no fim / no começo     → a seta correspondente fica apagada (desativada)
    categoria que cabe inteira    → ← e → ficam apagadas, sem mexer no layout

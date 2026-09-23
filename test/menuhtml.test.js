@@ -256,8 +256,16 @@ async function main() {
     assert.ok(html.includes('id="lua-view-panel"'), 'tela do painel do Usar');
     assert.ok(html.includes('data-voltar="raiz"'), 'Voltar do painel');
     assert.ok(html.includes('id="__wrap"') || html.includes('w.id="__wrap"'), 'contêiner injetado');
-    assert.ok(/#__wrap\{height:\d+px;max-height:\d+px;overflow:hidden/.test(html), 'altura fixa e página que NÃO rola');
-    assert.ok(/html,body\{margin:0;padding:0;height:\d+px;max-height:\d+px;overflow:hidden\}/.test(html), 'html/body sem rolagem');
+    // A altura é o MENOR entre o valor pedido e o WebView real: sem isso, um
+    // card mais baixo que o documento corta o fim da lista sem como alcançar.
+    assert.ok(
+      /html,body\{margin:0;padding:0;height:\d+px;height:min\(\d+px,100vh\);max-height:\d+px;max-height:min\(\d+px,100vh\);overflow:hidden\}/.test(html),
+      'html/body cabem no WebView (min(altura,100vh)) e não rolam'
+    );
+    assert.ok(
+      /#__wrap\{height:\d+px;height:min\(\d+px,100vh\);[^}]*overflow:hidden;display:flex;flex-direction:column/.test(html),
+      '#__wrap idem (flex em coluna, sem rolagem própria)'
+    );
     assert.ok(html.includes('prefers-reduced-motion'), 'respeita movimento reduzido');
     // contêineres de rolagem: um por eixo, cada um com overflow próprio
     assert.ok(html.includes('id="lua-list"'), 'contêiner rolável dos comandos');
@@ -270,6 +278,11 @@ async function main() {
     const iLista = html.indexOf('id="lua-list"');
     const iBarra = html.indexOf('class="vrail"');
     assert.ok(iBarra > iLista && html.indexOf('</main>', iLista) < iBarra, 'barra ↑↓ depois da lista (irmã)');
+    assert.ok(html.includes('id="lua-top"'), 'atalho "topo" existe');
+    const iTopo = html.indexOf('id="lua-top"');
+    assert.ok(iTopo > iLista, 'atalho "topo" vem depois da lista no documento');
+    assert.ok(html.indexOf('</main>', iLista) < iTopo, 'atalho "topo" está FORA da área que rola (sempre acessível)');
+    assert.ok(!/<div class="top">\s*<button/.test(html), 'o antigo botão no fim da lista saiu (era o que cortava o último comando)');
     assert.ok(html.includes('aria-label="Rolar comandos para baixo"'), 'rótulo: rolar para baixo');
     assert.ok(html.includes('aria-label="Rolar comandos para cima"'), 'rótulo: rolar para cima');
     assert.ok(html.includes('aria-label="Mostrar próximas categorias"'), 'rótulo: próximas categorias');
@@ -559,12 +572,19 @@ async function main() {
           el.dispatchEvent(new W.Event('scroll'));
         } catch (_) {}
       };
+      const cancelarAnim = () => {
+        // atribuir scrollTop/scrollLeft cancela o scroll suave em andamento
+        clearTimeout(el.__anim);
+        el.__anim = null;
+      };
       def('scrollLeft', () => x, (v) => {
         x = Math.max(0, Math.min(maxX, Math.round(Number(v) || 0)));
+        cancelarAnim();
         avisar(); // o WebView dispara scroll em rolagem programática: aqui também
       });
       def('scrollTop', () => y, (v) => {
         y = Math.max(0, Math.min(maxY, Math.round(Number(v) || 0)));
+        cancelarAnim();
         avisar();
       });
       medir.limite ||= {};
@@ -582,10 +602,21 @@ async function main() {
           w.matchMedia = (q) => ({ matches: opts.movimento !== 'full', media: q, addEventListener() {}, removeEventListener() {} });
           w.__rolagens = [];
           // scrollTo/scrollBy do jsdom não existem de verdade: aqui eles viram
-          // deslocamento imediato e ficam registrados (com o `behavior`).
+          // deslocamento (imediato ou "animado", com opts.animacao) e ficam
+          // registrados com o `behavior`.
           w.Element.prototype.scrollTo = function (a, b) {
             const o = a && typeof a === 'object' ? a : { top: b, left: a };
             w.__rolagens.push({ id: this.id, top: o.top, left: o.left, behavior: o.behavior });
+            if (opts.animacao && o.behavior === 'smooth') {
+              // animação em curso: chega no destino só depois (como no aparelho)
+              const el = this;
+              clearTimeout(el.__anim);
+              el.__anim = setTimeout(() => {
+                if (typeof o.top === 'number') el.scrollTop = o.top;
+                if (typeof o.left === 'number') el.scrollLeft = o.left;
+              }, 150);
+              return;
+            }
             if (typeof o.top === 'number') this.scrollTop = o.top;
             if (typeof o.left === 'number') this.scrollLeft = o.left;
           };
@@ -1132,6 +1163,79 @@ async function main() {
       dom.window.close();
     } catch (e) {
       fail('20h: DOM movimento reduzido/resize', e);
+    }
+
+    /* 20j) cabe no WebView: altura = min(pedido, viewport) */
+    try {
+      const ctxAltura = fakeCtx();
+      const antes = process.env.MENU_HTML_HEIGHT;
+      process.env.MENU_HTML_HEIGHT = '600';
+      const card600 = htmlMenu.montarDocumento(ctxAltura, { kind: 'categoria', categoria: 'downloads' }).html;
+      assert.ok(card600.includes('height:min(600px,100vh)'), 'valor pedido entra no min() com 100vh');
+      assert.ok(card600.includes('height:600px;height:min(600px,100vh)'), 'a declaração antiga fica como fallback');
+      if (antes === undefined) delete process.env.MENU_HTML_HEIGHT;
+      else process.env.MENU_HTML_HEIGHT = antes;
+
+      // o rodapé é o ÚLTIMO conteúdo: nada depois dele para "empurrar" o último comando
+      const dom = montarDom(card);
+      const d = dom.window.document;
+      const lista = d.getElementById('lua-list');
+      const ultimoFilho = lista.lastElementChild;
+      assert.strictEqual(ultimoFilho.className, 'foot', 'o rodapé fecha a lista (é o último nó)');
+      medir(lista, { h: 282, sh: 3000 });
+      lista.scrollTop = 99999;
+      const rodapeAltura = 58; // medido no Chromium com este CSS
+      const ultimoCartao = [...lista.querySelectorAll('.cmd')].at(-1);
+      assert.ok(ultimoCartao, 'há comandos');
+      assert.ok(
+        (lista.scrollHeight - (lista.scrollTop + lista.clientHeight)) === 0,
+        'a rolagem termina exatamente no fim do conteúdo'
+      );
+      assert.ok(rodapeAltura < 90, 'rodapé enxuto (o antigo tinha 154px e cortava o último comando)');
+      ok('20j: [DOM] rodapé enxuto no fim da lista e altura limitada pelo WebView');
+      dom.window.close();
+    } catch (e) {
+      fail('20j: DOM fim da lista/altura', e);
+    }
+
+    /* 20k) rajada: toques rápidos andam um passo cada, sem fila de animações */
+    try {
+      const dom = montarDom(card, { animacao: true, movimento: 'full' });
+      const w = dom.window;
+      const d = w.document;
+      const lista = d.getElementById('lua-list');
+      medir(lista, { h: 200, sh: 2000 }); // passo = 140
+      w.__luaMenu.atualizarSetas();
+      const baixo = d.getElementById('lua-down');
+
+      baixo.click(); // primeiro toque: animado
+      await esperar(30);
+      assert.strictEqual(lista.scrollTop, 0, 'primeiro toque ainda animando (posição não saltou)');
+      const suavesLista = () => w.__rolagens.filter((r) => r.id === 'lua-list' && r.behavior === 'smooth').length;
+      const suavesAntes = suavesLista();
+      assert.strictEqual(suavesAntes, 1, 'primeiro toque pediu animação (na lista)');
+
+      baixo.click(); // rajada: aplica na hora, sem enfileirar animação
+      baixo.click();
+      baixo.click();
+      await esperar(40);
+      assert.strictEqual(lista.scrollTop, 4 * 140, '4 toques seguidos = 4 passos exatos (sem esperar a animação)');
+      assert.strictEqual(suavesLista(), suavesAntes, 'rajada não cria novas animações (sem fila)');
+
+      await esperar(500); // pausa: volta ao modo suave
+      baixo.click();
+      assert.ok(suavesLista() > suavesAntes, 'depois da pausa o toque volta a animar suave');
+      await esperar(400);
+      assert.strictEqual(lista.scrollTop, 5 * 140, 'e o total acumulado segue exato');
+
+      // 20 toques em rajada: para no fim, sem estourar
+      for (let i = 0; i < 20; i++) baixo.click();
+      await esperar(60);
+      assert.strictEqual(lista.scrollTop, 1800, 'rajada para no fim (max = 2000-200)');
+      ok('20k: [DOM] rajada de toques anda passo a passo, sem fila de animações');
+      dom.window.close();
+    } catch (e) {
+      fail('20k: DOM rajada', e);
     }
 
     /* 20i) último comando e última categoria acessíveis pelas setas */

@@ -1,0 +1,238 @@
+#!/usr/bin/env node
+/**
+ * scripts/menu-scroll-check.js — confere a ROLAGEM do card HTML num navegador
+ * de verdade (layout real), não só em simulação.
+ *
+ * Por que existe: a suíte normal (`npm test`) roda em jsdom, que NÃO calcula
+ * layout — clientHeight/scrollHeight são sempre 0. Foi assim que passou batido
+ * o defeito em que o card se declarava com uma altura fixa maior que o WebView
+ * e o fim da lista ficava cortado, sem forma de alcançar (ver MENUS-HTML.md §7).
+ * Este script abre o card no Chromium em alturas diferentes e verifica o que o
+ * jsdom não vê: se a lista rola DE VERDADE, se o último comando aparece
+ * inteiro no fim, se as setas desativam nos limites e se a rajada de toques
+ * anda um passo por toque.
+ *
+ * É OPCIONAL de propósito: sem `puppeteer` instalado ele avisa e sai com 0, sem
+ * quebrar nada. No Termux/aparelho o teste que vale é o card no WhatsApp.
+ *
+ * Uso:
+ *   npm i --no-save puppeteer        # ou: CHROME_PATH=/caminho/para/chrome
+ *   node scripts/menu-scroll-check.js
+ *   CHROME_PATH=... node scripts/menu-scroll-check.js
+ */
+
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+
+const RAIZ = path.resolve(__dirname, '..');
+process.chdir(RAIZ);
+
+let puppeteer;
+try {
+  puppeteer = require('puppeteer');
+} catch (_) {
+  console.log('⏭  menu-scroll-check: puppeteer não instalado — verificação de layout pulada.');
+  console.log('   Para rodar: npm i --no-save puppeteer   (ou defina CHROME_PATH)');
+  process.exit(0);
+}
+
+const TMP = path.join(RAIZ, 'tmp');
+fs.mkdirSync(TMP, { recursive: true });
+process.env.DATABASE_FILE = process.env.DATABASE_FILE || path.join(TMP, 'menu-scroll-check.db');
+
+require('../database/database').open();
+require('../commands/loader').loadCommands(true);
+const htmlMenu = require('../menus/html');
+
+const ctxFalso = {
+  socket: { user: { id: '5511977776666:3@s.whatsapp.net' } },
+  remoteJid: '120363000000000000@g.us',
+  isGroup: true,
+  prefix: '!',
+  sender: '5511999999999@s.whatsapp.net',
+};
+
+let falhas = 0;
+const ok = (m) => console.log('✅ ' + m);
+const erro = (m) => {
+  falhas++;
+  console.log('❌ ' + m);
+};
+
+/** Mesma verificação do card, dentro da página, devolvida como objeto. */
+const ROTEIRO = async () => {
+  const dorme = (ms) => new Promise((r) => setTimeout(r, ms));
+  const lista = document.getElementById('lua-list');
+  const cx = (el) => el.getBoundingClientRect();
+  const visiveis = () => [...lista.querySelectorAll('.cmd')].filter((c) => c.offsetParent !== null && cx(c).height > 0);
+  const max = () => lista.scrollHeight - lista.clientHeight;
+  const passo = () => Math.max(90, Math.round(lista.clientHeight * (window.__luaMenu.passo || 0.7)));
+  const r = {};
+
+  r.semTransbordoLateral = document.documentElement.scrollWidth <= window.innerWidth + 1;
+  r.barraVisivel = (() => {
+    const b = cx(document.getElementById('lua-down'));
+    return b.right <= window.innerWidth + 1 && b.left >= -1;
+  })();
+  r.cabeNoVisivel = cx(lista).bottom <= window.innerHeight + 1;
+  r.alturaLista = Math.round(cx(lista).height);
+  r.rolavel = lista.scrollHeight > lista.clientHeight + 1;
+
+  // descer até o fim
+  let n = 0;
+  while (!document.getElementById('lua-down').disabled && n < 400) {
+    document.getElementById('lua-down').click();
+    await dorme(30);
+    n++;
+    if (Math.abs(lista.scrollTop - max()) < 2) break;
+  }
+  await dorme(900);
+  const lr = cx(lista);
+  const ultimo = visiveis().at(-1);
+  r.cartaoMaiorQueJanela = Math.max(...visiveis().map((c) => cx(c).height)) > lista.clientHeight + 1;
+  r.fim = {
+    toques: n,
+    noFim: Math.abs(lista.scrollTop - max()) < 2,
+    setaBaixoDesativada: document.getElementById('lua-down').disabled,
+    ultimoInteiro: cx(ultimo).top >= lr.top - 1 && cx(ultimo).bottom <= lr.bottom + 1,
+    usarInteiro: (() => {
+      const b = cx(ultimo.querySelector('.go'));
+      return b.top >= lr.top - 1 && b.bottom <= lr.bottom + 1;
+    })(),
+  };
+
+  // "Usar" + copiar no fim da lista
+  ultimo.querySelector('.go').click();
+  await dorme(350);
+  document.getElementById('lua-copy').click();
+  await dorme(150);
+  r.copiaNoFim = {
+    valor: window.__copiado,
+    status: document.getElementById('lua-status').textContent,
+    painel: !document.getElementById('lua-view-panel').hidden,
+  };
+  document.querySelector('[data-voltar="raiz"]').click();
+  await dorme(600);
+  r.voltouComRolagem = Math.round(lista.scrollTop);
+
+  // atalho de topo (na barra, fora da rolagem)
+  document.getElementById('lua-top').click();
+  await dorme(900);
+  r.topo = {
+    scrollTop: Math.round(lista.scrollTop),
+    setaCimaDesativada: document.getElementById('lua-up').disabled,
+    primeiroAparece: (() => {
+      const c = visiveis()[0];
+      const l = cx(lista);
+      return cx(c).bottom > l.top + 1 && cx(c).top < l.bottom - 1;
+    })(),
+    primeiroInteiro: (() => {
+      const c = visiveis()[0];
+      const l = cx(lista);
+      return cx(c).top >= l.top - 1 && cx(c).bottom <= l.bottom + 1;
+    })(),
+    // no topo da lista vem o título da categoria antes do primeiro comando;
+    // se título + cartão não cabem juntos, o cartão inteiro no topo é
+    // fisicamente impossível (caso de card muito baixo)
+    cabecalhoMaisCartao: (() => {
+      const c = visiveis()[0];
+      const sec = c.closest('.sec');
+      const titulo = sec ? cx(sec).top : cx(c).top;
+      return Math.round(cx(c).bottom - titulo);
+    })(),
+  };
+
+  // rajada: 5 toques sem esperar devem andar 5 passos
+  const antes = lista.scrollTop;
+  for (let i = 0; i < 5; i++) document.getElementById('lua-down').click();
+  await dorme(1200);
+  r.rajada = { passos: (lista.scrollTop - antes) / passo(), andou: Math.round(lista.scrollTop - antes) };
+
+  // horizontais seguem funcionando
+  const faixa = document.getElementById('lua-tabs');
+  const antesH = faixa.scrollLeft;
+  if (!document.getElementById('lua-cat-next').disabled) {
+    document.getElementById('lua-cat-next').click();
+    await dorme(500);
+  }
+  r.horizontal = { andou: Math.round(faixa.scrollLeft - antesH) };
+  return r;
+};
+
+(async () => {
+  const arquivo = path.join(TMP, 'menu-scroll-check.html');
+  const { html, grupo } = htmlMenu.montarDocumento(ctxFalso, { kind: 'main' });
+  fs.writeFileSync(arquivo, html);
+  console.log(`card: ${grupo.titulo} (${grupo.total} comandos) — ${(Buffer.byteLength(html, 'utf8') / 1024).toFixed(1)} KB\n`);
+
+  const navegador = await puppeteer.launch({
+    executablePath: process.env.CHROME_PATH || undefined,
+    args: ['--no-sandbox', '--disable-dev-shm-usage'],
+  });
+
+  try {
+    for (const altura of [520, 430, 300]) {
+      const pg = await navegador.newPage();
+      await pg.setViewport({ width: 360, height: altura, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
+      await pg.evaluateOnNewDocument(() => {
+        window.__copiado = null;
+        Object.defineProperty(navigator, 'clipboard', {
+          value: { writeText: (t) => { window.__copiado = t; return Promise.resolve(); } },
+          configurable: true,
+        });
+      });
+      await pg.goto('file://' + arquivo, { waitUntil: 'load' });
+      await new Promise((r) => setTimeout(r, 300));
+      const r = await pg.evaluate(ROTEIRO);
+      const tag = `[${altura}px]`;
+
+      if (r.cabeNoVisivel) ok(`${tag} a lista cabe no WebView (altura ${r.alturaLista}px, rola: ${r.rolavel})`);
+      else erro(`${tag} a lista extrapola o WebView (é isto que corta os comandos)`);
+
+      if (r.semTransbordoLateral) ok(`${tag} nada passa da largura da tela (sem transbordo lateral)`);
+      else erro(`${tag} conteúdo mais largo que a tela — botões fora da área visível`);
+
+      if (r.barraVisivel) ok(`${tag} barra das setas visível na tela`);
+      else erro(`${tag} barra das setas fora da área visível`);
+
+      if (r.rolavel) ok(`${tag} a lista realmente rola (conteúdo > área visível)`);
+      else erro(`${tag} a lista NÃO rola — as setas não têm para onde ir`);
+
+      if (r.fim.noFim && r.fim.setaBaixoDesativada) ok(`${tag} desceu até o fim em ${r.fim.toques} toques e ↓ desativou`);
+      else erro(`${tag} não chegou ao fim (scrollTop ≠ máximo) ou ↓ seguiu ativa`);
+
+      if (r.fim.ultimoInteiro && r.fim.usarInteiro) ok(`${tag} último comando e botão "Usar" inteiros no fim`);
+      else if (r.cartaoMaiorQueJanela) ok(`${tag} cartão mais alto que a janela (${r.alturaLista}px): não há como caber inteiro — visível e alcançável`);
+      else erro(`${tag} último comando/botão "Usar" cortados no fim`);
+
+      if (r.copiaNoFim.valor && /Copiado/.test(r.copiaNoFim.status)) ok(`${tag} "Usar" + copiar funcionam no fim da lista (${r.copiaNoFim.valor})`);
+      else erro(`${tag} "Usar"/copiar falharam no fim da lista`);
+
+      if (r.topo.scrollTop === 0 && r.topo.setaCimaDesativada) ok(`${tag} atalho de topo voltou ao início e ↑ desativou`);
+      else erro(`${tag} atalho de topo não voltou ao início`);
+
+      if (r.topo.primeiroInteiro) ok(`${tag} primeiro comando inteiro no topo`);
+      else if (r.topo.cabecalhoMaisCartao > r.alturaLista)
+        ok(`${tag} primeiro comando visível no topo (título + cartão = ${r.topo.cabecalhoMaisCartao}px numa janela de ${r.alturaLista}px)`);
+      else erro(`${tag} primeiro comando cortado no topo`);
+
+      if (Math.abs(r.rajada.passos - 5) < 0.35) ok(`${tag} rajada de 5 toques andou ${r.rajada.passos.toFixed(2)} passos (sem fila de animações)`);
+      else erro(`${tag} rajada andou ${r.rajada.passos.toFixed(2)} passos (esperado ~5)`);
+
+      if (r.horizontal.andou > 0) ok(`${tag} setas horizontais seguem movendo a faixa (${r.horizontal.andou}px)`);
+      else erro(`${tag} setas horizontais não moveram a faixa`);
+
+      await pg.close();
+    }
+  } finally {
+    await navegador.close();
+  }
+
+  console.log(falhas ? `\n❌ ${falhas} problema(s) de layout` : '\n✅ layout e rolagem OK nas alturas testadas');
+  process.exit(falhas ? 1 : 0);
+})().catch((e) => {
+  console.error('❌ menu-scroll-check:', e && e.message);
+  process.exit(1);
+});

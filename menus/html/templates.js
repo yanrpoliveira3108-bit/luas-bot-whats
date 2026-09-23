@@ -53,20 +53,32 @@ function emojiDeComando(cmd) {
 }
 
 /**
- * Altura fixa do card (payload). Sem isso o host mede o conteúdo e o conteúdo
- * mede o host, e o card "treme" ao rolar/abrir campos (relatado no upstream).
- * O CSS tem que vir ANTES do nosso para não disputar `height`/`overflow`.
+ * Altura do card: o MENOR entre o valor pedido e a altura REAL do WebView.
  *
- * `overflow:hidden` no html/body/#__wrap é proposital: a página NÃO rola. Toda
- * rolagem acontece nos contêineres internos (#lua-tabs, #lua-list,
- * #lua-panel-body), o que evita o gesto de arrastar virar "responder mensagem"
- * no WhatsApp.
+ * Por que assim (isto foi a causa dos comandos cortados): antes o documento se
+ * declarava com `height:520px` fixos. Quando o WebView entregue pelo WhatsApp é
+ * mais baixo que isso, o rodapé do card — justamente o fim da lista de comandos
+ * — ficava FORA da área visível e, como html/body/#__wrap têm `overflow:hidden`,
+ * não havia como alcançá-lo: os últimos comandos ficavam cortados e
+ * inacessíveis, mesmo com as setas (elas movem a lista, mas a caixa da própria
+ * lista terminava abaixo do corte).
+ *
+ * `min(<n>px, 100vh)` mantém o teto de `<n>` px (o card não cresce sem
+ * controle) e encolhe quando o WebView é menor. A declaração em px fica ANTES
+ * de propósito: motor sem suporte a `min()` usa o valor antigo, sem quebrar.
+ *
+ * `overflow:hidden` no html/body/#__wrap também é proposital: a página NÃO
+ * rola. Toda rolagem acontece nos contêineres internos (#lua-tabs, #lua-list,
+ * #lua-panel-body), o que evita o gesto de arrastar virar "responder" no
+ * WhatsApp.
  */
 function travarAltura(px) {
   const n = Math.max(240, Math.min(900, Number(px) || 520));
+  const h = `height:${n}px;height:min(${n}px,100vh)`;
+  const mh = `max-height:${n}px;max-height:min(${n}px,100vh)`;
   return (
-    `<style>html,body{margin:0;padding:0;height:${n}px;max-height:${n}px;overflow:hidden}` +
-    `#__wrap{height:${n}px;max-height:${n}px;overflow:hidden;display:flex;flex-direction:column;` +
+    `<style>html,body{margin:0;padding:0;${h};${mh};overflow:hidden}` +
+    `#__wrap{${h};${mh};overflow:hidden;display:flex;flex-direction:column;` +
     'overscroll-behavior:contain}</style>'
   );
 }
@@ -150,7 +162,6 @@ function documento(info, grupo, opts = {}) {
     '<main id="lua-list" tabindex="-1" aria-label="Comandos da categoria">' +
     (secoes || '<p class="empty">Nenhum comando carregado.</p>') +
     '<p class="empty" id="lua-empty" hidden>🔎 Nada encontrado. Tente outro termo.</p>' +
-    '<div class="top"><button type="button" id="lua-top">↑ Voltar ao topo</button></div>' +
     comp.rodape({ prefix: info.prefix }) +
     '</main>' +
     '</div>';
@@ -168,10 +179,14 @@ function documento(info, grupo, opts = {}) {
 
   // A barra vertical fica FORA das telas (irmã delas): assim continua acessível
   // na lista e no painel, nunca cobre um comando e não rola junto.
+  // A barra guarda as duas setas e o atalho "topo". Nada disso rola junto com a
+  // lista, então está sempre acessível — inclusive de qualquer ponto do meio.
   const barraVertical =
     '<div class="vrail" role="group" aria-label="Rolagem do conteúdo">' +
     setaVertical('lua-up', '↑', 'Rolar comandos para cima') +
     setaVertical('lua-down', '↓', 'Rolar comandos para baixo') +
+    '<button type="button" class="vtop" id="lua-top" aria-label="Voltar ao topo da lista">' +
+    '<span aria-hidden="true">⇱</span></button>' +
     '</div>';
 
   return (

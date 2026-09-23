@@ -54,13 +54,19 @@ function buildCss() {
 [hidden]{display:none!important}
 html,body{margin:0;padding:0;background:var(--lua-bg,#05030A);color:var(--lua-text,#fff)}
 body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:15px;line-height:1.45}
-#__wrap{padding:0 12px 28px}
-.wrap{flex:1 1 auto;min-height:0;min-width:0;max-width:640px;margin:0 auto;
+#__wrap{padding:0 12px 28px;align-items:center}
+/* CAUSA (corrigida): com margin:0 auto num flex em COLUNA, o item deixa de ser
+   esticado e passa a ser dimensionado pelo conteúdo (fit-content). Como o
+   conteúdo tem min-content da ordem de 588px, este bloco saía com 640px numa
+   janela de 360px: tudo era desenhado fora da área visível, inclusive a barra
+   das setas ↑↓ e a seta →. Agora a largura é 100% (limitada por max-width) e o
+   #__wrap centraliza com align-items:center. */
+.wrap{flex:1 1 auto;min-height:0;min-width:0;width:100%;max-width:640px;
   display:flex;flex-direction:row;align-items:stretch;gap:8px}
 .screens{flex:1 1 auto;min-width:0;min-height:0;display:flex;flex-direction:column}
 
 /* ---------- telas (troca local, sem reenviar nada) ---------- */
-.screen{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;will-change:opacity,transform}
+.screen{flex:1 1 auto;min-height:0;min-width:0;display:flex;flex-direction:column;will-change:opacity,transform}
 .screen.sai{opacity:0;transform:translateY(4px);transition:opacity .11s ease,transform .11s ease}
 .screen.entra{animation:lua-entra .17s ease both}
 @keyframes lua-entra{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -69,7 +75,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
 }
 
 /* ---------- cabeçalho ---------- */
-.head{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:14px 0 8px;
+.head{flex:0 0 auto;min-width:0;display:flex;align-items:center;gap:10px;padding:14px 0 8px;
   border-bottom:1px solid rgba(255,255,255,.10)}
 .logo{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:20px;
   background:linear-gradient(135deg,var(--lua-primary,#8B5CF6),var(--lua-primary-dark,#4C1D95));
@@ -98,8 +104,8 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
 .tab .count{font-size:11px;opacity:.75;font-weight:500}
 
 /* ---------- busca (fixa) ---------- */
-.searchbar{flex:0 0 auto;padding:4px 0 10px}
-.searchbar input{width:100%;min-height:44px;padding:10px 14px;border-radius:var(--lua-radius);
+.searchbar{flex:0 0 auto;min-width:0;padding:4px 0 10px}
+.searchbar input{width:100%;min-width:0;min-height:44px;padding:10px 14px;border-radius:var(--lua-radius);
   border:1px solid rgba(255,255,255,.14);background:var(--lua-bg-secondary,#0B0614);color:var(--lua-text,#fff);
   font-size:15px;outline:none}
 .searchbar input:focus{border-color:var(--lua-primary,#8B5CF6)}
@@ -133,7 +139,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
   background:linear-gradient(135deg,var(--lua-primary,#8B5CF6),var(--lua-primary-dark,#4C1D95))}
 .go:active{transform:translateY(1px)}
 .go:focus-visible,.tab:focus-visible,.pn-copy:focus-visible,.pn-back:focus-visible,#lua-top:focus-visible,
-#lua-q:focus-visible,.vnav:focus-visible,.snav:focus-visible{
+#lua-q:focus-visible,.vnav:focus-visible,.snav:focus-visible,.vtop:focus-visible{
   outline:2px solid var(--lua-neon,#C084FC);outline-offset:2px}
 .tag{font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:999px;text-transform:uppercase;letter-spacing:.4px}
 .tag.dono{background:rgba(250,204,21,.16);color:#FACC15}
@@ -177,19 +183,33 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
 .pn-tip{margin:10px 0 0;font-size:12px;color:var(--lua-text-secondary,#B8A9D9)}
 
 /* ---------- rodapé ---------- */
-.foot{margin-top:22px;padding-top:14px;border-top:1px solid rgba(255,255,255,.10);font-size:12px;
-  color:var(--lua-text-secondary,#B8A9D9)}
+.foot{margin-top:14px;padding-top:10px;border-top:1px solid rgba(255,255,255,.10);font-size:11.5px;
+  line-height:1.35;color:var(--lua-text-secondary,#B8A9D9)}
 .foot code{color:var(--lua-neon,#C084FC);font-weight:700}
 .empty{padding:26px 8px;text-align:center;color:var(--lua-text-secondary,#B8A9D9);font-size:13.5px}
-.top{display:flex;justify-content:center;margin-top:16px}
-.top button{min-height:44px;padding:0 18px;border-radius:999px;border:1px solid rgba(255,255,255,.16);
-  background:var(--lua-bg-secondary,#0B0614);color:var(--lua-text,#fff);font-size:13px;font-weight:600;cursor:pointer}
+/* atalho "topo": mora na barra (fora da área que rola), por isso nunca some no
+   meio da lista — antes ele ficava no fim do conteúdo e só aparecia no final */
+.vtop{width:48px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;
+  border-radius:13px;border:1px dashed rgba(255,255,255,.22);background:transparent;
+  color:var(--lua-text-secondary,#B8A9D9);font-size:17px;line-height:1;cursor:pointer}
+.vtop:active{transform:translateY(1px)}
 /* Telas estreitas: setas continuam com 44px de toque, só o resto encolhe. */
-@media (max-width:360px){body{font-size:14.5px}.cmd code{font-size:13px}.vrail{width:44px}.vnav{width:44px}}
+@media (max-width:360px){body{font-size:14.5px}.cmd code{font-size:13px}.vrail{width:44px}
+  .vnav,.vtop{width:44px}}
 /* Card baixo (MENU_HTML_HEIGHT pequeno): aperta o topo para sobrar área de
    comandos — as setas nunca encolhem. */
 @media (max-height:430px){.head{padding:8px 0 5px}.tabs{padding:6px 0}.searchbar{padding:2px 0 6px}
   .logo{width:32px;height:32px;font-size:17px}.vnav{min-height:46px}}
+/* Card MUITO baixo: tudo o que não é lista encolhe, para sobrar área rolável. */
+@media (max-height:360px){.head{padding:5px 0 4px}
+  .logo{width:26px;height:26px;font-size:15px}.bot-meta{font-size:11px}.cat-name{font-size:11.5px}
+  .tabs{padding:4px 0}.tab{min-height:38px;padding:6px 11px;font-size:12.5px}
+  .snav{min-height:38px}.searchbar{padding:0 0 4px}.searchbar input{min-height:38px;font-size:14px}
+  .vnav{min-height:42px}.sec{margin:10px 0 4px}.sec-title{font-size:12.5px;margin-bottom:2px}
+  /* Num card deste tamanho o rodapé comeria metade da área rolável (e o
+     último comando não caberia): aqui ele sai — o aviso de que "Usar" só
+     copia continua no painel (.pn-tip) e no rodapé dos cards normais. */
+  .foot{display:none}}
 `.trim();
 }
 
