@@ -55,4 +55,34 @@ function setButtonsEnabled(enabled) {
   set('buttons_enabled', enabled ? 'true' : 'false');
 }
 
-module.exports = { get, set, getBool, getInt, effectivePrefix, buttonsEnabled, setButtonsEnabled };
+/**
+ * Menus em HTML (card richResponseMessage) — `!modohtml on/off`.
+ *
+ * ESCOPO GLOBAL, mesmo padrão do `!botao on/off` e do `!tema`: o formato do
+ * menu é uma preferência de apresentação do bot inteiro, guardada em
+ * `settings` (chave/valor). Não é por grupo: o card HTML é montado a partir do
+ * prefixo/registro globais e faz sentido que a escolha valha em todo lugar.
+ * O comando é restrito ao dono (como o `!botao`).
+ *
+ * PADRÃO: desativado quando a chave não existe (exigência do pedido) — quem
+ * nunca configurou continua no menu tradicional.
+ */
+function menuHtmlEnabled() {
+  return getBool('menu_html', false);
+}
+
+function setMenuHtmlEnabled(enabled) {
+  set('menu_html', enabled ? 'true' : 'false');
+}
+
+module.exports = {
+  get,
+  set,
+  getBool,
+  getInt,
+  effectivePrefix,
+  buttonsEnabled,
+  setButtonsEnabled,
+  menuHtmlEnabled,
+  setMenuHtmlEnabled,
+};

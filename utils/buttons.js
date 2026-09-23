@@ -118,6 +118,13 @@ function useInteractiveMenu() {
 }
 
 async function sendMainMenu(ctx) {
+  // 1) formato HTML (só com !modohtml on e fora do modo seguro)
+  // 2) lista/botões interativos (comportamento de sempre)
+  // 3) menu textual numerado (compatibilidade)
+  const menuFormat = require('./menuFormat');
+  if (await menuFormat.abrir(ctx, { kind: 'main', forceText: ctx && ctx.forceTextMenu })) {
+    return true;
+  }
   if (useInteractiveMenu()) {
     return sendInteractiveMainMenu(ctx);
   }
