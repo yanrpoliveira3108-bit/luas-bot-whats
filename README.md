@@ -19,6 +19,7 @@ Bot WhatsApp **modular, estável, seguro e profissional**, construído com **Nod
 - [Execução](#execução)
 - [Atualização](#atualização)
 - [Troubleshooting](#troubleshooting)
+- [Restrição de conta / segurança de envio](#restrição-de-conta--segurança-de-envio)
 - [Recuperação](#recuperação)
 - [Desenvolvimento](#desenvolvimento)
 - [Testes](#testes)
@@ -253,10 +254,30 @@ Todas as variáveis ficam em `.env` (nunca versionado). Veja `.env.example` comp
 
 | Variável | Descrição |
 |----------|-----------|
-| `BUTTONS_ENABLED` | Botões interativos no menu (`true`/`false`) |
+| `BUTTONS_ENABLED` | Botões interativos no menu (`true`/`false`). Só é afetado se você ligar `SAFE_MODE=1` |
 | `LUA_THEME` | Tema visual (`LUA_NIGHT`, `LUA_VIOLET`, `LUA_GALAXY`, etc.) |
 | `LUA_UI_MODE` | Modo de menu (`text`, `buttons`, `auto`) |
 | `LUA_READMORE` | "Ler mais" em mensagens longas |
+
+### Segurança de envio (anti-restrição) — leia antes de tirar do padrão
+
+| Variável | Descrição | Padrão |
+|----------|-----------|--------|
+| `SAFE_MODE` | Opcional: bloqueia lista/botões nativos, cards HTML e pagamento | `0` (desligado) |
+| `ALLOW_INTERACTIVE` / `ALLOW_RICH_CARDS` / `ALLOW_PAYMENT_TEST` | Liberam só aquele payload (vazio = segue o `SAFE_MODE`) | vazio |
+| `SEND_MIN_INTERVAL_MS` / `SEND_CHAT_INTERVAL_MS` / `SEND_JITTER_MS` | Freio: intervalo global, por conversa e variação aleatória | `1200` / `2000` / `900` |
+| `SEND_MAX_PER_MINUTE` / `SEND_CHAT_MAX_PER_MINUTE` | Teto de mensagens por minuto (total / por conversa) | `15` / `6` |
+| `SEND_WARMUP_HOURS` / `SEND_WARMUP_FACTOR` | WARMUP de número novo: limites ÷fator | `48` / `3` |
+| `SEND_DUP_MAX_CHATS` / `SEND_DUP_WINDOW_MIN` | Anti-broadcast (0 = desligado) | `0` / `10` |
+| `SEND_BLOCK_COLD_PV` | Não iniciar conversa no PV com quem nunca falou com o bot | `1` |
+| `SEND_PAUSE_MINUTES` | Pausa automática de tudo ao detectar sinal de restrição | `15` |
+| `SEND_CONNECT_GRACE_MS` | Espera após conectar antes do 1º envio | `8000` |
+
+> ℹ️ **Sobre restrição de conta:** não existe causa única nem prova de que cards
+> HTML/menu interativo causem banimento (vários bots usam isso sem cair). O
+> padrão do bot é o comportamento normal (HTML liberado) + **freio de ritmo**
+> ligado. Para investigar um caso real: `node scripts/restricao.js`.
+> Detalhes em **[SEGURANCA-ENVIO.md](SEGURANCA-ENVIO.md)**.
 
 ### Limites
 
@@ -452,6 +473,37 @@ Verifica Node, better-sqlite3, ffmpeg, yt-dlp, conversores, fetch, rede, downloa
 
 ---
 
+## Restrição de conta / segurança de envio
+
+Se aparecer o aviso **"conta restrita"** (ou o número parar de enviar), comece
+pela auditoria — ela mostra o que a conta fez antes de cair:
+
+```bash
+node scripts/restricao.js          # lê os logs: pareamentos, quedas, 429, ritmo, repetição
+node scripts/restricao.js --dias 30
+```
+
+O relatório completo (fatos, hipóteses descartadas, checklist da conta e teste
+controlado) está em **[SEGURANCA-ENVIO.md](SEGURANCA-ENVIO.md)**. Resumo do
+protocolo:
+
+1. `!freio pausar 120` — **pare de enviar**. Não reenvie a mensagem que falhou:
+   cada tentativa durante o aviso soma penalidade (restrição → restrição → ban).
+2. Espere o prazo do aviso + algumas horas com o número em silêncio total.
+3. `!freio retomar` e use pouco nas primeiras horas.
+4. Número novo precisa de aquecimento (0–24 h de uso humano antes de ligar o bot).
+
+O que fica **ligado** por padrão: freio de ritmo (fila, intervalo, teto por
+minuto, pausa automática ao detectar restrição) e bloqueio de conversa fria no
+PV. O que fica **liberado** (comportamento normal): cards HTML, menu por
+lista/botões e pagamento.
+
+```bash
+!freio              # painel: limites, fila, warmup e restrições detectadas
+!freio seguro on    # opcional: bloqueia cards HTML e menu nativo
+!freio warmup off   # número já é antigo/aquecido → limites normais
+```
+
 ## Recuperação
 
 ### Backup automático
@@ -472,7 +524,7 @@ cp -a backup/pre-update-20250101-120000/. .
 - `!backup` — gera `.db` em `backup/`
 - `!restore` — restaura mais recente (dono)
 
-### Recuperação total (instalação limpa sem perder dados)
+## Recuperação total (instalação limpa sem perder dados)
 
 ```bash
 # faça backup manual dos dados importantes
@@ -554,12 +606,15 @@ node test/prefix.test.js      # prefixo BOT_PREFIX vs PREFIX
 node test/migration.test.js   # migrações
 node test/life.test.js        # Lua Life (23 regressões)
 node test/e2e.test.js         # pipeline ponta a ponta
+node test/sendguard.test.js   # freio de envio + modo seguro (anti-restrição)
+node scripts/restricao.js     # auditoria de restrição (lê os logs do bot)
 node scripts/diagnose.js      # diagnóstico ambiente
 node scripts/sticker-selftest.js # teste pipeline sticker
 ```
 
 **Cobertura mínima validada:**
 
+- Auditoria de restrição de conta (`scripts/restricao.js` — lê logs e auditoria de envios)
 - Inicialização e carregamento de configuração
 - Banco e migrações
 - Comandos e plugins (sem duplicatas, sem comandos sem execute)
@@ -568,7 +623,9 @@ node scripts/sticker-selftest.js # teste pipeline sticker
 - Economia (race conditions, rollback)
 - Lua Life (criação, trabalho, banco, compra/venda, mineração, casa, missões, diário, loteria)
 - Downloaders (YouTube, TikTok, etc.)
-- Menus e navegação por botões
+- Menus e navegação por botões (lista nativa no padrão; textual com `SAFE_MODE=1`)
+- Freio de envio: ordem da fila, intervalos, teto por conversa, PV frio,
+  anti-broadcast, pausa automática por restrição e warmup
 - Tratamento de erros (bot nunca morre por exceção isolada)
 
 ---
@@ -588,10 +645,15 @@ Auditoria realizada:
 - ✅ Baileys logs em arquivo separado, sem credenciais no terminal
 - ✅ `!eval` desabilitado por padrão (`ENABLE_EVAL=false`)
 - ✅ Permissões verificadas via `utils/permissions.js` (owner, admin, botAdmin)
+- ✅ Freio de envio (`utils/sendGuard.js`): fila com intervalo/teto por minuto,
+  pausa automática ao detectar restrição, warmup de número novo, bloqueio de
+  conversa fria no PV e auditoria de envios (`data/sends.jsonl`, sem conteúdo)
+- ✅ Modo seguro opcional (`utils/safety.js`, `SAFE_MODE=0` por padrão): permite
+  bloquear lista/botões nativos, cards HTML e pagamento se o dono quiser testar
 
 **Nunca versione:**
 
-- `.env`, `session/`, `database/*.db`, `logs/`, `backup/`, `node_modules/`, `*.log`, `*.db`, credenciais
+- `.env`, `session/`, `database/*.db`, `logs/`, `backup/`, `data/`, `node_modules/`, `*.log`, `*.db`, credenciais
 
 ---
 

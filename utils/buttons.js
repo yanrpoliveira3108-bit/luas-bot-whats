@@ -110,6 +110,10 @@ async function sendInteractiveMainMenu(ctx) {
  */
 function useInteractiveMenu() {
   if (CONFIG.ui && CONFIG.ui.uiMode === 'text') return false;
+  // Modo seguro: o menu por lista/botões é um payload que o cliente oficial
+  // do WhatsApp não produz (foi o gatilho da restrição no !menu). Com o modo
+  // seguro ligado, o menu sai no modo textual numerado — mesmas funções.
+  if (require('./safety').blocksInteractive()) return false;
   return settings.buttonsEnabled();
 }
 

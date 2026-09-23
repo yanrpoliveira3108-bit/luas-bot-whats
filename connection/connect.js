@@ -29,6 +29,7 @@ const logger = require('../utils/logger').child('connection');
 const activity = require('../utils/activity');
 const pairing = require('./pairing');
 const sessionRecovery = require('./sessionRecovery');
+const sendGuard = require('../utils/sendGuard');
 
 let sock = null;
 let connecting = false;
@@ -262,6 +263,14 @@ async function connect({ phone } = {}) {
       markOnlineOnConnect: true,
     });
     logger.info('socket criado — aguardando connection.update');
+
+    // FREIO DE ENVIO (anti-restrição): instala a fila + limites em TODAS as
+    // saídas do socket antes de qualquer handler existir. É isso que impede
+    // rajada de mensagens (o padrão que o WhatsApp trata como spam), trava
+    // mensagem idêntica repetida em vários chats e pausa tudo sozinho quando
+    // aparece sinal de restrição.
+    sendGuard.attach(sock);
+
     // EXPERIMENTAL (selective payment/text): anexa a API de transporte
     // seletivo ao socket SEM substituí-lo (ver utils/selective.js).
     try {
@@ -281,6 +290,9 @@ async function connect({ phone } = {}) {
         pendingPhone = String(phone).replace(/\D/g, '');
         currentPhoneDigits = pendingPhone;
         pairingCodeRequested = false; // novo pareamento → vai re-pedir o código
+        // número NOVO: recomeça o warmup (limites mais duros nas primeiras
+        // horas, que é quando o WhatsApp mais restringe conta recém-criada)
+        sendGuard.resetWarmup('novo pareamento');
         // ⚠️ IMPORTANTE: espera o websocket abrir e o handshake concluir
         // (evento 'qr') ANTES de pedir o código. O requestPairingCode chama
         // sendNode, que lança "Connection Closed" (428) se o websocket ainda
@@ -436,6 +448,9 @@ function handleConnectionUpdate(update, sockRef) {
     pairingCodeRequested = false;
     currentPhoneDigits = phoneDigitsFromJid(sockRef.user && sockRef.user.id) || currentPhoneDigits;
     logger.info({ jid: sockRef.user && sockRef.user.id }, '✅ conectado ao WhatsApp (connection = open)');
+    // freio: zera as janelas de frequência e respeita a espera inicial
+    // (uma rajada logo depois de conectar é justamente o que chama atenção)
+    sendGuard.markConnected();
     // Diagnóstico de identidade LID (comunidades dependem do LID da sessão).
     logger.info(
       { id: sockRef.user && sockRef.user.id, lid: sockRef.user && sockRef.user.lid, hasLid: !!(sockRef.user && sockRef.user.lid) },

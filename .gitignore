@@ -29,6 +29,9 @@ baileys_auth_info/
 *.session
 *.session-journal
 
+# ---- Estado local do bot (warmup/contadores do freio de envio) ----
+data/
+
 # ---- Banco de dados local ----
 database/*.db
 database/*.db-*

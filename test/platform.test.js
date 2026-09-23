@@ -496,6 +496,16 @@ async function main() {
         rows = (params.sections || []).flatMap((sec) => sec.rows || []);
       } else if (classicList) {
         rows = (classicList.content.sections || []).flatMap((sec) => sec.rows || []);
+      } else {
+        // MODO SEGURO (padrão do bot): lista/botões nativos são bloqueados por
+        // serem payload de alto risco (restrição de conta) e a tela sai como
+        // menu TEXTUAL numerado — mesmo conteúdo, comando numérico funcionando.
+        const txt = sent.find(
+          (s) => s.content && typeof s.content.text === 'string' && /(^|\n)\s*\d+\.\s/.test(s.content.text)
+        );
+        assert.ok(txt, id + ' enviou menu textual numerado (modo seguro)');
+        assert.ok(/número/i.test(txt.content.text), id + ' instrução de navegação numérica');
+        continue;
       }
       assert.ok(rows.length > 0, id + ' enviou lista');
     }

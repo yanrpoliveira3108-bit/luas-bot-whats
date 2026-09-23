@@ -95,6 +95,8 @@ const groupHandler = require('./handlers/groupHandler');
 const eventHandler = require('./handlers/eventHandler');
 const janitor = require('./utils/janitor');
 const autobot = require('./utils/autobot');
+const sendGuard = require('./utils/sendGuard');
+const safety = require('./utils/safety');
 const connection = require('./connection/connect');
 const { cleanupTmp } = require('./utils/download');
 const autoBackup = require('./utils/autoBackup');
@@ -104,6 +106,14 @@ autoBackup.startAutoBackup();
 
 connection.onMessage((sock, messages, type) => {
   for (const msg of messages) {
+    // Freio de envio: saber QUEM falou com o bot é o que autoriza responder no
+    // privado. Sem isso, o freio trata o PV como "conversa fria" e não deixa o
+    // bot iniciar conversa com estranho (gatilho clássico de restrição).
+    try {
+      if (msg && msg.key && msg.key.remoteJid) sendGuard.noteInbound(msg.key.remoteJid);
+    } catch (_) {
+      /* o freio nunca pode atrapalhar o pipeline */
+    }
     commandHandler.handleMessage(sock, msg, type).catch((err) => {
       logger.error({ err: err.message }, 'erro não tratado em mensagem');
     });
@@ -148,6 +158,27 @@ connection.onCall((sock, calls) => {
 // AutoBot está carregado antes de qualquer mensagem chegar.
 autobot.boot();
 ui.ok(`AutoBot pronto (${autobot.FEATURES.length} recursos)`);
+
+// Freio de envio: fila + intervalo + teto por minuto + pausa automática.
+// O attach() acontece em connection/connect.js (assim que o socket nasce);
+// aqui só carregamos o estado (warmup, chats conhecidos, contadores).
+const guardStats = sendGuard.init();
+const policy = safety.summary();
+ui.ok(
+  `Freio de envio ativo — ${guardStats.limits.maxPerMinute} msg/min ` +
+    `(${guardStats.limits.chatMaxPerMinute}/min por conversa)`
+);
+if (guardStats.warmup.active) {
+  console.log(
+    `   ⚠️  WARMUP: número em aquecimento — limites ÷${guardStats.warmup.factor} por mais ` +
+      `${guardStats.warmup.remainingHours}h (definido em ${guardStats.warmup.since}).`
+  );
+}
+if (policy.safeMode) {
+  console.log('   🛡️  MODO SEGURO ligado: sem cards HTML, sem menu por lista/botões e sem pagamento.');
+} else {
+  console.log('   🖼️  Cards HTML e menu por botões ATIVOS (padrão). Para bloquear: !freio seguro on');
+}
 
 // UM timer para todas as limpezas de memória (utils/janitor).
 janitor.start();

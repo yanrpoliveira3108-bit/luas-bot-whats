@@ -72,6 +72,19 @@ async function sendHtml(sock, jid, html, opts = {}) {
   if (!sock || typeof sock.relayMessage !== 'function') {
     throw new Error('relayMessage indisponível no socket');
   }
+  // MODO SEGURO: este card se passa por resposta de "bot IA" da Meta
+  // (botForwardedMessage + forwardedAiBotMessageInfo apontando para um @bot
+  // falso). É payload que o cliente oficial nunca gera — e um dos gatilhos de
+  // "conta restrita". Lançar aqui faz o chamador usar o fallback textual dele
+  // (!ping2 e !tigrinho já têm fallback pronto).
+  if (require('./safety').blocksRichCards()) {
+    const err = new Error(
+      'MODO SEGURO: card HTML (payload de bot IA) desativado para não gerar restrição de conta. ' +
+        'Para reativar (assumindo o risco): ALLOW_RICH_CARDS=1 ou !freio seguro off.'
+    );
+    err.code = 'SAFE_MODE_RICH_CARD';
+    throw err;
+  }
   return sock.relayMessage(jid, buildHtmlMessage(html, opts), {});
 }
 
