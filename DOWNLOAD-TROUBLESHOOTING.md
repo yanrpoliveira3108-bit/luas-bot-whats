@@ -15,6 +15,33 @@ caso** — não precisa adivinhar.
 
 ---
 
+## 0.1 Se TODOS os sites dizem "Nenhum resultado encontrado"
+
+Essa mensagem **não é um diagnóstico** — até esta versão, *qualquer* falha
+(rede caindo, captcha, login, IP bloqueado) era mostrada com essa mesma frase.
+Agora o bot diz o motivo real:
+
+| Mensagem nova | O que significa |
+|---|---|
+| 🌐 "...não deu para alcançar" | Rede: DNS, conexão recusada, sem internet no app |
+| 🚧 "...pediu verificação anti-robô" | O site respondeu com captcha/challenge (bloqueio de rede/IP) |
+| 🚫 "...recusou o acesso (HTTP 403)" | O site bloqueou este aparelho/rede |
+| 🔒 "...exige login" | Conteúdo privado (não é falha do bot) |
+| 🔎 "...não encontrei mídia" | O link é válido, mas não tem foto/vídeo |
+
+Se aparecer **🌐/🚧/🚫** em tudo, o problema é a **rede do celular**, não o bot:
+
+1. Troque de rede: Wi-Fi ↔ dados móveis (faça a troca e teste na hora).
+2. Desligue **VPN, DNS privado (ex.: AdGuard/NextDNS) e adblock**.
+3. Reinicie o roteador se estiver no Wi-Fi.
+4. Teste em outro horário — alguns sites recusam faixas de IP inteiras.
+
+Se aparecer **🔎** em tudo, os sites estão respondendo "sem mídia" para o bot
+(quase sempre porque a página entregue é a de bloqueio). O conserto mais eficaz
+nesse caso é o **yt-dlp** (item 1.1) — ele fala direto com as APIs.
+
+---
+
 ## 1. Os 3 motivos mais comuns
 
 ### 1.1 Faltam os motores no Termux (causa nº 1 do YouTube)
@@ -84,7 +111,7 @@ O diagnóstico mostra se está OK ("TMPDIR do sistema gravável").
 
 | Site | Como funciona | Quando falha |
 |---|---|---|
-| YouTube | yt-dlp → reserva ytdl-core | Sem yt-dlp/ffmpeg, ou bot-check (item 1.1/1.2) |
+| YouTube | yt-dlp → reserva ytdl-core | Sem yt-dlp/ffmpeg, ou bot-check (item 1.1/1.2). **Busca** (`!play`, `!audio`, `!video`): se o `yt-search` voltar vazio, o bot tenta automaticamente pelo yt-dlp |
 | TikTok | API pública `tikwm.com` | Serviço de terceiro fora do ar → tentar de novo mais tarde |
 | Instagram | Open Graph da página | Post privado/stories exigem login → falha esperada |
 | Facebook | Open Graph da página | Vídeo privado ou link de app (`fb.watch`) pode falhar |
@@ -120,6 +147,7 @@ ritmo justamente para não derrubar o número (ver `SEGURANCA-ENVIO.md`).
 node scripts/downloads-doctor.js youtube     # só YouTube
 node scripts/downloads-doctor.js tiktok      # só TikTok
 node test/sendguard.test.js                  # garante que o freio não atrasa o arquivo
+node test/downloads.test.js                  # fila, avisos, cache, temporário, busca
 ```
 
 Se o diagnóstico passa mas no WhatsApp não chega, mande a saída do diagnóstico
