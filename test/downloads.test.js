@@ -147,6 +147,40 @@ async function teste(nome, fn) {
     ok('5: cookies do YouTube configuráveis (YT_COOKIES)');
   });
 
+  /* ── 6. busca com plano B: yt-dlp quando o yt-search volta vazio ── */
+  await teste('6: busca pelo yt-dlp (plano B)', async () => {
+    const { execFileSync } = require('child_process');
+    const dir = path.join(ROOT, 'tmp', 'fakebin');
+    fs.mkdirSync(dir, { recursive: true });
+    const bin = path.join(dir, 'yt-dlp');
+    fs.writeFileSync(
+      bin,
+      '#!/bin/sh\n' +
+        'if [ "$1" = "--version" ]; then echo "2026.01.01"; exit 0; fi\n' +
+        `printf 'abc123\\tVídeo de Teste\\t3:21\\tCanal Teste\\n'\n`
+    );
+    fs.chmodSync(bin, 0o755);
+
+    // processo limpo com o yt-dlp falso no PATH (o módulo memoriza a detecção)
+    const script = [
+      `process.env.PATH = ${JSON.stringify(dir)} + ':' + process.env.PATH;`,
+      "const yt = require('./downloaders/youtube');",
+      'yt.search("teste de busca").then((r) => console.log("RESULT:" + JSON.stringify(r)))',
+      '  .catch((e) => console.log("RESULT:" + JSON.stringify({ erro: e.message })));',
+    ].join(' ');
+    const saida = execFileSync(process.execPath, ['-e', script], { cwd: ROOT, timeout: 60000 }).toString();
+    const linhaResult = saida.split('\n').find((l) => l.startsWith('RESULT:'));
+    assert.ok(linhaResult, 'a busca respondeu alguma coisa');
+    const r = JSON.parse(linhaResult.replace('RESULT:', ''));
+
+    assert.ok(Array.isArray(r), `busca devolveu lista (${JSON.stringify(r).slice(0, 120)})`);
+    assert.strictEqual(r.length, 1, 'usou o motor alternativo quando o principal voltou vazio');
+    assert.strictEqual(r[0].url, 'https://www.youtube.com/watch?v=abc123', 'link montado do id');
+    assert.strictEqual(r[0].engine, 'yt-dlp', 'marcado como motor alternativo');
+    fs.rmSync(dir, { recursive: true, force: true });
+    ok('6: busca tem plano B pelo yt-dlp (não morre em "nenhum resultado")');
+  });
+
   console.log(`\n=== DOWNLOADS TEST: ${total - falhas}/${total} ✅ ===`);
   if (falhas) {
     console.error(`❌ ${falhas} falha(s)`);

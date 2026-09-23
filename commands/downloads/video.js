@@ -3,6 +3,7 @@
 const youtube = require('../../downloaders/youtube');
 const { sendVideoResult } = require('../_shared/downloads');
 const errorHandler = require('../../handlers/errorHandler');
+const { dicaBuscaVazia } = require('../_shared/searchHint');
 
 module.exports = [
   {
@@ -16,7 +17,7 @@ module.exports = [
       const query = ctx.args.join(' ');
       if (!query) return ctx.reply('⚠️ Envie a busca: !video <busca>');
       const results = await youtube.search(query, 1);
-      if (!results.length) return ctx.reply('🔎 Nenhum resultado encontrado.');
+      if (!results.length) return ctx.reply(dicaBuscaVazia());
       await ctx.reply('⏳ Baixando vídeo...');
       try {
         const video = await youtube.downloadVideo(results[0].url, results[0].title);

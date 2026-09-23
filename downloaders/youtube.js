@@ -333,17 +333,66 @@ async function runYtdlpAttempt(url, suggestedName, base, outTemplate, kind, att,
 
 /* ------------------------- busca ---------------------- */
 
+/**
+ * Busca pelo yt-dlp (plano B quando o yt-search volta vazio).
+ *
+ * Por que existe: o `yt-search` depende do HTML do YouTube. Quando o YouTube
+ * serve uma página de consentimento/bloqueio para o bot, a busca volta VAZIA —
+ * e o usuário lê "Nenhum resultado encontrado" mesmo com o nome certo.
+ */
+async function searchViaYtdlp(query, limit = 5) {
+  const q = `ytsearch${Math.max(1, Math.min(10, limit))}:${String(query || '').trim()}`;
+  const stdout = await execYtdlp(
+    ['--flat-playlist', '--no-warnings', '--print', '%(id)s\t%(title)s\t%(duration_string)s\t%(uploader)s', q],
+    45000
+  );
+  const linhas = String(stdout || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const out = [];
+  for (const linha of linhas) {
+    const [id, title, duration, author] = linha.split('\t');
+    if (!id || !title) continue;
+    out.push({
+      title,
+      url: `https://www.youtube.com/watch?v=${id}`,
+      duration: duration || '',
+      views: 0,
+      author: author || '',
+      thumbnail: `https://i.ytimg.com/vi/${id}/mqdefault.jpg`,
+      engine: 'yt-dlp',
+    });
+  }
+  return out.slice(0, limit);
+}
+
 async function search(query, limit = 5) {
-  const r = await yts({ query: String(query || '').trim() });
-  const videos = (r && r.videos) || [];
-  return videos.slice(0, limit).map(v => ({
-    title: v.title,
-    url: v.url,
-    duration: v.duration && v.duration.timestamp,
-    views: v.views,
-    author: v.author && v.author.name,
-    thumbnail: v.thumbnail,
-  }));
+  const q = String(query || '').trim();
+  let videos = [];
+  try {
+    const r = await yts({ query: q });
+    videos = ((r && r.videos) || []).slice(0, limit).map((v) => ({
+      title: v.title,
+      url: v.url,
+      duration: v.duration && v.duration.timestamp,
+      views: v.views,
+      author: v.author && v.author.name,
+      thumbnail: v.thumbnail,
+    }));
+  } catch (err) {
+    logger.warn({ err: err.message }, 'busca (yt-search) falhou — tentando yt-dlp');
+  }
+
+  if (!videos.length && ytdlpAvailable()) {
+    try {
+      const viaYtdlp = await searchViaYtdlp(q, limit);
+      if (viaYtdlp.length) {
+        logger.info({ q, n: viaYtdlp.length }, 'busca pelo yt-dlp (plano B)');
+        return viaYtdlp;
+      }
+    } catch (err) {
+      logger.warn({ err: err.message }, 'busca pelo yt-dlp também falhou');
+    }
+  }
+  return videos;
 }
 
 function validateUrl(url) {
@@ -625,6 +674,7 @@ async function downloadVideo(url, suggestedName) {
 module.exports = {
   ensureTmp,
   search,
+  searchViaYtdlp,
   validateUrl,
   getInfo,
   downloadAudio,

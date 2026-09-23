@@ -10,6 +10,7 @@ const youtube = require('../../downloaders/youtube');
 const searchResults = require('../_shared/searchResults');
 const nav = require('../../utils/nav');
 const errorHandler = require('../../handlers/errorHandler');
+const { dicaBuscaVazia } = require('../_shared/searchHint');
 
 module.exports = [
   {
@@ -26,7 +27,7 @@ module.exports = [
       await ctx.reply('🔎 Pesquisando...');
       try {
         const results = await youtube.search(query, 3);
-        if (!results.length) return ctx.reply('🔎 Nenhum resultado encontrado.');
+        if (!results.length) return ctx.reply(dicaBuscaVazia());
         const built = searchResults.build(ctx, results);
         const ok = await nav.sendButtons(ctx, {
           title: '🔎 RESULTADOS',

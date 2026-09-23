@@ -199,7 +199,23 @@ async function rede() {
     const t0 = Date.now();
     try {
       const res = await withTimeout(fetch(url, { method: 'GET', redirect: 'follow' }), 15000, nome);
-      linha('ok', `${nome} — HTTP ${res.status} em ${Date.now() - t0}ms`);
+      let corpo = '';
+      try {
+        corpo = (await res.text()).slice(0, 4000);
+      } catch (_) {}
+      const { temMarca, MARCAS_BLOQUEIO, MARCAS_LOGIN } = require('../utils/errors');
+      if (temMarca(corpo, MARCAS_BLOQUEIO)) {
+        linha(
+          'bad',
+          `${nome} — HTTP ${res.status} com PÁGINA DE BLOQUEIO/CAPTCHA`,
+          'este aparelho/rede está sendo tratado como robô pelo site\n' +
+            '      -> troque de rede (Wi-Fi x dados móveis), desligue VPN/adblock e teste de novo'
+        );
+      } else if (temMarca(corpo, MARCAS_LOGIN)) {
+        linha('warn', `${nome} — HTTP ${res.status}, exige login`, 'conteúdo privado não pode ser baixado');
+      } else {
+        linha('ok', `${nome} — HTTP ${res.status} em ${Date.now() - t0}ms`);
+      }
     } catch (e) {
       const msg = String(e.message || e);
       const extra = /EAI_AGAIN|ENOTFOUND|getaddrinfo/i.test(msg)
@@ -348,6 +364,15 @@ function veredito() {
     console.log(`  ${C.warn}${avisos.length} aviso(s)${C.reset} (não impedem, mas atrapalham)`);
   }
   console.log(`\n  Guia completo: ${C.bold}DOWNLOAD-TROUBLESHOOTING.md${C.reset}`);
+  const bloqueio = resultados.some((r) => /BLOQUEIO|CAPTCHA|recusou/i.test(r.titulo));
+  if (bloqueio) {
+    console.log(
+      `\n  ${C.warn}Dica:${C.reset} apareceu bloqueio/captcha. Isso é REDE, não bug do bot:\n` +
+        '   • troque Wi-Fi <-> dados móveis\n' +
+        '   • desligue VPN, DNS privado e adblock\n' +
+        '   • tente em outro horário (o site pode estar recusando o IP inteiro)'
+    );
+  }
   console.log(`  Manda a saída inteira deste script para o suporte — ela diz exatamente o que falhou.`);
 }
 

@@ -23,6 +23,9 @@ const FRIENDLY = {
   BOT_NOT_ADMIN: CONFIG.messages.botNotAdmin,
   NO_FORMAT: '📥 Formato indisponível para este link (o vídeo pode ser restrito ou muito grande).',
   YOUTUBE_BLOCKED: '📥 O YouTube recusou o download (bloqueio de rede/região ou vídeo restrito).\n▸ Tente outro vídeo, ou use TikTok/Instagram/Pinterest.',
+  NETWORK: '🌐 Não consegui alcançar o site.\n▸ Confira a internet do celular, desligue VPN/adblock e tente de novo.',
+  BLOCKED: '🚫 O site recusou o acesso a este aparelho/rede (HTTP 4xx ou captcha).\n▸ Troque de rede (Wi-Fi ↔ dados), desligue VPN e tente mais tarde.',
+  LOGIN: '🔒 Este conteúdo é privado e exige login — não dá para baixar.',
   CONVERTER_UNAVAILABLE: '🎨 Não consegui converter a mídia.\n▸ No Termux/Android, instale o ffmpeg: `pkg install ffmpeg`\n▸ Depois reinicie o bot.',
 };
 
