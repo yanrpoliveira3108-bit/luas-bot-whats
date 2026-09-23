@@ -181,6 +181,73 @@ async function teste(nome, fn) {
     ok('6: busca tem plano B pelo yt-dlp (não morre em "nenhum resultado")');
   });
 
+  /* ── 7. sem ffmpeg, "vídeo" que é só áudio tem que ser RECUSADO ──
+   *
+   * Caso real (celular do dono): o yt-dlp baixou o formato f140 (só áudio) e o
+   * bot mandou aquilo como se fosse vídeo. Aqui um yt-dlp falso devolve
+   * vcodec=none e o download de vídeo precisa FALHAR com aviso claro.
+   */
+  await teste('7: vídeo só de áudio é recusado (sem ffmpeg)', async () => {
+    const { execFileSync } = require('child_process');
+    const dir = path.join(ROOT, 'tmp', 'fakebin-video');
+    fs.mkdirSync(dir, { recursive: true });
+    const bin = path.join(dir, 'yt-dlp');
+    // responde --version, cria o arquivo do template e imprime os 5 campos
+    fs.writeFileSync(
+      bin,
+      '#!/bin/sh\n' +
+        'if [ "$1" = "--version" ]; then echo "2026.08.19"; exit 0; fi\n' +
+        'prev=""\n' +
+        'for a in "$@"; do\n' +
+        '  if [ "$prev" = "-o" ]; then echo "arquivo falso" > "$(echo "$a" | sed "s/%(ext)s/mp4/")"; fi\n' +
+        '  prev="$a"\n' +
+        'done\n' +
+        'echo "Vídeo de Teste"\n' +
+        'echo "Canal de Teste"\n' +
+        'echo "140"\n' +
+        'echo "none"\n' +
+        'echo "mp4a.40.2"\n'
+    );
+    fs.chmodSync(bin, 0o755);
+
+    const script = [
+      `process.env.PATH = ${JSON.stringify(dir)} + ':' + process.env.PATH;`,
+      "process.env.SEND_STATE_DIR = './tmp/dl-test-state';",
+      "const yt = require('./downloaders/youtube');",
+      'yt.downloadVideo("https://www.youtube.com/watch?v=dQw4w9WgXcQ")',
+      '  .then((r) => console.log("RESULT:" + JSON.stringify({ ok: true, path: r.path })))',
+      '  .catch((e) => console.log("RESULT:" + JSON.stringify({ code: e.code, msg: e.message })));',
+    ].join(' ');
+    const saida = execFileSync(process.execPath, ['-e', script], { cwd: ROOT, timeout: 60000 }).toString();
+    const linhaResult = saida.split('\n').find((l) => l.startsWith('RESULT:'));
+    const r = JSON.parse(linhaResult.replace('RESULT:', ''));
+
+    assert.ok(!r.ok, 'não pode entregar áudio como se fosse vídeo');
+    assert.strictEqual(r.code, 'CONVERTER_UNAVAILABLE', 'erro explica que falta o ffmpeg');
+    assert.ok(/ffmpeg/i.test(r.msg), 'a mensagem diz para instalar o ffmpeg');
+    // a mensagem tem que ser a NOSSA (ffmpeg), e não a do YouTube ("sessão
+    // validada") — antes o `includes('bot')` do friendlyError trocava as duas
+    assert.ok(!/sessão validada|não é um robô/i.test(r.msg), 'não pode virar a mensagem de robô do YouTube');
+
+    // e o arquivo inválido não fica no tmp do bot
+    const restos = fs.readdirSync(path.join(ROOT, 'tmp')).filter((f) => f.startsWith('youtube_'));
+    assert.strictEqual(restos.length, 0, `tmp sem arquivo inválido (${restos.join(', ')})`);
+    fs.rmSync(dir, { recursive: true, force: true });
+    ok('7: áudio disfarçado de vídeo é recusado com aviso do ffmpeg');
+  });
+
+  /* ── 8. seletor de formato não escolhe áudio para vídeo ── */
+  await teste('8: seletor de vídeo exige trilha de vídeo sem ffmpeg', async () => {
+    const yt = require('../downloaders/youtube');
+    const semFfmpeg = yt.buildVideoFormat(720, false);
+    assert.ok(/vcodec!=none/.test(semFfmpeg), 'exige vídeo no seletor padrão');
+    const comFfmpeg = yt.buildVideoFormat(720, true);
+    assert.ok(/\+ba/.test(comFfmpeg), 'com ffmpeg pode juntar vídeo+áudio');
+    const audio = yt.buildAudioFormat();
+    assert.ok(/bestaudio|best/.test(audio), 'áudio continua no seu próprio seletor');
+    ok('8: seletores de formato coerentes com o ffmpeg disponível');
+  });
+
   console.log(`\n=== DOWNLOADS TEST: ${total - falhas}/${total} ✅ ===`);
   if (falhas) {
     console.error(`❌ ${falhas} falha(s)`);

@@ -3,8 +3,9 @@
  * scripts/downloads-doctor.js — diagnóstico dos downloads (rode NO CELULAR/PC
  * onde o bot roda).
  *
- *   node scripts/downloads-doctor.js            # testa tudo
- *   node scripts/downloads-doctor.js youtube    # só uma plataforma
+ *   node scripts/downloads-doctor.js                 # testa tudo
+ *   node scripts/downloads-doctor.js youtube         # só uma plataforma
+ *   node scripts/downloads-doctor.js tiktok <link>   # testa com o SEU link
  *
  * Ele responde, em ordem:
  *   1. o ambiente deixa BAIXAR? (diretórios, espaço, motores externos)
@@ -230,7 +231,43 @@ async function rede() {
 
 /* ══════════════════════════ 3. DOWNLOAD REAL ══════════════════════════ */
 
-async function testarPlataforma(nome, fn) {
+/** Teste de BUSCA (devolve lista de resultados, não arquivo). */
+async function testarBusca(nome, fn) {
+  const t0 = Date.now();
+  try {
+    const r = await withTimeout(fn(), 60000, nome);
+    const lista = Array.isArray(r) ? r : [];
+    if (!lista.length) {
+      linha(
+        'bad',
+        `${nome} — não devolveu nenhum resultado`,
+        temBinario('yt-dlp')
+          ? 'o motor principal (yt-search) e o plano B (yt-dlp) voltaram vazios.\n' +
+            '      ▸ Teste com um nome simples; se persistir, o YouTube está bloqueando a busca do bot.'
+          : 'a busca do YouTube está bloqueada para o bot e não existe plano B sem yt-dlp:\n' +
+            '      ▸ pkg install python && pip install -U yt-dlp'
+      );
+      return;
+    }
+    const motor = lista.find((x) => x && x.engine) ? lista.find((x) => x && x.engine).engine : 'yt-search';
+    linha(
+      'ok',
+      `${nome} — ${lista.length} resultado(s) em ${((Date.now() - t0) / 1000).toFixed(1)}s • motor: ${motor}`,
+      `primeiro: ${String(lista[0].title || '').slice(0, 60)}`
+    );
+  } catch (e) {
+    linha('bad', `${nome} — FALHOU (${e.code || 'sem código'}): ${String(e.message || e).split('\n')[0]}`);
+  }
+}
+
+/**
+ * Testa um download.
+ * @param {string} nome rótulo
+ * @param {() => Promise<any>} fn executa o download
+ * @param {object} [opts] { linkDeTeste: bool } — link de teste que pode ter
+ *        saído do ar (a falha vira aviso, não erro do bot)
+ */
+async function testarPlataforma(nome, fn, opts = {}) {
   const t0 = Date.now();
   try {
     const r = await withTimeout(fn(), 180000, nome);
@@ -250,7 +287,9 @@ async function testarPlataforma(nome, fn) {
     linha(
       'ok',
       `${nome} — OK em ${((Date.now() - t0) / 1000).toFixed(1)}s • ${humano(bytes)} • ${(r.title || '').slice(0, 50)}`,
-      `${path.basename(r.path)} [${assinatura}]${r.engine ? ' • motor: ' + r.engine : ''}`
+      `${path.basename(r.path)} [${assinatura}]` +
+        `${r.engine ? ' • motor: ' + r.engine : ''}` +
+        `${r.vcodec ? ' • codec: ' + r.vcodec : ''}`
     );
     try {
       fs.unlinkSync(r.path);
@@ -267,11 +306,18 @@ async function testarPlataforma(nome, fn) {
     if (/ETIMEDOUT|timeout|abort/i.test(msg)) dicas.push('rede lenta/bloqueada — teste em outra rede ou sem VPN');
     if (/403|429|Forbidden|blocked|rate/i.test(msg)) dicas.push('o site bloqueou este IP — tente outra rede/VPN ou mais tarde');
     if (/NO_RESULT|indispon|privad/i.test(msg)) dicas.push('o link de teste pode ter saído do ar — não é falha do bot');
-    linha('bad', `${nome} — FALHOU (${e.code || 'sem código'}): ${msg}`, dicas.join('\n      '));
+    // Link de teste fora do ar ≠ bot quebrado: aviso, não erro.
+    const sospeitaDeLink = opts.linkDeTeste && ['NO_RESULT', 'NETWORK', 'LOGIN'].includes(e.code);
+    linha(
+      sospeitaDeLink ? 'warn' : 'bad',
+      `${nome} — ${sospeitaDeLink ? 'não deu para testar' : 'FALHOU'} (${e.code || 'sem código'}): ${msg}`,
+      dicas.join('\n      ') +
+        (sospeitaDeLink ? `\n      ▸ teste com um link seu: node scripts/downloads-doctor.js ${opts.slug || ''} <link>` : '')
+    );
   }
 }
 
-async function downloads(alvo) {
+async function downloads(alvo, linkDoUsuario) {
   titulo('3) DOWNLOAD REAL (é isso que o bot faz por baixo)');
   const youtube = require('../downloaders/youtube');
   const tiktok = require('../downloaders/tiktok');
@@ -279,30 +325,76 @@ async function downloads(alvo) {
   const twitter = require('../downloaders/twitter');
 
   const so = alvo ? String(alvo).toLowerCase() : null;
+  const soEh = (p) => !so || so === p;
 
-  // links públicos e estáveis
+  // youtube = link fixo e estável; os outros podem sair do ar a qualquer
+  // momento (post apagado), por isso têm candidatos e viram AVISO, não erro.
   const YT = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ';
-  const TT = 'https://www.tiktok.com/@nasa/video/7314980458643918093';
-  const TW = 'https://x.com/nasa/status/1735289352063901729';
-  const PIN = 'https://www.pinterest.com/pin/1116123883329609/';
+  const TT = [linkDoUsuario, 'https://www.tiktok.com/@nasa/video/7314980458643918093', 'https://www.tiktok.com/@scout2015/video/6718335390845095173'].filter(Boolean);
+  const TW = [linkDoUsuario, 'https://x.com/nasa/status/1735289352063901729', 'https://twitter.com/NASA/status/1506622678043672576'].filter(Boolean);
+  const PIN = [linkDoUsuario, 'https://www.pinterest.com/pin/1116123883329609/'].filter(Boolean);
 
-  const testes = [
-    ['youtube', 'YouTube (busca)', () => youtube.search('lofi hip hop', 1)],
-    ['youtube', 'YouTube — áudio (!ytmp3)', () => youtube.downloadAudio(YT)],
-    ['youtube', 'YouTube — vídeo (!ytmp4)', () => youtube.downloadVideo(YT)],
-    ['tiktok', 'TikTok (!tiktok)', () => tiktok.download(TT)],
-    ['twitter', 'X/Twitter (!download)', () => twitter.download(TW)],
-    ['pinterest', 'Pinterest (!download)', () => social.downloadMedia(PIN, 'pinterest')],
+  /** Tenta cada candidato até um funcionar (link apagado não derruba o teste). */
+  const tentar = (lista, fn) => async () => {
+    let ultimo;
+    for (const l of lista) {
+      try {
+        return await fn(l);
+      } catch (e) {
+        ultimo = e;
+      }
+    }
+    throw ultimo;
+  };
+
+  const passos = [
+    {
+      quando: soEh('youtube'),
+      roda: () => testarBusca('YouTube (busca — !play/!audio/!video)', () => youtube.search('lofi hip hop', 1)),
+    },
+    {
+      quando: soEh('youtube'),
+      roda: () => testarPlataforma('YouTube — áudio (!ytmp3)', () => youtube.downloadAudio(YT)),
+    },
+    {
+      quando: soEh('youtube'),
+      roda: () => testarPlataforma('YouTube — vídeo (!ytmp4)', () => youtube.downloadVideo(YT)),
+    },
+    {
+      quando: soEh('tiktok'),
+      roda: () =>
+        testarPlataforma('TikTok (!tiktok)', tentar(TT, (l) => tiktok.download(l)), { linkDeTeste: !linkDoUsuario, slug: 'tiktok' }),
+    },
+    {
+      quando: soEh('twitter') || soEh('x'),
+      roda: () =>
+        testarPlataforma('X/Twitter (!download)', tentar(TW, (l) => twitter.download(l)), { linkDeTeste: !linkDoUsuario, slug: 'twitter' }),
+    },
+    {
+      quando: soEh('pinterest'),
+      roda: () =>
+        testarPlataforma('Pinterest (!download)', tentar(PIN, (l) => social.downloadMedia(l, 'pinterest')), { linkDeTeste: !linkDoUsuario, slug: 'pinterest' }),
+    },
   ];
 
   let rodou = 0;
-  for (const [plat, nome, fn] of testes) {
-    if (so && so !== plat) continue;
+  for (const passo of passos) {
+    if (!passo.quando) continue;
     rodou++;
-    await testarPlataforma(nome, fn);
+    await passo.roda();
   }
   if (!rodou) {
     linha('warn', `Nenhum teste para "${alvo}"`, 'use: youtube | tiktok | twitter | pinterest');
+  }
+
+  // aviso importante quando falta ffmpeg (afeta !ytmp4 e conversões)
+  if (!temBinario('ffmpeg')) {
+    linha(
+      'warn',
+      'Sem ffmpeg, !ytmp4 não consegue juntar vídeo+áudio',
+      'o bot agora AVISA em vez de mandar um arquivo só de áudio com nome de vídeo\n' +
+        '      ▸ pkg install ffmpeg  (e reinicie o bot)'
+    );
   }
 }
 
@@ -382,10 +474,11 @@ function veredito() {
   console.log(`${C.bold}🌙 LUA — DIAGNÓSTICO DE DOWNLOADS${C.reset}`);
   console.log(`${C.dim}${new Date().toLocaleString('pt-BR')} • ${ROOT}${C.reset}`);
   const alvo = process.argv[2];
+  const linkDoUsuario = /^https?:\/\//i.test(String(process.argv[3] || '')) ? process.argv[3] : null;
 
   ambiente();
   await rede();
-  await downloads(alvo);
+  await downloads(alvo, linkDoUsuario);
   await envio();
   veredito();
 

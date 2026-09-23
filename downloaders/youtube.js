@@ -78,15 +78,54 @@ function execYtdlp(args, timeoutMs) {
   return new Promise((resolve, reject) => {
     execFile('yt-dlp', args, { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
-        const msg = ((stderr || err.message || '').split('\n')[0] || '').trim();
-        const e = new Error(msg || 'yt-dlp falhou');
-        e.code = mapYtdlpError(msg);
-        reject(e);
+        reject(erroDeYtdlp(stderr || err.message));
       } else {
         resolve(stdout);
       }
     });
   });
+}
+
+/**
+ * Converte a saída de erro do yt-dlp em resposta útil.
+ *
+ * Antes a linha crua virava um `code` e o usuário lia "Nenhum resultado
+ * encontrado" mesmo quando o problema era ffmpeg ausente, cookies ou limite de
+ * tamanho. Agora o texto diz o que aconteceu e o que fazer.
+ */
+function erroDeYtdlp(saidaCrua) {
+  const bruto = String(saidaCrua || '').replace(/^\s*ERROR:\s*/i, '').split('\n')[0].trim().slice(0, 200);
+  const code = mapYtdlpError(bruto || saídaCrua);
+  const extra = [];
+  if (/ffmpeg|merg|postprocess|post-process/i.test(bruto)) {
+    extra.push('▸ Instale o ffmpeg para juntar vídeo+áudio: pkg install ffmpeg');
+  }
+  if (/sign in|not a bot|cookies|login_required/i.test(bruto)) {
+    extra.push('▸ O YouTube pediu sessão validada: defina YT_COOKIES no .env (veja DOWNLOAD-TROUBLESHOOTING.md)');
+  }
+  if (code === 'FILE_TOO_BIG') {
+    extra.push(`▸ Aumente DOWNLOAD_MAX_MB no .env (hoje: ${CONFIG.limits.maxDownloadMB} MB)`);
+  }
+  if (code === 'TIMEOUT') {
+    extra.push('▸ Conexão lenta: tente de novo ou use YT_VIDEO_QUALITY=360');
+  }
+  if (code === 'NO_FORMAT') {
+    extra.push('▸ Sem ffmpeg só dá para baixar formatos já prontos — pkg install ffmpeg');
+  }
+  if (code === 'NO_RESULT') {
+    extra.push('▸ Confira se o vídeo abre no navegador (privado/removido/região não dá).');
+  }
+  const texto = {
+    NO_RESULT: '🔎 O YouTube não devolveu este vídeo.',
+    NO_FORMAT: '📥 Nenhum formato compatível para este vídeo.',
+    FILE_TOO_BIG: '📦 O arquivo passou do limite configurado.',
+    TIMEOUT: '⏰ O YouTube demorou demais para responder.',
+    INVALID_URL: '🔗 Link do YouTube inválido.',
+    DOWNLOAD_FAILED: '📥 O yt-dlp não conseguiu concluir o download.',
+  }[code] || '📥 O yt-dlp falhou.';
+  const e = new Error([texto, bruto ? `▸ Detalhe: ${bruto}` : '', ...extra].filter(Boolean).join('\n'));
+  e.code = code;
+  return e;
 }
 
 function mapYtdlpError(msg) {
@@ -179,15 +218,19 @@ function buildVideoFormat(quality, hasFfmpeg) {
   // quality = 'best' ou número (360,480,720,1080,1440,2160)
   // Usa h264 (avc) explicitamente para compatibilidade com WhatsApp
   // WhatsApp NÃO aceita vp9/av01 em muitos aparelhos — força avc1
+  // Sem ffmpeg NÃO existe junção de vídeo+áudio: o seletor precisa exigir
+  // trilha de vídeo (`vcodec!=none`), senão o yt-dlp pode entregar um arquivo
+  // SÓ DE ÁUDIO (f140) dizendo que é o "melhor" — foi o que aconteceu no
+  // celular do dono (arquivo .f140 renomeado para .mp4).
   if (quality === 'best') {
     return hasFfmpeg
       ? 'bv*[ext=mp4][vcodec^=avc]+ba[ext=m4a]/b[ext=mp4][vcodec^=avc]/b[ext=mp4]/b'
-      : 'b[ext=mp4][vcodec^=avc]/b[ext=mp4]/b';
+      : 'b[ext=mp4][vcodec^=avc]/b[ext=mp4][vcodec!=none]/b[vcodec!=none]';
   }
   const h = Number(quality) || 720;
   return hasFfmpeg
     ? `bv*[height<=${h}][ext=mp4][vcodec^=avc]+ba[ext=m4a]/b[ext=mp4][height<=${h}][vcodec^=avc]/b[ext=mp4]/b`
-    : `b[ext=mp4][height<=${h}][vcodec^=avc]/b[ext=mp4][height<=${h}]/b[ext=mp4]/b`;
+    : `b[ext=mp4][height<=${h}][vcodec^=avc]/b[ext=mp4][height<=${h}][vcodec!=none]/b[height<=${h}][vcodec!=none]/b[vcodec!=none]`;
 }
 
 function buildAudioFormat() {
@@ -219,9 +262,12 @@ async function ytdlpDownload(url, suggestedName, kind) {
   // fallback android — formatos combinados, útil quando YouTube bloqueia IP de datacenter
   const fmtAndroid = kind === 'audio'
     ? 'b[height<=720]/b'
-    : quality === 'best'
-      ? 'b[ext=mp4][vcodec^=avc]/b[ext=mp4]/b'
-      : `b[ext=mp4][height<=${quality}][vcodec^=avc]/b[ext=mp4][height<=${quality}]/b[ext=mp4]/b`;
+    : !hasFfmpeg
+      ? // sem ffmpeg: só formato único COM vídeo
+        'b[ext=mp4][vcodec^=avc]/b[ext=mp4][vcodec!=none]/b[vcodec!=none]'
+      : quality === 'best'
+        ? 'b[ext=mp4][vcodec^=avc]/b[ext=mp4]/b'
+        : `b[ext=mp4][height<=${quality}][vcodec^=avc]/b[ext=mp4][height<=${quality}]/b[ext=mp4]/b`;
 
   const attempts = [
     { fmt: fmtDefault, android: false },
@@ -274,9 +320,16 @@ async function runYtdlpAttempt(url, suggestedName, base, outTemplate, kind, att,
     args.push('--extractor-args', 'youtube:player_client=android');
   }
 
+  // IMPORTANTE: prints no estágio padrão (`video`), não `after_move`.
+  // Sem ffmpeg instalado não existe pós-processamento/movimentação, e o
+  // `after_move:` não imprimia NADA — o bot ficava sem título e sem saber qual
+  // formato baixou (foi assim que um áudio-only virou "vídeo" no celular).
   args.push(
-    '--print', 'after_move:%(title)s',
-    '--print', 'after_move:%(uploader)s',
+    '--print', '%(title)s',
+    '--print', '%(uploader)s',
+    '--print', '%(format_id)s',
+    '--print', '%(vcodec)s',
+    '--print', '%(acodec)s',
     '--no-simulate',
     '-o', outTemplate,
     url,
@@ -296,9 +349,16 @@ async function runYtdlpAttempt(url, suggestedName, base, outTemplate, kind, att,
   }
 
   const stdout = await execYtdlp(args, CONFIG.limits.downloadTimeoutMs);
-  const lines = String(stdout || '').split('\n').map(l => l.trim()).filter(Boolean);
+  // o `--print` emite uma linha por campo, mas downloads repetidos (ou o
+  // `after_move` de uma tentativa anterior) podem deixar linhas extras: por
+  // isso os cinco campos são lidos das ÚLTIMAS linhas.
+  const lines = String(stdout || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const fim = lines.slice(-5);
   const title = lines[0] || suggestedName || 'YouTube';
-  const author = lines[1] || '';
+  const author = lines.length > 1 ? lines[1] : '';
+  const formatId = fim.length >= 3 ? fim[fim.length - 3] : '';
+  const vcodec = fim.length >= 2 ? fim[fim.length - 2] : '';
+  const acodec = fim.length >= 1 ? fim[fim.length - 1] : '';
 
   const file = findDownloaded(CONFIG.paths.tmpDir, base);
   if (!file) {
@@ -306,6 +366,20 @@ async function runYtdlpAttempt(url, suggestedName, base, outTemplate, kind, att,
     e.code = 'DOWNLOAD_FAILED';
     throw e;
   }
+  // Guarda: sem ffmpeg o yt-dlp não junta vídeo+áudio e pode entregar um
+  // arquivo SÓ DE ÁUDIO. Mandar isso como "vídeo" é pior que falhar — foi o que
+  // aconteceu no celular do dono (arquivo .f140 renomeado para .mp4).
+  if (kind === 'video' && (vcodec === 'none' || vcodec === '')) {
+    deleteFile(file);
+    const e = new Error(
+      '🎬 Baixei apenas o áudio: sem o ffmpeg não é possível juntar vídeo + áudio.\n' +
+        '▸ Instale e reinicie o bot: pkg install ffmpeg\n' +
+        '▸ (Ou peça só o áudio: !ytmp3)'
+    );
+    e.code = 'CONVERTER_UNAVAILABLE';
+    throw e;
+  }
+
   let finalFile = file;
   // garante compatibilidade com WhatsApp (mp4 h264)
   if (kind === 'video') {
@@ -328,6 +402,9 @@ async function runYtdlpAttempt(url, suggestedName, base, outTemplate, kind, att,
     thumbnail: '',
     mimetype: isVideo ? 'video/mp4' : ext === 'm4a' || ext === 'mp4' ? 'audio/mp4' : ext === 'mp3' ? 'audio/mpeg' : 'audio/webm',
     engine: att.android ? 'yt-dlp (android)' : 'yt-dlp',
+    formatId,
+    vcodec,
+    acodec,
   };
 }
 
@@ -399,10 +476,30 @@ function validateUrl(url) {
   return ytdl.validateURL(String(url || ''));
 }
 
+/** Códigos que JÁ são mensagens nossas — não podem ser reescritos. */
+const CODIGOS_NOSSOS = new Set([
+  'CONVERTER_UNAVAILABLE',
+  'NETWORK',
+  'BLOCKED',
+  'LOGIN',
+  'FILE_TOO_BIG',
+  'NO_FORMAT',
+  'TIMEOUT',
+  'INVALID_URL',
+  'YOUTUBE_BLOCKED',
+  'DOWNLOAD_FAILED',
+  'NO_RESULT',
+]);
+
 function friendlyError(err) {
   const m = String((err && err.message) || '');
   const code = (err && err.code) || '';
-  if (m.includes('sign in to confirm') || m.includes('not a bot') || m.includes('login_required') || m.includes('bot')) {
+  // Já é um erro nosso, com mensagem pensada para o usuário: passa direto.
+  // (Era aqui que "reinicie o bot" virava "confirme que você não é um robô",
+  // porque a checagem antiga usava `includes('bot')` — pegava a palavra "bot"
+  // em QUALQUER frase, inclusive nas nossas.)
+  if (code && CODIGOS_NOSSOS.has(code)) return err;
+  if (/sign in to confirm|not a bot|login_required|please sign in|confirm you('| a)?re not a bot/i.test(m)) {
     const e = new Error(
       'O YouTube exigiu sessão validada ("confirme que você não é um robô").\n' +
         '▸ Instale/atualize o yt-dlp: pkg install python && pip install -U yt-dlp\n' +
