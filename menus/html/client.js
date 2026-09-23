@@ -65,10 +65,17 @@
 const PASSO_PADRAO = 0.7;
 
 function buildJs(initialCategory, opts = {}) {
+  const { DIM } = require('./dimensoes');
   const initial = JSON.stringify(String(initialCategory || ''));
   const informado = Number(opts && opts.passo);
   const passo = Number.isFinite(informado) && informado > 0 && informado <= 1 ? informado : PASSO_PADRAO;
-  const alturaCss = Math.max(240, Math.min(900, Math.round(Number(opts && opts.altura) || 520)));
+  const alturaCss = Math.max(
+    DIM.alturaMin,
+    Math.min(DIM.alturaMax, Math.round(Number(opts && opts.altura) || DIM.altura))
+  );
+  // Guarda do encaixe e corte do body.curto: MESMOS números do dimensoes.js.
+  const alturaMin = DIM.alturaMin;
+  const alturaCurta = DIM.alturaCurta;
   return `
 (function(){
 "use strict";
@@ -89,7 +96,7 @@ m:"Para mencionar alguém use @ no chat depois de colar: digitar @nome não marc
 md:"Usa mídia enviada ou respondida no chat."};
 var st={tela:"list",cat:inicial,busca:"",rol:{},faixa:0,campos:{},cmd:"",pilha:[]};
 var timer=null,copiouEm=0,alvo=null,alvoEm=0;
-var ALTURA_CSS=${alturaCss},alturaAtual=0;
+var ALTURA_CSS=${alturaCss},ALTURA_MIN=${alturaMin},CURTO=${alturaCurta},alturaAtual=0;
 /* PASSO = fração da área visível por toque (único ponto de ajuste). */
 var PASSO=${passo};
 
@@ -102,7 +109,7 @@ function reduz(){try{return !!(window.matchMedia&&window.matchMedia("(prefers-re
 function encaixar(){
   var h=0;
   try{h=document.documentElement.clientHeight||0}catch(e){h=0}
-  var alvo=(h>=240&&h<ALTURA_CSS)?h:ALTURA_CSS;
+  var alvo=(h>=ALTURA_MIN&&h<ALTURA_CSS)?h:ALTURA_CSS;
   if(alvo===alturaAtual)return;
   alturaAtual=alvo;
   var px=alvo+"px",raiz=document.documentElement;
@@ -110,7 +117,7 @@ function encaixar(){
     if(!el)return;
     el.style.height=px;el.style.maxHeight=px;
   });
-  if(document.body)document.body.classList.toggle("curto",alvo<380);
+  if(document.body)document.body.classList.toggle("curto",alvo<CURTO);
   setas();
 }
 function chave(){return st.tela==="panel"?"panel":"cat:"+st.cat}

@@ -110,6 +110,77 @@ const ROTEIRO = async () => {
   r.alturaLista = Math.round(cx(lista).height);
   r.rolavel = lista.scrollHeight > lista.clientHeight + 1;
 
+  // ---- tamanho e legibilidade (o pedido: "menu maior e legível") ----------
+  // Mede o que o usuário vê: quanto do card é área de comando, os tamanhos de
+  // fonte efetivos e as áreas de toque. Serve de trava: se alguém reduzir de
+  // novo (o que já aconteceu neste card), a verificação falha.
+  const fonte = (sel) => {
+    const el = document.querySelector(sel);
+    return el ? Math.round(parseFloat(getComputedStyle(el).fontSize) * 10) / 10 : 0;
+  };
+  const alturaDe = (sel) => {
+    const el = document.querySelector(sel);
+    return el ? Math.round(cx(el).height) : 0;
+  };
+  const faixaCats = document.getElementById('lua-tabs');
+  const fr = cx(faixaCats);
+  const abas = [...document.querySelectorAll('.tab')];
+  const cardAltura = Math.round(cx(document.getElementById('__wrap')).height);
+  r.tamanho = {
+    card: cardAltura,
+    lista: Math.round(cx(lista).height),
+    fatiaLista: Math.round((cx(lista).height / cardAltura) * 100),
+    fontes: { corpo: fonte('body'), comando: fonte('.cmd code'), descricao: fonte('.cmd .desc'), aba: fonte('.tab') },
+    toques: {
+      usar: alturaDe('.go'),
+      vnav: alturaDe('.vnav'),
+      aba: alturaDe('.tab'),
+      snav: alturaDe('.snav'),
+    },
+    categoriasInteiras: abas.filter((t) => {
+      const b = cx(t);
+      return b.left >= fr.left - 1 && b.right <= fr.right + 1;
+    }).length,
+    totalCategorias: abas.length,
+    // nenhum botão "Usar" pode passar da área da lista (a largura do card é a
+    // que o WebView dá; o conteúdo tem de caber nela)
+    botoesDentro: (() => {
+      const l = cx(lista);
+      return [...lista.querySelectorAll('.cmd .go')].every((b) => cx(b).right <= l.right + 1);
+    })(),
+  };
+
+  // a faixa vai até a ÚLTIMA categoria (e volta): dá para acessar todas?
+  const maxFaixa = () => Math.max(0, faixaCats.scrollWidth - faixaCats.clientWidth);
+  let h = 0;
+  while (!document.getElementById('lua-cat-next').disabled && h < 80) {
+    document.getElementById('lua-cat-next').click();
+    await dorme(40);
+    h++;
+    if (Math.abs(faixaCats.scrollLeft - maxFaixa()) < 2) break;
+  }
+  await dorme(700);
+  const ultimaAba = abas[abas.length - 1];
+  const recFr = cx(faixaCats);
+  r.faixa = {
+    toques: h,
+    noFim: Math.abs(faixaCats.scrollLeft - maxFaixa()) < 2,
+    setaDireitaDesativada: document.getElementById('lua-cat-next').disabled,
+    ultimaInteira: cx(ultimaAba).left >= recFr.left - 1 && cx(ultimaAba).right <= recFr.right + 1,
+  };
+  let v = 0;
+  while (!document.getElementById('lua-cat-prev').disabled && v < 80) {
+    document.getElementById('lua-cat-prev').click();
+    await dorme(40);
+    v++;
+    if (faixaCats.scrollLeft <= 1) break;
+  }
+  await dorme(700);
+  const recFr2 = cx(faixaCats);
+  const primeiraAba = abas[0];
+  r.faixa.voltou = faixaCats.scrollLeft <= 1 && document.getElementById('lua-cat-prev').disabled;
+  r.faixa.primeiraInteira = cx(primeiraAba).left >= recFr2.left - 1 && cx(primeiraAba).right <= recFr2.right + 1;
+
   // descer até o fim
   let n = 0;
   while (!document.getElementById('lua-down').disabled && n < 400) {
@@ -221,7 +292,9 @@ const ROTEIRO = async () => {
   });
 
   try {
-    for (const altura of [520, 430, 300]) {
+    // a primeira é a altura PADRÃO do card (dimensoes.js); as outras, janelas
+    // menores — inclusive as que o cliente encaixa em runtime.
+    for (const altura of [...new Set([alturaDeclarada, 520, 430, 300])]) {
       const pg = await navegador.newPage();
       await pg.setViewport({ width: 360, height: altura, deviceScaleFactor: 1, isMobile: true, hasTouch: true });
       await pg.evaluateOnNewDocument(() => {
@@ -235,6 +308,45 @@ const ROTEIRO = async () => {
       await new Promise((r) => setTimeout(r, 300));
       const r = await pg.evaluate(ROTEIRO);
       const tag = `[${altura}px]`;
+
+      // --- tamanho, legibilidade e faixa de categorias ---
+      // A moldura (cabeçalho + faixa + busca + respiro) tem orçamento de px: o
+      // que sobrar do card é área de comando. É isso que mantém o menu grande
+      // em janela alta e ainda utilizável em janela baixa.
+      const moldura = r.tamanho.card - r.tamanho.lista;
+      if (moldura <= 260)
+        ok(`${tag} moldura (cabeçalho+faixa+busca) = ${moldura}px; comandos ficam com ${r.tamanho.lista}px`);
+      else erro(`${tag} moldura grande demais: ${moldura}px de ${r.tamanho.card}px de card`);
+
+      // No card na altura declarada (a que o aparelho recebe), a área de
+      // comando tem de ser a maior parte da interface.
+      if (r.tamanho.card === alturaDeclarada) {
+        if (r.tamanho.fatiaLista >= 55)
+          ok(`${tag} área de comandos = ${r.tamanho.lista}px, ${r.tamanho.fatiaLista}% do card de ${r.tamanho.card}px`);
+        else erro(`${tag} área de comandos pequena: ${r.tamanho.lista}px (${r.tamanho.fatiaLista}% do card)`);
+      }
+
+      if (r.tamanho.fontes.corpo >= 16 && r.tamanho.fontes.comando >= 15 && r.tamanho.fontes.descricao >= 14 && r.tamanho.fontes.aba >= 14)
+        ok(`${tag} fontes legíveis (corpo ${r.tamanho.fontes.corpo}px, comando ${r.tamanho.fontes.comando}px, descrição ${r.tamanho.fontes.descricao}px, categoria ${r.tamanho.fontes.aba}px)`);
+      else erro(`${tag} fonte pequena: ${JSON.stringify(r.tamanho.fontes)}`);
+
+      if (Math.min(...Object.values(r.tamanho.toques)) >= 44)
+        ok(`${tag} áreas de toque confortáveis (Usar ${r.tamanho.toques.usar}px, setas ${r.tamanho.toques.vnav}/${r.tamanho.toques.snav}px, categoria ${r.tamanho.toques.aba}px)`);
+      else erro(`${tag} alvo de toque pequeno: ${JSON.stringify(r.tamanho.toques)}`);
+
+      if (r.tamanho.botoesDentro) ok(`${tag} todos os botões "Usar" cabem dentro da área da lista`);
+      else erro(`${tag} botão "Usar" passando da borda da lista`);
+
+      if (r.tamanho.categoriasInteiras >= 2)
+        ok(`${tag} ${r.tamanho.categoriasInteiras} categorias inteiras visíveis na faixa (de ${r.tamanho.totalCategorias})`);
+      else erro(`${tag} só ${r.tamanho.categoriasInteiras} categoria inteira visível na faixa`);
+
+      if (r.faixa.noFim && r.faixa.setaDireitaDesativada && r.faixa.ultimaInteira)
+        ok(`${tag} última categoria alcançada e inteira (${r.faixa.toques} toques; → desativou)`);
+      else erro(`${tag} não chega à última categoria inteira (${JSON.stringify(r.faixa)})`);
+
+      if (r.faixa.voltou && r.faixa.primeiraInteira) ok(`${tag} volta à primeira categoria (← desativou; aba inteira)`);
+      else erro(`${tag} não volta à primeira categoria (${JSON.stringify(r.faixa)})`);
 
       if (r.cabeNoVisivel) ok(`${tag} a lista cabe no WebView (altura ${r.alturaLista}px, rola: ${r.rolavel})`);
       else erro(`${tag} a lista extrapola o WebView (é isto que corta os comandos)`);

@@ -274,7 +274,8 @@ async function main() {
     assert.ok(html.includes('id="lua-tabs"'), 'contêiner rolável das categorias');
     assert.ok(html.includes('id="lua-panel-body"'), 'contêiner rolável do painel');
     assert.ok(/#lua-list\{flex:1 1 auto;min-height:0;overflow-y:auto/.test(html), '#lua-list rola no eixo Y');
-    assert.ok(/\.tabs\{flex:1 1 auto;min-width:0;display:flex;gap:8px;overflow-x:auto/.test(html), '.tabs rola no eixo X');
+    // o gap entre abas é ajustável em dimensoes.js/styles.js: aqui só importa a ESTRUTURA
+    assert.ok(/\.tabs\{flex:1 1 auto;min-width:0;display:flex;gap:\d+px;overflow-x:auto/.test(html), '.tabs rola no eixo X');
     assert.ok(/#lua-panel-body\{flex:1 1 auto;min-height:0;overflow-y:auto/.test(html), 'painel rola no eixo Y');
     // setas: fora das áreas que rolam (irmãs, não filhas) e com rótulo acessível
     const iLista = html.indexOf('id="lua-list"');
@@ -1244,6 +1245,30 @@ async function main() {
       dom.window.close();
     } catch (e) {
       fail('20m: DOM altura/encaixe', e);
+    }
+
+    /* 20n) tamanhos: saem todos de dimensoes.js e chegam ao card (nada de vh) */
+    try {
+      const dim = require('../menus/html/dimensoes');
+      const { DIM } = dim;
+      assert.ok(DIM.altura >= 600, `altura padrão grande (${DIM.altura}px)`);
+      assert.ok(dim.ESCALA >= 1.1, `escala de textos >= 1.1 (${dim.ESCALA})`);
+      assert.ok(DIM.toque >= 48, `alvo de toque principal >= 48px (${DIM.toque}px)`);
+      assert.ok(DIM.larguraMax >= 700, `largura máxima para telas grandes (${DIM.larguraMax}px)`);
+
+      const htmlGrande = htmlMenu.montarDocumento(fakeCtx(), { kind: 'main' }).html;
+      assert.ok(htmlGrande.includes(`height:${DIM.altura}px`), 'a altura declarada é a de dimensoes.js');
+      assert.ok(htmlGrande.includes(`font-size:${dim.px(15)}`), 'a fonte base do CSS é a escalada');
+      assert.ok(htmlGrande.includes(`font-size:${dim.px(14)}`), 'a fonte do comando também é a escalada');
+      assert.ok(htmlGrande.includes(`min-height:${DIM.toque}px`), 'os botões principais usam o alvo de toque central');
+      assert.ok(htmlGrande.includes(`max-width:${DIM.larguraMax}px`), 'a largura máxima vem de dimensoes.js');
+
+      const estilos = (htmlGrande.match(/<style>[\s\S]*?<\/style>/g) || []).join('');
+      assert.ok(!/height:\s*[^;}]*\b(?:vh|svh|lvh|dvh)\b/.test(estilos), 'nenhuma altura em unidade de viewport');
+      assert.ok(!/@media\s*\(\s*(?:max|min)-height/.test(estilos), 'nenhuma @media de altura de viewport');
+      ok('20n: [DOM] tamanhos centralizados em dimensoes.js e aplicados no card');
+    } catch (e) {
+      fail('20n: dimensões centralizadas', e);
     }
 
     /* 20k) rajada: toques rápidos andam um passo cada, sem fila de animações */

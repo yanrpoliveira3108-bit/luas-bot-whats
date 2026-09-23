@@ -32,8 +32,10 @@ const logger = require('../../utils/logger').child('menuHtml');
 // passando disso, cortamos comandos por categoria em passos e dizemos isso no
 // próprio card, com o atalho para o menu completo em texto.
 const MAX_BYTES_PADRAO = 120000;
-// Altura fixa default do card (px). Ver templates.travarAltura().
-const ALTURA_PADRAO = 520;
+// Altura fixa default do card (px) e faixa aceita: vivem em dimensoes.js —
+// TODOS os números de tamanho do card ficam naquele arquivo (ver o doc dele).
+const { DIM } = require('./dimensoes');
+const ALTURA_PADRAO = DIM.altura;
 const CAP_PADRAO = 30;
 // Fração da área visível deslocada por toque nas setas ↑↓ e ←→.
 // O número vive em UM lugar só: menus/html/client.js (PASSO_PADRAO = 0.7),
@@ -47,7 +49,7 @@ const { PASSO_PADRAO } = require('./client');
  */
 function alturaDoCard() {
   const bruto = Number(process.env.MENU_HTML_HEIGHT);
-  if (Number.isFinite(bruto) && bruto >= 240 && bruto <= 900) return Math.round(bruto);
+  if (Number.isFinite(bruto) && bruto >= DIM.alturaMin && bruto <= DIM.alturaMax) return Math.round(bruto);
   return ALTURA_PADRAO;
 }
 

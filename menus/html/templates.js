@@ -75,7 +75,8 @@ function emojiDeComando(cmd) {
  * WhatsApp.
  */
 function travarAltura(px) {
-  const n = Math.max(240, Math.min(900, Number(px) || 520));
+  const { DIM } = require('./dimensoes');
+  const n = Math.max(DIM.alturaMin, Math.min(DIM.alturaMax, Number(px) || DIM.altura));
   return (
     `<style>html,body{margin:0;padding:0;height:${n}px;max-height:${n}px;overflow:hidden}` +
     `#__wrap{height:${n}px;max-height:${n}px;overflow:hidden;display:flex;flex-direction:column;` +
