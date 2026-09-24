@@ -398,6 +398,70 @@ const MIGRATIONS = [
     last_announced TEXT DEFAULT ''
   );
   CREATE INDEX IF NOT EXISTS idx_birthdays_day_month ON birthdays(day, month);`,
+
+  // 41 — CAÇA AO TESOURO + apostas de jogos (caça e tigrinho)
+  //
+  // Três tabelas, cada uma com um papel claro:
+  //   game_bets     → LIVRO-CAIXA das apostas (idempotência: uma linha por
+  //                   operação, com chave única; é o que garante que uma
+  //                   mensagem repetida/retransmitida não cobre duas vezes);
+  //   treasure_games→ PARTIDA de caça ao tesouro (mapa oculto fica AQUI, no
+  //                   banco — nunca no HTML; escavações e estado persistidos
+  //                   para recuperar depois de reiniciar);
+  //   game_rounds   → RODADA do tigrinho (o resultado é sorteado no backend e
+  //                   gravado; reabrir/atualizar a tela NÃO sorteia de novo).
+  //
+  // O saldo continua sendo o de sempre: economy.wallet (LuaCoins). Nada de
+  // carteira paralela — só o registro do que já foi cobrado/pago.
+  `CREATE TABLE IF NOT EXISTS game_bets (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    game TEXT NOT NULL,
+    bet INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'settled',
+    reward INTEGER NOT NULL DEFAULT 0,
+    ref_id TEXT DEFAULT '',
+    created_at TEXT DEFAULT '',
+    settled_at TEXT DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS idx_game_bets_user_game ON game_bets(user_id, game, created_at);
+  CREATE INDEX IF NOT EXISTS idx_game_bets_ref ON game_bets(ref_id);
+
+  CREATE TABLE IF NOT EXISTS treasure_games (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    chat_id TEXT DEFAULT '',
+    size INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    bet INTEGER NOT NULL DEFAULT 0,
+    reward INTEGER NOT NULL DEFAULT 0,
+    digs_total INTEGER NOT NULL DEFAULT 0,
+    digs_used INTEGER NOT NULL DEFAULT 0,
+    treasures_total INTEGER NOT NULL DEFAULT 0,
+    treasures_found INTEGER NOT NULL DEFAULT 0,
+    traps_total INTEGER NOT NULL DEFAULT 0,
+    secret TEXT NOT NULL DEFAULT '{}',
+    revealed TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT DEFAULT '',
+    updated_at TEXT DEFAULT '',
+    expires_at TEXT DEFAULT '',
+    finished_at TEXT DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS idx_treasure_user ON treasure_games(user_id, status);
+  CREATE INDEX IF NOT EXISTS idx_treasure_chat ON treasure_games(chat_id, status);
+
+  CREATE TABLE IF NOT EXISTS game_rounds (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    game TEXT NOT NULL DEFAULT 'tigrinho',
+    bet INTEGER NOT NULL DEFAULT 0,
+    reward INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL DEFAULT 'settled',
+    payload TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT DEFAULT '',
+    settled_at TEXT DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS idx_game_rounds_user ON game_rounds(user_id, game, created_at);`,
 ];
 
 /* ----------------------------- core ------------------------------ */

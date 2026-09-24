@@ -539,6 +539,12 @@ na configuração.
   — o `!modohtml` continua marcado como ligado, e o próprio comando explica:
   “ligado, mas o MODO SEGURO bloqueia cards HTML”.
 - Log de envio registra o formato usado e erro sem dados sensíveis.
+- Os **jogos com aposta** (🗺️ caça ao tesouro e 🐯 tigrinho) usam a mesma decisão
+  por `menuFormat.usarHtmlJogo()`: `!modohtml on` → card; `!modohtml off` → texto
+  equivalente; **nunca configurado** → card (o tigrinho sempre foi HTML e o caça
+  é pedido como card); modo seguro → texto. Os cards de jogo têm painel próprio
+  (`utils/betPanel.js`, compartilhado) e não entram no teto do menu — são
+  enviados por comando, não como menu. Ver `JOGOS-APOSTA.md`.
 
 ---
 

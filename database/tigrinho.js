@@ -13,7 +13,7 @@
 
 'use strict';
 
-const { prepare } = require('./database');
+const { prepare, get: getDb } = require('./database');
 const economy = require('./economy');
 const { withLock } = require('../utils/keyedMutex');
 const { TIGRINHO_CONFIG } = require('../utils/tigrinhoGame');
@@ -98,6 +98,64 @@ function applySpin(userId, { bet, reward, reels, jackpot, won }) {
   });
 }
 
+/**
+ * Registra o RESULTADO de uma rodada JÁ COBRADA/PAGA pela camada financeira
+ * comum (utils/gameWallet): estatísticas + histórico + fecho da rodada numa
+ * transação só. NÃO movimenta dinheiro — quem movimenta é o gameWallet.
+ *
+ * Usado pelo comando do tigrinho (débito e crédito ficam no livro-caixa
+ * `game_bets`, com idempotência pelo id da rodada). `applySpin` continua
+ * existindo para quem quiser o giro todo num passo (testes/compatibilidade).
+ *
+ * @param {object} p { userId, bet, reward, reels, jackpot, won, roundId }
+ * @returns {{balance:number, reward:number, won:boolean, jackpot:boolean}}
+ */
+function registrarRodada({ userId, bet, reward = 0, reels = [], jackpot = false, won = false, roundId = null }) {
+  const premio = Math.max(0, Math.floor(Number(reward) || 0));
+  const valor = Math.max(0, Math.floor(Number(bet) || 0));
+  return withLock(userId, () => {
+    ensure(userId);
+    const tx = getDb().transaction(() => {
+      prepare(
+        'upd_tigrinho',
+        `UPDATE tigrinho_players
+           SET spins = spins + 1,
+               wins = wins + ?,
+               losses = losses + ?,
+               jackpots = jackpots + ?,
+               best_win = MAX(best_win, ?),
+               last_spin_at = ?
+         WHERE user_id = ?`
+      ).run(won ? 1 : 0, won ? 0 : 1, jackpot ? 1 : 0, premio, Date.now(), userId);
+
+      prepare(
+        'ins_tigrinho_hist',
+        `INSERT INTO tigrinho_history (user_id, reels, bet, reward, jackpot, created_at) VALUES (?, ?, ?, ?, ?, ?)`
+      ).run(userId, JSON.stringify(reels), valor, premio, jackpot ? 1 : 0, now());
+
+      prepare(
+        'trim_tigrinho_hist',
+        `DELETE FROM tigrinho_history
+          WHERE user_id = ?
+            AND id NOT IN (
+              SELECT id FROM tigrinho_history WHERE user_id = ? ORDER BY id DESC LIMIT ?
+            )`
+      ).run(userId, userId, TIGRINHO_CONFIG.historyLimit);
+
+      if (roundId) {
+        prepare(
+          'done_round',
+          `UPDATE game_rounds SET state = 'settled', reward = ?, payload = ?, settled_at = ? WHERE id = ?`
+        ).run(premio, JSON.stringify({ reels, jackpot, won }), now(), roundId);
+      }
+    });
+    tx();
+    const balance = economy.get(userId).wallet;
+    logger.info({ user: userId, bet: valor, reward: premio, balance }, '[LUA TIGRINHO] Rodada registrada');
+    return { balance, reward: premio, won: !!won, jackpot: !!jackpot };
+  });
+}
+
 /** Últimos giros do jogador (mais recente primeiro). */
 function getHistory(userId, limit = TIGRINHO_CONFIG.historyLimit) {
   const n = Math.min(50, Math.max(1, Number(limit) || TIGRINHO_CONFIG.historyLimit));
@@ -136,6 +194,7 @@ module.exports = {
   createPlayer,
   getBalance,
   applySpin,
+  registrarRodada,
   getHistory,
   getRanking,
   canSpin,

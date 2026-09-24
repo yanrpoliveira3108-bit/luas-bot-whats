@@ -1,0 +1,425 @@
+#!/usr/bin/env node
+/**
+ * test/tigrinhopainel.test.js — 🐯 TIGRINHO com o painel de carteira/aposta.
+ *
+ * O tigrinho NÃO foi recriado: continua o mesmo comando, com os mesmos
+ * subcomandos e a mesma tabela de prêmios. O que este teste garante é a
+ * integração financeira e a honestidade do card:
+ *
+ *  1) o card abre com a carteira REAL (saldo/disponível/mín/máx) e o campo de
+ *     valor, e NÃO sorteia nada ao abrir (reabrir mostra o mesmo resultado)
+ *  2) o resultado validado pelo bot é o que o card mostra (o HTML não decide)
+ *  3) `!tigrinho jogar`: cobrança ÚNICA (idempotente pelo id da mensagem),
+ *     prêmio creditado UMA vez, saldo/limites revalidados na hora
+ *  4) mensagem repetida não gira de novo; giro em sequência cai no cooldown
+ *  5) rodada pendente (queda no meio): conclui uma vez; rodada sem resultado
+ *     devolve a aposta
+ *  6) `!modohtml off` → texto com os MESMOS dados e comandos
+ *  7) subcomandos antigos preservados (fichas/historico/ranking/ajuda)
+ *  8) apostas simultâneas entre jogos (tigrinho + caça) não estouram o saldo
+ *  9) [jsdom, opcional] painel valida/copia o comando e o botão de rever a
+ *     rodada termina exatamente no resultado validado
+ */
+
+'use strict';
+
+const assert = require('assert');
+const fs = require('fs');
+const { execFileSync } = require('child_process');
+
+const DB = require('./dbtmp').tmpFile('lua-tigrinho-painel-test.db');
+
+let falhas = 0;
+let feitos = 0;
+function ok(l) {
+  feitos++;
+  console.log('✅ ' + l);
+}
+function fail(l, e) {
+  falhas++;
+  console.log('❌ ' + l + ' — ' + (e && e.message));
+}
+function skip(l, motivo) {
+  console.log('⏭  ' + l + ' — pulado: ' + motivo);
+}
+
+function fakeCtx(opts = {}) {
+  const enviados = [];
+  const ctx = {
+    enviados,
+    socket: {
+      user: { id: '5511977776666:3@s.whatsapp.net' },
+      relayMessage: async (jid, message, o) => {
+        enviados.push({ jid, message, o });
+        return { key: { id: 'XYZ' } };
+      },
+    },
+    remoteJid: '120363000000000000@g.us',
+    isGroup: true,
+    prefix: '!',
+    sender: opts.sender || '5511999999999@s.whatsapp.net',
+    args: opts.args || [],
+    command: opts.command || 'tigrinho',
+    message: { key: { id: opts.msgId || 'T' + Math.random().toString(36).slice(2) } },
+    replies: [],
+    reply: async (m) => {
+      ctx.replies.push(String(m));
+      return {};
+    },
+  };
+  return ctx;
+}
+
+function card(ctx) {
+  if (!ctx.enviados.length) {
+    throw new Error('nenhum card enviado; respostas: ' + ctx.replies.join(' | ').slice(0, 300));
+  }
+  const rich = ctx.enviados[0].message.botForwardedMessage.message.richResponseMessage;
+  return JSON.parse(rich.unifiedResponse.data.toString('utf8')).sections[0].view_model.primitive.payload;
+}
+
+async function main() {
+  try {
+    fs.rmSync(DB, { force: true });
+  } catch (_) {}
+  process.env.OWNER_NUMBER = '5511999999999';
+  process.env.DATABASE_FILE = DB;
+  process.env.BUTTONS_ENABLED = 'true';
+
+  const database = require('../database/database');
+  database.open();
+  require('../commands/loader').loadCommands(true);
+
+  const store = require('../database/tigrinho');
+  const rounds = require('../database/gameRounds');
+  const wallet = require('../utils/gameWallet');
+  const economy = require('../database/economy');
+  const settings = require('../database/settings');
+  const menuFormat = require('../utils/menuFormat');
+  const { registry } = require('../engine/plugins');
+  const cmd = registry.getCommand('tigrinho');
+
+  const U = '5511999999999@s.whatsapp.net';
+
+  /* ------------- 1) abrir: carteira no card, sem sorteio -------------- */
+  try {
+    economy.setWallet(U, 1000);
+    const ctx = fakeCtx({ args: [], msgId: 'OPEN-1' });
+    await cmd.execute(ctx);
+    const html = card(ctx);
+    assert.ok(/LUA TIGRINHO/.test(html), 'card do tigrinho');
+    assert.ok(/Saldo na carteira/.test(html) && /Disponível para apostar/.test(html), 'painel de carteira no card');
+    assert.ok(/Valor da aposta/.test(html) && /Mínimo/.test(html) && /Máximo/.test(html), 'campo de valor com mín/máx');
+    assert.ok(/Confirmar giro/.test(html), 'botão de confirmar antes da rodada');
+    assert.ok(/tigrinho jogar \{valor\}|tigrinho jogar &lt;valor&gt;/.test(html), 'comando do giro no card');
+    assert.ok(/NENHUMA RODADA VALIDADA|ULTIMA RODADA VALIDADA|ÚLTIMA RODADA VALIDADA/.test(html), 'estado da rodada informado');
+    assert.ok(/nada foi cobrado|Nada é cobrado/.test(html), 'deixa claro que abrir/consultar não cobra');
+    // reabrir não sorteia: o mesmo estado aparece de novo
+    const ctx2 = fakeCtx({ args: [], msgId: 'OPEN-2' });
+    await cmd.execute(ctx2);
+    const html2 = card(ctx2);
+    const reels = (h) => (h.match(/class="cell">([^<]+)</g) || []).join('|');
+    assert.strictEqual(reels(html2), reels(html), 'reabrir mostra os MESMOS rolos (sem sorteio no card)');
+    ok('1: card abre com a carteira real, sem sortear nada');
+  } catch (e) {
+    fail('1: abrir', e);
+  }
+
+  /* ------------ 2) girar: cobrança única, prêmio único ---------------- */
+  try {
+    const antes = economy.get(U).wallet;
+    const ctx = fakeCtx({ args: ['jogar', '100'], msgId: 'SPIN-1' });
+    await cmd.execute(ctx);
+    const txt = ctx.replies.join('\n');
+    assert.ok(/Aposta:/.test(txt) && /Saldo:/.test(txt), 'resposta traz aposta e saldo');
+    assert.ok(/Lucro líquido:/.test(txt), 'diferencia retorno e lucro líquido');
+    const rodada = rounds.get(`tigrinho:${U}:SPIN-1`);
+    assert.ok(rodada, 'rodada gravada com o id da aposta');
+    assert.strictEqual(rodada.state, 'settled', 'rodada concluída');
+    assert.strictEqual(rodada.bet, 100, 'aposta gravada');
+    assert.ok(Array.isArray(rodada.payload.reels) && rodada.payload.reels.length === 5, 'resultado (5 rolos) guardado');
+    const esperado = antes - 100 + rodada.reward;
+    assert.strictEqual(economy.get(U).wallet, esperado, `saldo = ${antes} - 100 + ${rodada.reward}`);
+    const p = store.getPlayer(U);
+    assert.strictEqual(p.spins, 1, 'estatística contada UMA vez');
+    assert.strictEqual(p.wins, rodada.reward > 0 ? 1 : 0, 'vitória contada conforme o resultado');
+
+    // o card depois do giro mostra o resultado VALIDADO (mesmos rolos do banco)
+    const ctxCard = fakeCtx({ args: [], msgId: 'OPEN-3' });
+    await cmd.execute(ctxCard);
+    const html = card(ctxCard);
+    const rolos = rodada.payload.reels.map((col) => col[1]).join('');
+    rolos.split('').length;
+    for (const s of rodada.payload.reels.map((col) => col[1])) {
+      assert.ok(html.includes(s), `o card mostra o símbolo validado ${s}`);
+    }
+    assert.ok(html.includes(String(economy.get(U).wallet)) || /SALDO/.test(html), 'card traz o saldo atualizado');
+    ok('2: giro — cobrança única, prêmio único, estatística única e card com o resultado do bot');
+  } catch (e) {
+    fail('2: giro', e);
+  }
+
+  /* -------- 3) mensagem repetida e cooldown não duplicam giro --------- */
+  try {
+    const saldo = economy.get(U).wallet;
+    const spins = store.getPlayer(U).spins;
+    const repetida = fakeCtx({ args: ['jogar', '100'], msgId: 'SPIN-1' });
+    await cmd.execute(repetida);
+    assert.strictEqual(economy.get(U).wallet, saldo, 'mensagem repetida não cobrou nem pagou de novo');
+    assert.strictEqual(store.getPlayer(U).spins, spins, 'mensagem repetida não contou estatística');
+    assert.ok(repetida.replies.some((r) => /já (foi|tinha)|repetid/i.test(r)), 'avisa que o giro já era conhecido');
+
+    const seguida = fakeCtx({ args: ['jogar', '100'], msgId: 'SPIN-2' });
+    await cmd.execute(seguida);
+    assert.strictEqual(economy.get(U).wallet, saldo, 'giro em sequência (cooldown) não movimentou nada');
+    assert.ok(seguida.replies.some((r) => /Aguarde/i.test(r)), 'cooldown avisado');
+    ok('3: mensagem repetida e cooldown — nenhum giro duplicado');
+  } catch (e) {
+    fail('3: repetição/cooldown', e);
+  }
+
+  /* ---------- 4) rodada pendente: conclui UMA vez --------------------- */
+  try {
+    const V = '5511911111111@s.whatsapp.net';
+    economy.setWallet(V, 1000);
+    // simula a queda: aposta cobrada + rodada gravada com resultado, sem pagamento
+    const cobranca = await wallet.cobrarAposta({ userId: V, game: 'tigrinho', valor: 100, ref: 'QUEDA-1', status: 'pending' });
+    await rounds.criar({
+      id: cobranca.id,
+      userId: V,
+      game: 'tigrinho',
+      bet: 100,
+      reward: 250,
+      payload: { reels: [['🐯'], ['🐯'], ['🐯'], ['🐯'], ['🐯']], jackpot: false, won: true, mult: 2.5 },
+    });
+    assert.strictEqual(economy.get(V).wallet, 900, 'aposta cobrada e rodada pendente');
+    const ctx = fakeCtx({ args: [], sender: V, msgId: 'REC-1' });
+    await cmd.execute(ctx);
+    assert.strictEqual(economy.get(V).wallet, 1150, 'paga 250 UMA vez ao reabrir (900 + 250)');
+    assert.strictEqual(rounds.get(cobranca.id).state, 'settled', 'rodada fechada');
+    assert.strictEqual(store.getPlayer(V).spins, 1, 'estatística registrada UMA vez');
+    // reabrir de novo NÃO paga outra vez
+    const ctx2 = fakeCtx({ args: [], sender: V, msgId: 'REC-2' });
+    await cmd.execute(ctx2);
+    assert.strictEqual(economy.get(V).wallet, 1150, 'reabrir não paga de novo');
+    assert.ok(ctx2.replies.length || ctx2.enviados.length, 'segunda abertura responde normalmente');
+    ok('4: recuperação de rodada pendente — paga e registra uma vez só');
+  } catch (e) {
+    fail('4: recuperação', e);
+  }
+
+  /* ---------- 5) rodada pendente SEM resultado: devolve -------------- */
+  try {
+    const W = '5511922222222@s.whatsapp.net';
+    economy.setWallet(W, 500);
+    const cobranca = await wallet.cobrarAposta({ userId: W, game: 'tigrinho', valor: 100, ref: 'QUEDA-2', status: 'pending' });
+    await rounds.criar({ id: cobranca.id, userId: W, game: 'tigrinho', bet: 100, reward: 0, payload: null });
+    assert.strictEqual(economy.get(W).wallet, 400, 'aposta cobrada, rodada sem resultado');
+    const ctx = fakeCtx({ args: [], sender: W, msgId: 'SEMRES-1' });
+    await cmd.execute(ctx);
+    assert.strictEqual(economy.get(W).wallet, 500, 'aposta DEVOLVIDA (não havia giro a concluir)');
+    const r = rounds.get(cobranca.id);
+    assert.strictEqual(r.state, 'settled', 'rodada fechada');
+    assert.strictEqual(r.payload.devolvida, true, 'marcada como devolvida');
+    assert.strictEqual(store.getPlayer(W).spins, 0, 'não conta giro que não houve');
+    const txt = ctx.replies.join(' ') + card(ctx);
+    assert.ok(/devolv|Completei|pendente/i.test(txt), 'explica a devolução');
+    ok('5: rodada sem resultado — aposta devolvida e nada de estatística');
+  } catch (e) {
+    fail('5: sem resultado', e);
+  }
+
+  /* ---------------- 6) saldo insuficiente / sem saldo ---------------- */
+  try {
+    const Z = '5511933333333@s.whatsapp.net';
+    economy.setWallet(Z, 50);
+    const ctx = fakeCtx({ args: ['jogar', '999'], sender: Z, msgId: 'FUND-1' });
+    await cmd.execute(ctx);
+    assert.strictEqual(economy.get(Z).wallet, 50, 'nada cobrado');
+    assert.strictEqual(rounds.pendente(Z, 'tigrinho'), null, 'nenhuma rodada criada');
+    const txt = ctx.replies.join('\n');
+    assert.ok(/não aceita|insuficiente/i.test(txt), 'recusa explica o motivo');
+    assert.ok(/50/.test(txt), 'mostra o máximo permitido agora');
+    ok('6: aposta acima do saldo — recusa com o motivo e sem movimentar nada');
+  } catch (e) {
+    fail('6: saldo insuficiente', e);
+  }
+
+  /* --------------- 7) !modohtml off → texto equivalente -------------- */
+  try {
+    settings.setMenuHtmlEnabled(false);
+    try {
+      const ctx = fakeCtx({ args: [], msgId: 'TXT-1' });
+      await cmd.execute(ctx);
+      assert.strictEqual(ctx.enviados.length, 0, 'modo desligado não envia card');
+      const txt = ctx.replies.join('\n');
+      assert.ok(/CARTEIRA E APOSTA/.test(txt), 'texto tem o painel');
+      assert.ok(/Saldo:/.test(txt) && /Disponível/.test(txt), 'texto traz o saldo');
+      assert.ok(/Aposta mínima/.test(txt) && /máxima agora/.test(txt), 'texto traz mín/máx');
+      assert.ok(/tigrinho jogar <valor>/.test(txt), 'texto traz o comando do giro');
+      assert.ok(/Última rodada validada|Nenhuma rodada validada/.test(txt), 'texto traz o estado da rodada');
+    } finally {
+      settings.setMenuHtmlEnabled(true);
+    }
+    ok('7: !modohtml off — fluxo textual com os mesmos dados e comandos');
+  } catch (e) {
+    fail('7: modohtml off', e);
+  }
+
+  /* ------------- 8) subcomandos antigos preservados ------------------ */
+  try {
+    assert.strictEqual(cmd.category, 'rpg', 'categoria rpg preservada');
+    assert.deepStrictEqual(cmd.commands, ['tigrinho'], 'trigger preservado');
+    assert.deepStrictEqual(cmd.aliases, [], 'sem alias novo');
+    const casos = [
+      [['fichas'], /SALDO|Saldo/],
+      [['historico'], /HISTÓRICO|HISTORICO|ainda não girou/i],
+      [['ranking'], /RANKING|vazio/i],
+      [['ajuda'], /AJUDA|JACKPOT/],
+      [['acelerar'], /AJUDA|JACKPOT/],
+    ];
+    for (const [args, re] of casos) {
+      const ctx = fakeCtx({ args });
+      await cmd.execute(ctx);
+      assert.ok(re.test(ctx.replies.join('\n')), `!tigrinho ${args.join(' ')} responde`);
+    }
+    ok('8: subcomandos do tigrinho preservados (fichas/historico/ranking/ajuda)');
+  } catch (e) {
+    fail('8: subcomandos', e);
+  }
+
+  /* ------- 9) apostas simultâneas entre jogos não estouram saldo ----- */
+  try {
+    const S = '5511944444444@s.whatsapp.net';
+    economy.setWallet(S, 300);
+    const cacatesouro = registry.getCommand('cacatesouro');
+    const a = fakeCtx({ args: ['jogar', '3', '250'], sender: S, msgId: 'SIM-CACA' });
+    const b = fakeCtx({ args: ['jogar', '250'], sender: S, msgId: 'SIM-TIG' });
+    await Promise.all([cacatesouro.execute(a), cmd.execute(b)]);
+    assert.ok(economy.get(S).wallet >= 0, 'saldo nunca negativo');
+    const apostas = database.get().prepare('SELECT * FROM game_bets WHERE user_id = ?').all(S);
+    assert.strictEqual(apostas.length, 1, 'só uma aposta foi registrada (a outra foi recusada)');
+    assert.strictEqual(apostas[0].bet, 250, 'a aposta registrada é a de 250');
+    const rodadas = database.get().prepare('SELECT * FROM game_rounds WHERE user_id = ?').all(S);
+    const premio = rodadas.length ? rodadas[0].reward : 0;
+    assert.strictEqual(
+      economy.get(S).wallet,
+      300 - 250 + premio,
+      `300 - 250 + ${premio} (prêmio do giro que passou) = saldo íntegro`
+    );
+    ok('9: apostas simultâneas caça + tigrinho — uma só passa, saldo íntegro');
+  } catch (e) {
+    fail('9: simultâneas', e);
+  }
+
+  /* ------------------ 10) jsdom: painel + rever rodada --------------- */
+  let jsdom = null;
+  try {
+    jsdom = require('jsdom');
+  } catch (_) {
+    skip('10: card no jsdom', 'jsdom não instalado');
+  }
+  if (jsdom) {
+    try {
+      const J = '5511955555555@s.whatsapp.net';
+      economy.setWallet(J, 800);
+      // um giro real para ter resultado validado
+      const girar = fakeCtx({ args: ['jogar', '200'], sender: J, msgId: 'JS-SPIN' });
+      await cmd.execute(girar);
+      const rodada = rounds.get(`tigrinho:${J}:JS-SPIN`);
+      const ctx = fakeCtx({ args: [], sender: J, msgId: 'JS-OPEN' });
+      await cmd.execute(ctx);
+      const dom = new jsdom.JSDOM(card(ctx), { runScripts: 'dangerously', pretendToBeVisual: true });
+      const win = dom.window;
+      const doc = win.document;
+      // o card entrega o resultado VALIDADO (nada de prêmio calculado no HTML)
+      // atençao: arrays criados dentro do jsdom são de outro "realm" — comparar por valor
+      const resultado = win.__tigrinho.resultado();
+      assert.strictEqual(resultado.reward, rodada.reward, 'prêmio do card = prêmio validado pelo bot');
+      assert.strictEqual(resultado.bet, 200, 'aposta do card = aposta cobrada');
+      assert.strictEqual(
+        JSON.stringify(resultado.reels.map((c) => c[1])),
+        JSON.stringify(rodada.payload.reels.map((c) => c[1])),
+        'rolos do card = rolos validados'
+      );
+      // painel: validação e cópia do comando do giro
+      const inp = doc.getElementById('bp-in-tigrinho');
+      const go = doc.getElementById('bp-go-tigrinho');
+      const erro = doc.getElementById('bp-erro-tigrinho');
+      assert.ok(inp && go, 'painel presente no card');
+      const digitar = (v) => {
+        inp.value = v;
+        inp.dispatchEvent(new win.Event('input', { bubbles: true }));
+      };
+      digitar('-10');
+      assert.strictEqual(go.disabled, true, 'negativo recusado na tela');
+      assert.ok(/negativo/i.test(erro.textContent), 'explica o negativo');
+      digitar('0');
+      assert.ok(/maior que zero/i.test(erro.textContent), 'explica o zero');
+      digitar('1,5');
+      assert.ok(/centavos/i.test(erro.textContent), 'explica os centavos');
+      digitar('9999999');
+      assert.ok(/insuficiente|limite/i.test(erro.textContent), 'explica o limite/saldo');
+      digitar('150');
+      assert.strictEqual(go.disabled, false, 'valor válido habilita');
+      go.dispatchEvent(new win.Event('click', { bubbles: true }));
+      assert.ok(/tigrinho jogar 150/.test(doc.getElementById('bp-cmd-tigrinho').textContent), 'copia o comando do giro');
+      // rever a rodada termina no resultado validado
+      const replay = doc.getElementById('replay');
+      assert.strictEqual(replay.disabled, false, 'botão de rever ativo (há rodada validada)');
+      ok('10: card no jsdom — painel valida/copia e o card mostra o resultado do bot');
+    } catch (e) {
+      fail('10: jsdom', e);
+    }
+
+    try {
+      // sem rodada validada o botão fica desativado (não inventa giro)
+      const N = '5511966666666@s.whatsapp.net';
+      const ctx = fakeCtx({ args: [], sender: N, msgId: 'JS-EMPTY' });
+      await cmd.execute(ctx);
+      const dom = new jsdom.JSDOM(card(ctx), { runScripts: 'dangerously', pretendToBeVisual: true });
+      const doc = dom.window.document;
+      assert.strictEqual(doc.getElementById('replay').disabled, true, 'sem rodada: botão de rever desativado');
+      assert.ok(/NENHUMA RODADA VALIDADA/i.test(doc.getElementById('status').textContent), 'diz o que falta');
+      ok('11: sem rodada validada — o card não finge girar e diz o que falta');
+    } catch (e) {
+      fail('11: jsdom vazio', e);
+    }
+  }
+
+  /* ---------------- 12) reinício não apaga rodada -------------------- */
+  try {
+    const R = '5511977777777@s.whatsapp.net';
+    economy.setWallet(R, 600);
+    await cmd.execute(fakeCtx({ args: ['jogar', '100'], sender: R, msgId: 'REST-TIG' }));
+    const saldo = economy.get(R).wallet;
+    const spins = store.getPlayer(R).spins;
+    const script =
+      `process.env.DATABASE_FILE=${JSON.stringify(DB)};` +
+      `process.env.OWNER_NUMBER='5511999999999';` +
+      `require('${process.cwd()}/database/database').open();` +
+      `require('${process.cwd()}/commands/loader').loadCommands(true);` +
+      `const s=require('${process.cwd()}/database/tigrinho');` +
+      `const r=require('${process.cwd()}/database/gameRounds');` +
+      `const w=require('${process.cwd()}/utils/gameWallet');` +
+      `console.log(JSON.stringify({saldo:w.saldo(${JSON.stringify(R)}).wallet,spins:s.getPlayer(${JSON.stringify(
+        R
+      )}).spins,ultima:!!r.ultima(${JSON.stringify(R)},'tigrinho')}));`;
+    const saida = execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', env: process.env });
+    const json = JSON.parse(saida.trim().split('\n').pop());
+    assert.strictEqual(json.saldo, saldo, 'saldo preservado depois do reinício');
+    assert.strictEqual(json.spins, spins, 'estatística preservada');
+    assert.strictEqual(json.ultima, true, 'rodada validada continua disponível para o card');
+    ok('12: reinício — rodada, saldo e estatística continuam no banco');
+  } catch (e) {
+    fail('12: reinício', e);
+  }
+
+  console.log(`\n${feitos} ✅ · ${falhas} ❌`);
+  process.exit(falhas ? 1 : 0);
+}
+
+main().catch((e) => {
+  console.error('❌ erro fatal:', e);
+  process.exit(1);
+});

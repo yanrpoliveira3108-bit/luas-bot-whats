@@ -99,4 +99,43 @@ async function abrir(ctx, opts = {}) {
   }
 }
 
-module.exports = { ESCOPO, htmlAtivo, htmlPermitido, status, setEnabled, abrir };
+/**
+ * O dono já mexeu na chave `menu_html` alguma vez?
+ * Permite distinguir "desligado de propósito" de "nunca configurou".
+ */
+function htmlFoiConfigurado() {
+  try {
+    return settings.get('menu_html', null) !== null;
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Decisão de HTML para os JOGOS (caça ao tesouro e tigrinho).
+ *
+ * Diferença em relação aos MENUS (htmlAtivo): o menu tradicional continua sendo
+ * o padrão de quem nunca configurou nada; já o tigrinho SEMPRE enviou o card
+ * visual, e o caça ao tesouro é pedido como interface HTML. Então:
+ *   - `!modohtml on`  → card (HTML);
+ *   - `!modohtml off` → texto (o fluxo textual tem os MESMOS dados e ações);
+ *   - nunca configurado → card (comportamento que os jogos já tinham);
+ *   - modo seguro ligado → nunca card (o payload é bloqueado).
+ * @returns {{usar:boolean, motivo:string}}
+ */
+function usarHtmlJogo() {
+  if (!htmlPermitido()) return { usar: false, motivo: 'modo seguro bloqueia cards HTML' };
+  if (htmlFoiConfigurado() && !htmlAtivo()) return { usar: false, motivo: 'modohtml desligado' };
+  return { usar: true, motivo: htmlAtivo() ? 'modohtml ligado' : 'padrão dos jogos' };
+}
+
+module.exports = {
+  ESCOPO,
+  htmlAtivo,
+  htmlPermitido,
+  htmlFoiConfigurado,
+  usarHtmlJogo,
+  status,
+  setEnabled,
+  abrir,
+};

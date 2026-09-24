@@ -19,6 +19,7 @@ Bot WhatsApp **modular, estável, seguro e profissional**, construído com **Nod
 - [Execução](#execução)
 - [Atualização](#atualização)
 - [Troubleshooting](#troubleshooting)
+- [Jogos com aposta (caça ao tesouro e tigrinho)](#jogos-com-aposta-caça-ao-tesouro-e-tigrinho)
 - [Restrição de conta / segurança de envio](#restrição-de-conta--segurança-de-envio)
 - [Recuperação](#recuperação)
 - [Desenvolvimento](#desenvolvimento)
@@ -483,6 +484,22 @@ site de verdade e diz, linha por linha, o que fazer. Detalhes em
 
 ---
 
+## Jogos com aposta (caça ao tesouro e tigrinho)
+
+Os dois jogos que movimentam LuaCoins usam **a mesma carteira**
+(`database/economy.js`) e a **mesma camada de aposta**:
+
+- `{prefix}cacatesouro` → 🗺️ caça ao tesouro de 3×3 até 13×13, com painel de
+  carteira/aposta, expedição única, pistas de vizinhança, armadilhas e TTL de
+  30 min. Também aceita `jogar <n> casual` (sem aposta) e `rapido` (o 3×3
+  antigo);
+- `{prefix}tigrinho` → 🐯 preservado, agora com o mesmo painel e com a animação
+  mostrando o **resultado validado pelo bot** (o card nunca sorteia pêmio).
+
+Detalhes completos (origem do saldo, parâmetros, regras de pagamento, o que o
+card pode fazer, testes): **[JOGOS-APOSTA.md](JOGOS-APOSTA.md)**.
+
+---
 ## Restrição de conta / segurança de envio
 
 Se aparecer o aviso **"conta restrita"** (ou o número parar de enviar), comece
