@@ -251,17 +251,62 @@ categoria no cabeçalho** (ex.: “⚙️ Geral”) ou no título da seção: ap
 que couber **no seu aparelho** — o card nunca pede mais do que a área que o
 aplicativo desenha (§2.2, item 5).
 
-**O card também PEDE a altura ao host**, pela ponte nativa do WebView
-(`AndroidBridge.updateSize`, a mesma que o formato usa para auto-altura), sem
-laço de medição: um pedido por valor, sempre com o px que o HTML já declara. Se
-o host não tiver a ponte ou ignorar, nada muda — e é por isso que o layout não
-depende disso.
+**O card NÃO pede resize ao host** (era o que encolhia o card — ver §2.3). A
+altura continua sendo o px declarado no CSS; a única coisa que o card faz com a
+área recebida é *medir* (e só encolher dentro do piso, §2.3).
 
 **Onde ajustar depois:** `menus/html/dimensoes.js` → `ESCALA` (texto e toque:
 `1.0` volta ao tamanho anterior, `1.3` é bem grande), `altura` (padrão 640),
 `alturaCurta` (quando o topo aperta), `larguraMax`, `toque`, `snav`,
 `tabAltura`, `folgaLateral`/`folgaInferior`, `passo`. Sem editar código:
 `MENU_HTML_HEIGHT` (altura) e `MENU_HTML_STEP` (passo das setas) — §3.
+
+### 2.3 Regressão 24/09 — “o menu voltou a ficar muito pequeno encolhido”
+
+**O que aconteceu.** O card apareceu no aparelho com ~244 px de altura (cabeçalho
+em modo denso, quase nenhum comando visível). Não era tamanho declarado (640 px):
+era o **encaixe em runtime** (`encaixar()`) aceitando uma medição pequena e
+*travando* o card ali.
+
+**Como foi reproduzido** (`node tmp/repro-menu.js`, jsdom, com um host que
+responde ao pedido de altura como um WebView Android responde — interpretando o
+número em px do aparelho e redimensionando a view):
+
+```
+host recebeu updateSize(640) → área do card virou 244px CSS (dpr 2.625)
+logo depois do load        area= 244px  html.height= 244px  curto=true
+depois de 2 interações     area= 244px  html.height= 244px  curto=true   ← travado
+```
+
+O encadeamento: `encaixar()` chamava `AndroidBridge.updateSize(640)` → o host
+redimensionava a view (640 px *do aparelho* = 244 px de CSS num dpr 2.625) →
+`resize` → `encaixar()` media 244 px, considerava “plausível” (≥ 240) e gravava
+`html/body{height:244px}`. Como só encolhe, **nunca voltava**. O pedido à ponte
+saiu no `4b83a5f` (densidade) junto com o resto.
+
+**Correção (o que mudou):**
+
+1. **Nenhum pedido de resize ao host.** A unidade que `AndroidBridge.updateSize`
+   espera (px de CSS? dp? px físico?) **não é verificável** daqui — pedir com a
+   unidade errada *encolhe* a view. A altura mora no CSS e pronto; é a mesma
+   decisão do helper de referência do formato, que só injeta `height` no HTML.
+2. **Piso de encolhimento** (`alturaEncolhidaMin`, 480 px): medida abaixo disso é
+   **ignorada** — o card fica na altura declarada e o host corta/rola o excedente
+   (limite do aplicativo). Antes: 244 px aplicava.
+3. **Medida estável** (`medidasEstaveis`, 2): encolher só com a **mesma** medida
+   repetida — uma leitura isolada pode ser a animação de abertura da view. Crescer
+   de volta para a altura declarada é imediato (nunca fica preso pequeno).
+
+**Testes que impedem a volta** (`test/menuhtml.test.js`, bloco 20m — roda com
+jsdom): medição de 1 px não encolhe; **244 px (< piso) é ignorada**; medida válida
+de 560 px só encaixa **na segunda leitura igual**; 900 px volta à altura declarada.
+O bloco 20q garante que **nenhum** `updateSize` é chamado, e o rodapé continua
+mostrando a área real quando o aplicativo limita.
+
+**Onde ajustar (um lugar só):** `menus/html/dimensoes.js` → `altura` (640),
+`alturaEncolhidaMin` (480), `medidasEstaveis` (2), `alturaCurta` (480), `ESCALA`.
+Sem editar código: `MENU_HTML_HEIGHT` e `MENU_HTML_STEP` (§3).
+
 
 ---
 
@@ -286,6 +331,7 @@ Variáveis opcionais (não precisam ser definidas):
 | `MENU_HTML_MAX_PER_CAT` | `30` | máximo de comandos por categoria no card |
 | `MENU_HTML_HEIGHT` | `640` | altura do card em px (240–900); o card ainda encolhe se o WebView for menor (ver §2.2) |
 | `MENU_HTML_STEP` | `0.7` | quanto cada toque das setas anda, como fração da área visível (aceita 0.05–1) |
+| (sem env) `alturaEncolhidaMin` | `480` | **piso do encolhimento** em `menus/html/dimensoes.js`: medida de área abaixo disso é ignorada (o card não vira selo) — §2.3 |
 
 O corte é adaptativo (reduz por categoria em passos até caber) e o card mostra
 “Mostrando X de Y comandos” com o atalho `!menucompleto <categoria>` para ver a
@@ -340,7 +386,7 @@ ambiente documentado por terceiros, coerente com o item 2.
 | `trustedSources` libera rede? | **Não** |
 | Tem armazenamento? | **Não.** `localStorage`/`sessionStorage`/`indexedDB`/`document.cookie` lançam erro |
 | Dá para navegar (`<a href="https://…">`)? | **Não conta como caminho.** No aparelho o toque não abriu o chat, e o WebView não oferece API para pedir execução |
-| Existe ponte `HTML → bot`? | **Não.** A única ponte nativa exposta é `AndroidBridge.updateSize` (altura do card) |
+| Existe ponte `HTML → bot`? | **Não.** O card não chama nenhuma ponte nativa (não pedimos resize — §2.3) |
 
 Ou seja: o botão antigo (`<a href="https://wa.me/…">Usar</a>`) **não tinha como
 executar o comando** — nem no privado, nem no grupo. Mesmo no melhor caso (o

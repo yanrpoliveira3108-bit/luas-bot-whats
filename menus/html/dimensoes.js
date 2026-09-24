@@ -49,6 +49,21 @@ const DIM = {
   alturaMin: 240,
   alturaMax: 900,
   /**
+   * PISO do encolhimento em runtime. Regressão real (24/09, no aparelho): o
+   * card apareceu "muito pequeno encolhido" — o `encaixar()` aceitava UMA
+   * medição pequena (área transitória do WebView, ou o host devolvendo
+   * `altura/dpr`) e travava a altura ali para sempre, com o cabeçalho no modo
+   * `body.curto`. Agora: medida abaixo deste piso é IGNORADA (o card fica na
+   * altura declarada, `altura`, e o host corta/rola o que não couber — limite
+   * do aplicativo, não nosso). Evidência e reprodução em MENUS-HTML.md §2.3.
+   */
+  alturaEncolhidaMin: 480,
+  /**
+   * Quantas medições IGUAIS e consecutivas são exigidas para aceitar encolher.
+   * Uma sozinha pode ser a animação de abertura da view (medida transitória).
+   */
+  medidasEstaveis: 2,
+  /**
    * Abaixo disso o cliente aperta o topo (body.curto): o cabeçalho fica com uma
    * linha, a linha da categoria na lista sai (ela já aparece no cabeçalho e na
    * aba ativa), a descrição fica com 1 linha e o rodapé some. Tudo isso é

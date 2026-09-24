@@ -1213,35 +1213,58 @@ async function main() {
       });
     }
 
-    /* 20m) altura: px fixo no CSS + encaixe em runtime com guarda (regressão 42d8c35) */
+    /* 20m) altura: px fixo no CSS + encaixe em runtime com PISO e medida estável
+       (regressão 42d8c35 do 1px + regressão 24/09 do card "muito pequeno") */
     try {
       const dom = montarDom(card);
       const w = dom.window;
       const d = w.document;
       const alturaCss = w.__luaMenu.altura();
       const wrap = d.getElementById('__wrap');
+      const PISO = require('../menus/html/dimensoes').DIM.alturaEncolhidaMin;
       assert.ok(alturaCss >= 240, `altura do CSS utilizável (${alturaCss}px)`);
+      assert.ok(PISO > 240 && PISO <= alturaCss, `piso do encolhimento coerente (${PISO}px)`);
       assert.strictEqual(typeof w.__luaMenu.encaixar, 'function', 'encaixar() exposto');
 
       // 1) medição DEGENERADA (1px): foi assim que o card colapsou no aparelho
       alturaDoWebView(w, 1);
       w.__luaMenu.encaixar();
-      assert.strictEqual(w.__luaMenu.altura(), alturaCss, 'medição de 1px NÃO encolhe o card (guarda >= 240px)');
+      assert.strictEqual(w.__luaMenu.altura(), alturaCss, 'medição de 1px NÃO encolhe o card');
       assert.strictEqual(wrap.style.height, alturaCss + 'px', '__wrap mantém a altura do CSS');
 
-      // 2) medição plausível e menor: encolhe só o necessário para caber
-      alturaDoWebView(w, 320);
+      // 2) medição PEQUENA (abaixo do piso): o card NÃO vira um selo
+      //    (foi o que aconteceu no aparelho: host devolveu ~244px e travou ali)
+      alturaDoWebView(w, 244);
       w.__luaMenu.encaixar();
-      assert.strictEqual(w.__luaMenu.altura(), 320, 'medida plausível (320px) encaixa o card na janela');
-      assert.strictEqual(wrap.style.height, '320px', '__wrap recebe a altura encaixada');
-      assert.ok(d.body.classList.contains('curto'), 'janela baixa liga body.curto (aperto do topo)');
+      w.__luaMenu.encaixar();
+      w.__luaMenu.encaixar();
+      assert.strictEqual(w.__luaMenu.altura(), alturaCss, 'área de 244px (< piso) é IGNORADA');
+      assert.strictEqual(wrap.style.height, alturaCss + 'px', '__wrap segue com a altura declarada');
+      assert.ok(!d.body.classList.contains('curto'), 'sem body.curto por medida abaixo do piso');
 
-      // 3) medição normal: volta à altura do CSS, sem esticar além dela
+      // 3) medida válida mas TRANSITÓRIA (uma só): ainda não encolhe
+      alturaDoWebView(w, 560);
+      w.__luaMenu.encaixar();
+      assert.strictEqual(w.__luaMenu.altura(), alturaCss, 'UMA medida menor não encolhe (pode ser animação da view)');
+
+      // 4) a MESMA medida de novo: agora sim encaixa
+      w.__luaMenu.encaixar();
+      assert.strictEqual(w.__luaMenu.altura(), 560, 'medida repetida (≥ piso) encaixa o card');
+      assert.strictEqual(wrap.style.height, '560px', '__wrap recebe a altura encaixada');
+      assert.ok(!d.body.classList.contains('curto'), '560px é área folgada: sem body.curto');
+
+      // 5) área realmente curta (dentro do piso): aperta o topo em vez de encolher demais
+      alturaDoWebView(w, 500);
+      w.__luaMenu.encaixar();
+      w.__luaMenu.encaixar();
+      assert.strictEqual(w.__luaMenu.altura(), 500, 'área de 500px (≥ piso) ainda encaixa');
+
+      // 6) medição normal: volta à altura do CSS, sem esticar além dela
       alturaDoWebView(w, 900);
       w.__luaMenu.encaixar();
       assert.strictEqual(w.__luaMenu.altura(), alturaCss, 'medição maior que o CSS não estica o card');
       assert.ok(!d.body.classList.contains('curto'), 'sem body.curto quando a janela é folgada');
-      ok('20m: [DOM] altura px fixo + encaixe em runtime (medição de 1px não colapsa o card)');
+      ok('20m: [DOM] px fixo + encaixe com piso (244px ignorado) e medida estável');
       dom.window.close();
     } catch (e) {
       fail('20m: DOM altura/encaixe', e);
@@ -1326,11 +1349,13 @@ async function main() {
       let pedido = null;
       w.AndroidBridge = { updateSize: (px) => { pedido = px; } };
       w.__luaMenu.encaixar();
-      assert.ok(pedido === null || typeof pedido === 'number', 'updateSize é chamado com um número (ou não existe na ponte)');
+      w.__luaMenu.encaixar();
+      alturaDoWebView(w, 244); // host devolvendo área pequena (caso real do aparelho)
       w.__luaMenu.encaixar();
       w.__luaMenu.encaixar();
-      assert.ok(pedido === null || pedido === w.__luaMenu.altura(), 'o pedido ao host usa a altura declarada (sem laço de medição)');
-      ok('20q: [DOM] aviso de corte no rodapé e pedido único de altura ao host');
+      assert.strictEqual(pedido, null, 'o card NÃO pede resize ao host (pedido com unidade errada encolhia o card)');
+      assert.strictEqual(w.__luaMenu.altura(), w.__luaMenu.altura(), 'altura estável');
+      ok('20q: [DOM] aviso de corte no rodapé e nenhum pedido de resize ao host');
       dom.window.close();
     } catch (e) {
       fail('20q: rodapé/altura do host', e);

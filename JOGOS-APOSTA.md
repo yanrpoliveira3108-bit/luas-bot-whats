@@ -248,13 +248,55 @@ Automatizados:
   saldo, texto equivalente com `!modohtml off`, subcomandos preservados, apostas
   simultâneas entre jogos, jsdom (painel valida/copia + card = resultado do bot) e
   reinício sem perder rodada/saldo/estatística.
+- `test/esquemajogos.test.js` — **6/6**: integridade do array `MIGRATIONS` (sem
+  buracos de vírgula), as 3 tabelas com as colunas usadas, banco com version
+  adiantada + tabelas ausentes **curado** na abertura, coluna ausente adicionada
+  sem perder dados, os dois comandos rodando de verdade depois da cura e o
+  `scripts/jogos-doctor.js` rodando nesse banco problemático.
 - Suíte completa: `npm test` (auditoria + smokes + todos os testes, incluindo os
-  dois acima) e `npm run menu:check` (guarda estática do card do menu).
+  três acima) e `npm run menu:check` (guarda estática do card do menu).
 
 Depende do aparelho (não dá para provar no sandbox): o WebView do card é
 **Android-only**, sem volta para o bot e sem rede — por isso o fluxo “copiar +
 enviar” é o único caminho suportado, e a conferência final (toque nas setas,
 cópia, animação) precisa ser feita no seu WhatsApp.
+
+### 8.1 “Algo deu errado” nos jogos — como descobrir a causa no aparelho
+
+Os dois comandos têm um `try/catch` que respondia a mesma frase genérica para
+todo mundo. Isso foi **corrigido**: o **dono** agora recebe o motivo real **e a
+linha onde falhou** (`arquivo:linha`), e o resto do grupo continua com a frase
+curta. Exemplo do que o dono vê:
+
+```
+⚠️ Erro na expedição: no such table: game_bets
+▸ at Object.criarExpedicao (/…/database/treasure.js:120:9)
+▸ Detalhes no log (módulo tesouro).
+```
+
+Para olhar tudo de uma vez, no Termux:
+
+```
+npm run jogos:doctor          # = node scripts/jogos-doctor.js
+```
+
+O doctor **não envia nada no WhatsApp** (usa um socket falso e um chat de teste)
+e mostra: node, caminho do banco, **version** de `schema_migrations`, as tabelas
+`game_bets`/`treasure_games`/`game_rounds` com as colunas, o estado do
+`menu_html`/modo seguro, e executa `!cacatesouro`, `!cacatesouro 3`, `!tigrinho`
+e `!menu` registrando **o erro completo com stack** (ou “card enviado” quando
+está tudo certo). Salva o relatório em `tmp/jogos-doctor.txt`.
+
+**Causa já tratada de forma automática.** A `version` de `schema_migrations` é o
+índice da migração + 1. Num banco cuja version esteja **adiante** do código
+(banco vindo de outro deploy/revisão), a migração dos jogos **nunca roda** e as
+três tabelas ficam faltando — exatamente o quadro em que *os dois* comandos
+respondem erro (os dois usam essas tabelas). Agora o `open()` confere o esquema
+**por medição** (tabelas e colunas reais em `sqlite_master`/`PRAGMA`) e cria o
+que faltar, sem apagar nada e sem reescrever a version do banco
+(`database/database.js` → `ensureGameSchema()`; migração 36 = `GAME_TABELAS_SQL`
++ `GAME_INDICES_SQL`). Cobertura em `test/esquemajogos.test.js`.
+
 
 ---
 
@@ -267,3 +309,6 @@ cópia, animação) precisa ser feita no seu WhatsApp.
 - Textos e regras mostrados antes de confirmar: `utils/betPanel.js` +
   `regrasDoJogo()` de cada comando.
 - TTL da expedição: `database/treasure.js` (`TTL_INATIVA_MS`).
+- Esquema do banco dos jogos: `database/database.js` (`GAME_TABELAS_SQL`,
+  `GAME_INDICES_SQL`, migração 36 e a auto-cura `ensureGameSchema()`).
+- Diagnóstico no aparelho: `scripts/jogos-doctor.js` (`npm run jogos:doctor`).

@@ -16,7 +16,9 @@
  *         trustedSources     = não muda isso (testado com host dentro e fora)
  *         storage            = localStorage/sessionStorage/cookie/indexedDB
  *                              lançam SecurityError
- *         ponte JS           = só `AndroidBridge.updateSize` (altura do card)
+ *         ponte JS           = `AndroidBridge.updateSize` existe no WebView, mas
+ *                              NÃO a usamos: a unidade que ela espera não é
+ *                              verificável e o pedido encolhia o card (§2.3)
  *       Nós NÃO conseguimos repetir essa medição daqui (o sandbox não tem o
  *       WebView do WhatsApp) — então isto é documentação de terceiros, tratada
  *       como hipótese de projeto, não como medida nossa.

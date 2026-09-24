@@ -76,6 +76,9 @@ function buildJs(initialCategory, opts = {}) {
   // Guarda do encaixe e corte do body.curto: MESMOS números do dimensoes.js.
   const alturaMin = DIM.alturaMin;
   const alturaCurta = DIM.alturaCurta;
+  // piso do encolhimento e confirmação da medida (ver dimensoes.js)
+  const alturaPiso = Math.min(DIM.alturaEncolhidaMin, alturaCss);
+  const medidasEstaveis = Math.max(1, Number(DIM.medidasEstaveis) || 2);
   return `
 (function(){
 "use strict";
@@ -96,21 +99,37 @@ m:"Para mencionar alguém use @ no chat depois de colar: digitar @nome não marc
 md:"Usa mídia enviada ou respondida no chat."};
 var st={tela:"list",cat:inicial,busca:"",rol:{},faixa:0,campos:{},cmd:"",pilha:[]};
 var timer=null,copiouEm=0,alvo=null,alvoEm=0;
-var ALTURA_CSS=${alturaCss},ALTURA_MIN=${alturaMin},CURTO=${alturaCurta},alturaAtual=0,medido=0,pedido=0;
+var ALTURA_CSS=${alturaCss},ALTURA_MIN=${alturaMin},PISO=${alturaPiso},CURTO=${alturaCurta},
+ESTAVEIS=${medidasEstaveis},alturaAtual=0,medido=0,anterior=-1,iguais=0;
 /* PASSO = fração da área visível por toque (único ponto de ajuste). */
 var PASSO=${passo};
 
 function reduz(){try{return !!(window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches)}catch(e){return false}}
 
-/* Encaixe de altura em RUNTIME (CSS fica em px fixo — ver templates.js):
-   só encolhe, só com medida PLAUSÍVEL (>=240px) e volta ao CSS se a janela
-   folgar. Medida de 0/1px é ignorada de propósito: foi com uma medida dessas
-   que a altura presa à viewport virou uma faixa de 1px (ver MENUS-HTML.md). */
+/* Encaixe de altura em RUNTIME (CSS fica em px fixo — ver templates.js).
+   Regras (todas com evidência — MENUS-HTML.md 2.3):
+     1. SO ENCOLHE, nunca acima da altura declarada;
+     2. medida menor que PISO é IGNORADA: um card de 244px já apareceu no
+        aparelho porque o host devolveu "altura/dpr" depois de um pedido de
+        resize. O card nunca fica menor que o piso por causa de UMA medida;
+     3. a medida precisa se repetir ESTAVEIS vezes (animacao de abertura da
+        view da medidas transitorias);
+     4. crescer de volta para ALTURA_CSS e imediato (nao trava pequeno).
+   NENHUM pedido de resize e feito ao host: a altura mora no CSS e o numero que
+   uma ponte nativa espera (px de CSS? dp? px fisico?) nao e verificavel daqui —
+   pedir com a unidade errada FOI o que encolheu o card. */
 function encaixar(){
   var h=0;
   try{h=document.documentElement.clientHeight||0}catch(e){h=0}
-  var alvo=(h>=ALTURA_MIN&&h<ALTURA_CSS)?h:ALTURA_CSS;
   medido=h||0;
+  var pequena=h>=ALTURA_MIN&&h<PISO;          /* medida transitória/absurda */
+  var aceita=h>=PISO&&h<ALTURA_CSS;           /* encolhimento legitimo      */
+  if(pequena||(!aceita&&h>0&&h<ALTURA_MIN)){iguais=0;anterior=-1}
+  if(aceita){
+    if(h===anterior){iguais++}else{anterior=h;iguais=1}
+    if(iguais<ESTAVEIS){notaMedida();return}
+  }
+  var alvo=aceita?h:ALTURA_CSS;
   if(alvo===alturaAtual)return;
   alturaAtual=alvo;
   var px=alvo+"px",raiz=document.documentElement;
@@ -120,27 +139,13 @@ function encaixar(){
   });
   if(document.body)document.body.classList.toggle("curto",alvo<CURTO);
   notaMedida();
-  pedirAltura();
   setas();
-}
-/* Pede ao HOST a altura declarada, pela ponte nativa do WebView
-   (AndroidBridge.updateSize — a mesma que o helper de referência do formato usa
-   para auto-altura). Enviamos SEMPRE o px que o HTML já declara, então não há
-   laço de medição: um pedido por valor, dentro de try/catch. Se o host não
-   tiver a ponte ou ignorar o pedido, nada muda. */
-function pedirAltura(){
-  if(pedido===ALTURA_CSS)return;
-  pedido=ALTURA_CSS;
-  try{
-    if(window.AndroidBridge&&typeof window.AndroidBridge.updateSize==="function"){
-      window.AndroidBridge.updateSize(ALTURA_CSS);
-    }
-  }catch(e){}
 }
 function notaMedida(){
   var el=document.getElementById("lua-medida");if(!el)return;
-  if(medido>=ALTURA_MIN&&medido<ALTURA_CSS){
-    el.textContent="▸ área do card aqui: "+medido+"px (pedido "+ALTURA_CSS+"px) — é o que o aplicativo desenha";
+  if(medido>0&&medido<ALTURA_CSS){
+    var extra=medido<PISO?" — abaixo do piso "+PISO+"px, mantido o pedido":"";
+    el.textContent="▸ área do card aqui: "+medido+"px (pedido "+ALTURA_CSS+"px)"+extra;
     el.hidden=false;
   }else{
     el.hidden=true;

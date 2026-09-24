@@ -626,16 +626,22 @@ async function enviarCard(ctx, prefix, extra = {}) {
   const { painel, dados } = montarPainel(ctx.sender, prefix);
   const p = store.getPlayer(ctx.sender);
   const ultima = extra.ultima === undefined ? rodadaValidada(ctx.sender) : extra.ultima;
-  const html = buildMachineHtml({
-    balance: dados.indisponivel ? null : dados.saldo.wallet,
-    jackpots: p.jackpots,
-    coin: moeda().emoji,
-    prefix,
-    painel,
-    ultima,
-    recuperada: extra.recuperada || null,
-    aviso: dados.indisponivel ? dados.bloqueio : '',
-  });
+  let html = null;
+  try {
+    html = buildMachineHtml({
+      balance: dados.indisponivel ? null : dados.saldo.wallet,
+      jackpots: p.jackpots,
+      coin: moeda().emoji,
+      prefix,
+      painel,
+      ultima,
+      recuperada: extra.recuperada || null,
+      aviso: dados.indisponivel ? dados.bloqueio : '',
+    });
+  } catch (err) {
+    logger.error({ err: err && err.message }, '[LUA TIGRINHO] falha ao montar o card — seguindo no texto');
+    return false;
+  }
   if (!html) return false;
   try {
     await richHtml.sendHtml(ctx.socket, ctx.remoteJid, html, { title: '🐯 Lua Tigrinho' });
@@ -731,19 +737,18 @@ async function handleOpen(ctx, prefix) {
   const ultima = rodadaValidada(ctx.sender);
   logger.info({ user: ctx.sender, saldo: dados.saldo.wallet }, '[LUA TIGRINHO] Interface aberta');
 
-  const html = buildMachineHtml({
-    balance: dados.indisponivel ? null : dados.saldo.wallet,
-    jackpots: p.jackpots,
-    coin: moeda().emoji,
-    prefix,
-    painel,
-    ultima,
-    recuperada: rec,
-    aviso: dados.indisponivel ? dados.bloqueio : '',
-  });
-
   if (menuFormat.usarHtmlJogo().usar) {
     try {
+      const html = buildMachineHtml({
+        balance: dados.indisponivel ? null : dados.saldo.wallet,
+        jackpots: p.jackpots,
+        coin: moeda().emoji,
+        prefix,
+        painel,
+        ultima,
+        recuperada: rec,
+        aviso: dados.indisponivel ? dados.bloqueio : '',
+      });
       await richHtml.sendHtml(ctx.socket, ctx.remoteJid, html, { title: '🐯 Lua Tigrinho' });
       return;
     } catch (err) {
@@ -811,8 +816,17 @@ module.exports = [
             return await handleHelp(ctx, prefix);
         }
       } catch (err) {
-        logger.error({ err: (err && err.message) || String(err), sub }, '[LUA TIGRINHO] Erro');
-        await ctx.reply('⚠️ Algo deu errado no tigrinho. Tente de novo em instantes.');
+        const motivo = (err && err.message) || String(err);
+        // o primeiro frame do stack diz ONDE falhou (arquivo:linha) — é o que
+        // permite achar a causa sem precisar de print da conversa
+        const onde = String((err && err.stack) || '').split('\n')[1];
+        logger.error({ err: motivo, stack: err && err.stack, sub }, '[LUA TIGRINHO] Erro');
+        // o DONO recebe o motivo real (diagnóstico); os outros, a mensagem curta
+        await ctx.reply(
+          ctx.isOwner
+            ? `⚠️ Erro no tigrinho: ${motivo}${onde ? `\n▸ ${onde.trim()}` : ''}\n▸ Detalhes no log (módulo tigrinho).`
+            : '⚠️ Algo deu errado no tigrinho. Tente de novo em instantes.'
+        );
       }
     },
   },

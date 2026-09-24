@@ -499,6 +499,10 @@ Os dois jogos que movimentam LuaCoins usam **a mesma carteira**
 Detalhes completos (origem do saldo, parâmetros, regras de pagamento, o que o
 card pode fazer, testes): **[JOGOS-APOSTA.md](JOGOS-APOSTA.md)**.
 
+Se algum jogo responder “algo deu errado”, rode `npm run jogos:doctor`: ele
+mostra a causa real (com stack) e o estado do banco, sem enviar nada no
+WhatsApp.
+
 ---
 ## Restrição de conta / segurança de envio
 

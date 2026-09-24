@@ -23,6 +23,155 @@ const prepared = new Map();
 
 /* --------------------------- migrations --------------------------- */
 
+/**
+ * SQL das tabelas dos JOGOS (livro-caixa de apostas, expedições e rodadas).
+ *
+ * Fica numa constante porque é usado em DOIS lugares:
+ *   1. na migração 36 (bancos novos/atualizados normalmente);
+ *   2. em `ensureGameSchema()`, a rede de segurança do `open()`.
+ *
+ * Por que a rede de segurança existe: a `version` de `schema_migrations` é o
+ * ÍNDICE da migração + 1. Se o banco já estiver com uma version MAIOR (banco
+ * vindo de outro estado do código), a migração acima NUNCA roda e as tabelas
+ * dos jogos ficariam faltando — os comandos responderiam "algo deu errado" com
+ * erro de SQLite. `ensureGameSchema()` confere o esquema de verdade (tabelas e
+ * colunas) depois de migrar e conserta o que faltar, sem apagar dado.
+ */
+const GAME_TABELAS_SQL = `CREATE TABLE IF NOT EXISTS game_bets (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    game TEXT NOT NULL,
+    bet INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'settled',
+    reward INTEGER NOT NULL DEFAULT 0,
+    ref_id TEXT DEFAULT '',
+    created_at TEXT DEFAULT '',
+    settled_at TEXT DEFAULT ''
+  );
+  CREATE TABLE IF NOT EXISTS treasure_games (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    chat_id TEXT DEFAULT '',
+    size INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    bet INTEGER NOT NULL DEFAULT 0,
+    reward INTEGER NOT NULL DEFAULT 0,
+    digs_total INTEGER NOT NULL DEFAULT 0,
+    digs_used INTEGER NOT NULL DEFAULT 0,
+    treasures_total INTEGER NOT NULL DEFAULT 0,
+    treasures_found INTEGER NOT NULL DEFAULT 0,
+    traps_total INTEGER NOT NULL DEFAULT 0,
+    secret TEXT NOT NULL DEFAULT '{}',
+    revealed TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT DEFAULT '',
+    updated_at TEXT DEFAULT '',
+    expires_at TEXT DEFAULT '',
+    finished_at TEXT DEFAULT ''
+  );
+  CREATE TABLE IF NOT EXISTS game_rounds (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    game TEXT NOT NULL DEFAULT 'tigrinho',
+    bet INTEGER NOT NULL DEFAULT 0,
+    reward INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL DEFAULT 'settled',
+    payload TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT DEFAULT '',
+    settled_at TEXT DEFAULT ''
+  );`;
+
+const GAME_INDICES_SQL = `CREATE INDEX IF NOT EXISTS idx_game_bets_user_game ON game_bets(user_id, game, created_at);
+  CREATE INDEX IF NOT EXISTS idx_game_bets_ref ON game_bets(ref_id);
+  CREATE INDEX IF NOT EXISTS idx_treasure_user ON treasure_games(user_id, status);
+  CREATE INDEX IF NOT EXISTS idx_treasure_chat ON treasure_games(chat_id, status);
+  CREATE INDEX IF NOT EXISTS idx_game_rounds_user ON game_rounds(user_id, game, created_at);`;
+
+/**
+ * SQL completo do esquema dos jogos (tabelas + índices) — usado pela
+ * migração. A separação existe porque `ensureGameSchema()` precisa criar
+ * TABELAS, depois as COLUNAS que faltam, e só então os ÍNDICES: um índice
+ * em cima de coluna que ainda não existe derruba a abertura do banco.
+ */
+const GAME_SCHEMA_SQL = GAME_TABELAS_SQL + '\n' + GAME_INDICES_SQL;
+
+/** Colunas obrigatórias de cada tabela dos jogos (nome → definição com default). */
+const GAME_SCHEMA_COLUNAS = {
+  game_bets: {
+    user_id: "TEXT NOT NULL DEFAULT ''",
+    game: "TEXT NOT NULL DEFAULT ''",
+    bet: 'INTEGER NOT NULL DEFAULT 0',
+    status: "TEXT NOT NULL DEFAULT 'settled'",
+    reward: 'INTEGER NOT NULL DEFAULT 0',
+    ref_id: "TEXT DEFAULT ''",
+    created_at: "TEXT DEFAULT ''",
+    settled_at: "TEXT DEFAULT ''",
+  },
+  treasure_games: {
+    user_id: "TEXT NOT NULL DEFAULT ''",
+    chat_id: "TEXT DEFAULT ''",
+    size: 'INTEGER NOT NULL DEFAULT 0',
+    status: "TEXT NOT NULL DEFAULT 'active'",
+    bet: 'INTEGER NOT NULL DEFAULT 0',
+    reward: 'INTEGER NOT NULL DEFAULT 0',
+    digs_total: 'INTEGER NOT NULL DEFAULT 0',
+    digs_used: 'INTEGER NOT NULL DEFAULT 0',
+    treasures_total: 'INTEGER NOT NULL DEFAULT 0',
+    treasures_found: 'INTEGER NOT NULL DEFAULT 0',
+    traps_total: 'INTEGER NOT NULL DEFAULT 0',
+    secret: "TEXT NOT NULL DEFAULT '{}'",
+    revealed: "TEXT NOT NULL DEFAULT '[]'",
+    created_at: "TEXT DEFAULT ''",
+    updated_at: "TEXT DEFAULT ''",
+    expires_at: "TEXT DEFAULT ''",
+    finished_at: "TEXT DEFAULT ''",
+  },
+  game_rounds: {
+    user_id: "TEXT NOT NULL DEFAULT ''",
+    game: "TEXT NOT NULL DEFAULT ''",
+    bet: 'INTEGER NOT NULL DEFAULT 0',
+    reward: 'INTEGER NOT NULL DEFAULT 0',
+    state: "TEXT NOT NULL DEFAULT 'pending'",
+    payload: "TEXT DEFAULT ''",
+    created_at: "TEXT DEFAULT ''",
+    settled_at: "TEXT DEFAULT ''",
+  },
+};
+
+/**
+ * Garante que as tabelas/colunas dos jogos existem — roda depois de `migrate()`.
+ * Devolve a lista do que precisou ser criado/ajustado (vazia = tudo certo).
+ */
+function ensureGameSchema() {
+  const ajustes = [];
+  const faltando = Object.keys(GAME_SCHEMA_COLUNAS).filter(
+    (t) => !db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`).get(t)
+  );
+  // 1) tabelas (as que já existem ficam como estão)  2) colunas que faltam
+  // 3) índices — só depois das colunas, senão o índice em coluna nova falha
+  db.exec(GAME_TABELAS_SQL);
+  for (const t of faltando) ajustes.push(`${t} (tabela criada)`);
+  for (const [tabela, colunas] of Object.entries(GAME_SCHEMA_COLUNAS)) {
+    const existentes = new Set(db.prepare(`PRAGMA table_info(${tabela})`).all().map((c) => c.name));
+    if (!existentes.size) {
+      ajustes.push(`${tabela} (tabela ausente)`);
+      continue;
+    }
+    for (const [coluna, definicao] of Object.entries(colunas)) {
+      if (existentes.has(coluna)) continue;
+      db.exec(`ALTER TABLE ${tabela} ADD COLUMN ${coluna} ${definicao}`);
+      ajustes.push(`${tabela}.${coluna}`);
+    }
+  }
+  db.exec(GAME_INDICES_SQL);
+  if (ajustes.length) {
+    logger.warn(
+      { ajustes, versao: (db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get() || {}).v },
+      '[DB] esquema dos jogos estava incompleto — ajustado sem apagar dados'
+    );
+  }
+  return ajustes;
+}
+
 const MIGRATIONS = [
   // 1 — usuários
   `CREATE TABLE IF NOT EXISTS users (
@@ -399,7 +548,10 @@ const MIGRATIONS = [
   );
   CREATE INDEX IF NOT EXISTS idx_birthdays_day_month ON birthdays(day, month);`,
 
-  // 41 — CAÇA AO TESOURO + apostas de jogos (caça e tigrinho)
+  // 36 — CAÇA AO TESOURO + apostas de jogos (caça e tigrinho)
+  //
+  // ATENÇÃO: a version é o ÍNDICE + 1 (não é o número deste comentário — os
+  // comentários antigos repetem/saltam números). Esta é a 36ª migração.
   //
   // Três tabelas, cada uma com um papel claro:
   //   game_bets     → LIVRO-CAIXA das apostas (idempotência: uma linha por
@@ -413,55 +565,7 @@ const MIGRATIONS = [
   //
   // O saldo continua sendo o de sempre: economy.wallet (LuaCoins). Nada de
   // carteira paralela — só o registro do que já foi cobrado/pago.
-  `CREATE TABLE IF NOT EXISTS game_bets (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    game TEXT NOT NULL,
-    bet INTEGER NOT NULL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'settled',
-    reward INTEGER NOT NULL DEFAULT 0,
-    ref_id TEXT DEFAULT '',
-    created_at TEXT DEFAULT '',
-    settled_at TEXT DEFAULT ''
-  );
-  CREATE INDEX IF NOT EXISTS idx_game_bets_user_game ON game_bets(user_id, game, created_at);
-  CREATE INDEX IF NOT EXISTS idx_game_bets_ref ON game_bets(ref_id);
-
-  CREATE TABLE IF NOT EXISTS treasure_games (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    chat_id TEXT DEFAULT '',
-    size INTEGER NOT NULL,
-    status TEXT NOT NULL DEFAULT 'active',
-    bet INTEGER NOT NULL DEFAULT 0,
-    reward INTEGER NOT NULL DEFAULT 0,
-    digs_total INTEGER NOT NULL DEFAULT 0,
-    digs_used INTEGER NOT NULL DEFAULT 0,
-    treasures_total INTEGER NOT NULL DEFAULT 0,
-    treasures_found INTEGER NOT NULL DEFAULT 0,
-    traps_total INTEGER NOT NULL DEFAULT 0,
-    secret TEXT NOT NULL DEFAULT '{}',
-    revealed TEXT NOT NULL DEFAULT '[]',
-    created_at TEXT DEFAULT '',
-    updated_at TEXT DEFAULT '',
-    expires_at TEXT DEFAULT '',
-    finished_at TEXT DEFAULT ''
-  );
-  CREATE INDEX IF NOT EXISTS idx_treasure_user ON treasure_games(user_id, status);
-  CREATE INDEX IF NOT EXISTS idx_treasure_chat ON treasure_games(chat_id, status);
-
-  CREATE TABLE IF NOT EXISTS game_rounds (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    game TEXT NOT NULL DEFAULT 'tigrinho',
-    bet INTEGER NOT NULL DEFAULT 0,
-    reward INTEGER NOT NULL DEFAULT 0,
-    state TEXT NOT NULL DEFAULT 'settled',
-    payload TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT DEFAULT '',
-    settled_at TEXT DEFAULT ''
-  );
-  CREATE INDEX IF NOT EXISTS idx_game_rounds_user ON game_rounds(user_id, game, created_at);`,
+  GAME_SCHEMA_SQL,
 ];
 
 /* ----------------------------- core ------------------------------ */
@@ -486,6 +590,7 @@ function open() {
   db.pragma('synchronous = NORMAL');
   db.pragma('foreign_keys = ON');
   migrate();
+  ensureGameSchema();
   seed();
   logger.info({ file: CONFIG.paths.databaseFile }, 'banco aberto');
   return db;
@@ -620,4 +725,6 @@ module.exports = {
   restore,
   stats,
   migrate,
+  ensureGameSchema,
+  MIGRATIONS,
 };

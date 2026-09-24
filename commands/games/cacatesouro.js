@@ -566,7 +566,14 @@ async function enviarHtml(ctx, html, titulo) {
 }
 
 async function mostrar(ctx, g, prefix, titulo) {
-  const enviado = await enviarHtml(ctx, buildHtml(g, prefix), titulo);
+  let html = null;
+  try {
+    html = buildHtml(g, prefix);
+  } catch (err) {
+    // se a MONTAGEM do card falhar, o jogo continua no texto (nunca "algo deu errado")
+    logger.error({ err: err && err.message, partida: g && g.id }, '[TESOURO] falha ao montar o card — usando texto');
+  }
+  const enviado = html ? await enviarHtml(ctx, html, titulo) : false;
   if (!enviado) await ctx.reply(resumoTexto(g, prefix));
   return true;
 }
@@ -604,7 +611,13 @@ async function abrirPainel(ctx, prefix, size) {
     painel.markup +
     '</div></body><script>' + painel.js + '</script>';
 
-  const enviado = await enviarHtml(ctx, html, '🗺️ Caça ao Tesouro');
+  let doc = null;
+  try {
+    doc = html;
+  } catch (err) {
+    logger.error({ err: err && err.message }, '[TESOURO] falha ao montar o painel — usando texto');
+  }
+  const enviado = doc ? await enviarHtml(ctx, doc, '🗺️ Caça ao Tesouro') : false;
   if (!enviado) await ctx.reply(painelTexto(p, prefix, cfg));
   return true;
 }
@@ -936,8 +949,17 @@ module.exports = [
             return await abrirPainel(ctx, prefix, 3);
         }
       } catch (err) {
-        logger.error({ err: (err && err.message) || String(err), sub }, '[TESOURO] erro no comando');
-        await ctx.reply('⚠️ Algo deu errado na expedição. Tente de novo em instantes.');
+        const motivo = (err && err.message) || String(err);
+        // o primeiro frame do stack diz ONDE falhou (arquivo:linha) — é o que
+        // permite achar a causa sem precisar de print da conversa
+        const onde = String((err && err.stack) || '').split('\n')[1];
+        logger.error({ err: motivo, stack: err && err.stack, sub }, '[TESOURO] erro no comando');
+        // o DONO recebe o motivo real (ajuda a diagnosticar); os outros, a mensagem curta
+        await ctx.reply(
+          ctx.isOwner
+            ? `⚠️ Erro na expedição: ${motivo}${onde ? `\n▸ ${onde.trim()}` : ''}\n▸ Detalhes no log (módulo tesouro).`
+            : '⚠️ Algo deu errado na expedição. Tente de novo em instantes.'
+        );
       }
     },
   },
