@@ -58,6 +58,7 @@ async function send(ctx, info, prefix, commands) {
   // A chave persistida tem precedência e permite !htmlplay on/off em runtime.
   let enabled = !!(CONFIG.htmlPlay && CONFIG.htmlPlay.enabled);
   try { enabled = settings.htmlPlayEnabled(); } catch (_) {}
+  console.log('[PLAY CARD] htmlEnabled', { targetJid: ctx && ctx.remoteJid, enabled });
   if (!enabled) return false;
   const html = buildHtmlPlay(info, prefix, commands);
   await richHtml.sendHtml(ctx.socket, ctx.remoteJid, html, { title: 'HTML PLAY' });

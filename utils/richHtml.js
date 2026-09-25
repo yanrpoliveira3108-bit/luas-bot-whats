@@ -85,9 +85,15 @@ async function sendHtml(sock, jid, html, opts = {}) {
     err.code = 'SAFE_MODE_RICH_CARD';
     throw err;
   }
-  console.log('[WA] chamando relayMessage (HTML)', { hasJid: Boolean(jid) });
-  const result = await sock.relayMessage(jid, buildHtmlMessage(html, opts), {});
-  console.log('[WA] relayMessage resolveu (HTML)', { hasResult: Boolean(result), id: result && result.key && result.key.id ? String(result.key.id).slice(0, 32) : undefined });
+  const payload = buildHtmlMessage(html, opts);
+  console.log('[PLAY CARD] relay payload', {
+    targetJid: jid,
+    payloadType: Object.keys(payload),
+    messageType: Object.keys(payload.botForwardedMessage && payload.botForwardedMessage.message || {}),
+  });
+  console.log('[WA] chamando relayMessage (HTML)', { targetJid: jid });
+  const result = await sock.relayMessage(jid, payload, {});
+  console.log('[WA] relayMessage resolveu (HTML)', { targetJid: jid, hasResult: Boolean(result), id: result && result.key && result.key.id ? String(result.key.id).slice(0, 32) : undefined });
   return result;
 }
 

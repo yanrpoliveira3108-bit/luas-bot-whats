@@ -52,7 +52,7 @@ function avisoBloqueio(kind, reason) {
 async function enviarArquivo(ctx, kind, filePath, send) {
   let res;
   try {
-    console.log('[MEDIA 9] enviando para WhatsApp', { kind });
+    console.log('[MEDIA 9] enviando para WhatsApp', { kind, targetJid: ctx && ctx.remoteJid });
     res = await send();
     console.log('[MEDIA 10] envio concluído', { kind, hasResult: Boolean(res), id: res && res.key && res.key.id ? String(res.key.id).slice(0, 32) : undefined });
   } finally {

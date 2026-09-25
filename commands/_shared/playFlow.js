@@ -101,6 +101,8 @@ async function fetchThumbnail(rawUrl) {
 }
 
 async function sendPlayDetailCard(ctx, track, prefix, kind = 'audio') {
+  const targetJid = ctx && ctx.remoteJid;
+  console.log('[PLAY CARD] targetJid=', targetJid, 'messageJid=', ctx && ctx.message && ctx.message.key && ctx.message.key.remoteJid, 'kind=', kind);
   const details = await selectedTrackDetails(track);
   const parsed = mediaPresentation.parseArtistAndTitle(details.title, details.channel || details.author);
   const card = mediaPresentation.formatPlayDetailCard({
@@ -129,21 +131,24 @@ async function sendPlayDetailCard(ctx, track, prefix, kind = 'audio') {
   if (CONFIG.htmlPlay && CONFIG.htmlPlay.enabled) {
     try {
       const info = htmlPlay.normalizeMediaInfo({ ...details, thumbnail: thumb ? `data:image/jpeg;base64,${thumb.toString('base64')}` : '' }, { kind, format: kind === 'video' ? 'MP4' : 'M4A' });
+      console.log('[PLAY CARD] payloadType=richHtml/relayMessage targetJid=', targetJid);
       await htmlPlay.send(ctx, info, prefix, { audio: 'ytmp3', video: 'ytmp4', lyrics: 'letra', search: 'play' });
-      if (htmlPlay.textFallbackEnabled()) await ctx.reply(card);
+      console.log('[PLAY CARD] HTML/info confirmado targetJid=', targetJid);
       return true;
     } catch (err) {
+      console.error('[PLAY CARD] HTML falhou; usando fallback textual', { targetJid, code: err && err.code, message: err && err.message });
       logger.warn({ err: err.message }, 'HTML PLAY indisponível; mantendo card tradicional');
     }
   }
   try {
     if (ctx.socket && typeof ctx.socket.sendMessage === 'function') {
+      console.log('[PLAY CARD] payloadType=text targetJid=', targetJid);
       console.log('[WA] chamando sendMessage');
       const sendResult = await antiBan.enqueueOutbound(() => ctx.socket.sendMessage(ctx.remoteJid, {
         text: card,
         contextInfo: { externalAdReply: preview },
       }, { quoted: ctx.message }));
-      console.log('[WA] sendMessage resolveu', { hasResult: Boolean(sendResult), id: sendResult && sendResult.key && sendResult.key.id ? String(sendResult.key.id).slice(0, 32) : undefined });
+      console.log('[WA] sendMessage resolveu', { targetJid, hasResult: Boolean(sendResult), id: sendResult && sendResult.key && sendResult.key.id ? String(sendResult.key.id).slice(0, 32) : undefined });
       return true;
     }
     await ctx.reply(card);
@@ -223,15 +228,6 @@ async function executeMediaAction(ctx, session, trackIndex, action) {
 
   const actionLabel = action === 'video' ? '🎬 Vídeo' : '🎵 Áudio';
   console.log('[1] comando recebido: ação de mídia selecionada');
-  console.log('[2] preparando mensagem inicial');
-  try {
-    console.log('[3] enviando mensagem inicial');
-    await ctx.reply(`⏳ Baixando ${actionLabel} de \"*${playPresentation.sanitizeTitle(track.title)}*\"...`);
-    console.log('[4] mensagem inicial enviada', { action });
-  } catch (error) {
-    console.error('[INITIAL_MESSAGE_ERROR]', error);
-    console.error(error && error.stack);
-  }
   try {
     console.log('[3] enviando texto/HTML do Play');
     const sent = await sendPlayDetailCard(ctx, track, session.prefix, action);
@@ -250,14 +246,14 @@ async function executeMediaAction(ctx, session, trackIndex, action) {
         const video = await youtube.downloadVideo(track.url, track.title);
         console.log('[6] mídia preparada', { kind: 'video' });
         if (isCancelled()) { youtube.deleteFile(video.path); throw new Error('Download cancelado'); }
-        console.log('[7] enviando mídia', { kind: 'video' });
+        console.log('[7] enviando mídia', { kind: 'video', targetJid: ctx && ctx.remoteJid });
         const sendRes = await sendVideoResult(ctx, video, `🎬 *${playPresentation.sanitizeTitle(track.title)}*`);
         console.log('[8] mídia enviada', { kind: 'video', delivered: !!(sendRes && sendRes.entregue) });
       } else {
         const audio = await youtube.downloadAudio(track.url, track.title);
         console.log('[6] mídia preparada', { kind: 'audio' });
         if (isCancelled()) { youtube.deleteFile(audio.path); throw new Error('Download cancelado'); }
-        console.log('[7] enviando mídia', { kind: 'audio' });
+        console.log('[7] enviando mídia', { kind: 'audio', targetJid: ctx && ctx.remoteJid });
         const sendRes = await sendAudioResult(ctx, audio);
         console.log('[8] mídia enviada', { kind: 'audio', delivered: !!(sendRes && sendRes.entregue) });
       }
