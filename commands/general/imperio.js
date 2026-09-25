@@ -1,0 +1,4 @@
+'use strict';
+const errorHandler=require('../../handlers/errorHandler');
+const {createTicket}=require('../../game/server');
+module.exports=[{name:'imperio',commands:['imperio','imperios'],category:'general',description:'Abre Lua: Impérios, jogo estratégico territorial.',usage:'!imperio',cooldown:10000,execute:async(ctx)=>{try{if(ctx.isGroup)return ctx.reply(`🌐 Abra no privado: envie ${ctx.prefix}imperio para receber o acesso seguro.`);const base=String(process.env.LUA_GAME_URL||'').replace(/\/$/,'');if(!base)return ctx.reply('⚠️ O servidor de Lua: Impérios ainda não está configurado. Defina LUA_GAME_URL no .env.');const ticket=createTicket(ctx.sender);await ctx.reply(`🌍 Lua: Impérios\n\nAbra seu acesso privado:\n${base}/?ticket=${encodeURIComponent(ticket)}\n\nO link expira em 10 minutos e só pode ser usado uma vez.`)}catch(e){await errorHandler.handle(ctx,e,{name:'imperio'})}}}];
