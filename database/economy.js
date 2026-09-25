@@ -112,6 +112,10 @@ function applyIdempotentOperation(opKey, userId, delta, type, note = '', targetI
   ).get(opKey);
 
   if (existing) {
+    // Validação estrita de reaproveitamento indevido da chave com parâmetros divergentes
+    if (existing.user_id !== userId || existing.amount !== delta || existing.type !== type) {
+      throw new Error('OP_KEY_REUSE_MISMATCH');
+    }
     return { ok: true, duplicated: true, record: existing };
   }
 
@@ -121,7 +125,12 @@ function applyIdempotentOperation(opKey, userId, delta, type, note = '', targetI
       'get_ledger_op',
       `SELECT * FROM economy_ledger WHERE op_key = ?`
     ).get(opKey);
-    if (inTx) return { ok: true, duplicated: true, record: inTx };
+    if (inTx) {
+      if (inTx.user_id !== userId || inTx.amount !== delta || inTx.type !== type) {
+        throw new Error('OP_KEY_REUSE_MISMATCH');
+      }
+      return { ok: true, duplicated: true, record: inTx };
+    }
 
     const row = get(userId);
     const next = row.wallet + delta;
@@ -178,6 +187,9 @@ function applyIdempotentTransfer(opKey, fromId, toId, amount, note = '') {
   ).get(opKey);
 
   if (existing) {
+    if (existing.user_id !== fromId || existing.target_id !== toId || existing.amount !== n) {
+      throw new Error('OP_KEY_REUSE_MISMATCH');
+    }
     return { ok: true, duplicated: true, record: existing };
   }
 
@@ -186,7 +198,12 @@ function applyIdempotentTransfer(opKey, fromId, toId, amount, note = '') {
       'get_ledger_op',
       `SELECT * FROM economy_ledger WHERE op_key = ?`
     ).get(opKey);
-    if (inTx) return { ok: true, duplicated: true, record: inTx };
+    if (inTx) {
+      if (inTx.user_id !== fromId || inTx.target_id !== toId || inTx.amount !== n) {
+        throw new Error('OP_KEY_REUSE_MISMATCH');
+      }
+      return { ok: true, duplicated: true, record: inTx };
+    }
 
     ensure(fromId);
     ensure(toId);

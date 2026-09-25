@@ -62,20 +62,30 @@ module.exports = [
     name: 'comprarcripto',
     commands: ['comprarcripto', 'comprarcrypto', 'buycrypto'],
     category: 'rpg',
-    description: 'Compra criptomoedas com LuaCoins.',
-    usage: '!comprarcripto <BTC|ETH|DOGE|LUA> <valor>',
+    description: 'Compra criptomoedas com LuaCoins com validação de cotação.',
+    usage: '!comprarcripto <BTC|ETH|DOGE|LUA> <valor> [cotacao_max]',
     cooldown: 3000,
     execute: async (ctx) => {
       const symbol = (ctx.args[0] || '').toUpperCase();
       const value = parseInt(ctx.args[1], 10);
+      const maxPrice = ctx.args[2] ? parseInt(ctx.args[2], 10) : null;
+
       if (!crypto.coin(symbol)) return ctx.reply('⚠️ Moedas: BTC, ETH, DOGE ou LUA.');
       if (!Number.isFinite(value) || value <= 0) return ctx.reply('⚠️ Use: !comprarcripto <moeda> <valor>');
+
+      const q = crypto.quote(symbol);
+      if (maxPrice && q.price > maxPrice) {
+        return ctx.reply(
+          `⚠️ Cotação atual (${formatMoney(q.price)}) está acima do teto estipulado (${formatMoney(maxPrice)}). Operação abortada.`
+        );
+      }
+
       try {
         const r = await withLock(ctx.sender, () => crypto.buy(ctx.sender, symbol, value));
         await ctx.reply(
-          `✅ *Compra realizada*\n▸ ${r.amount.toFixed(6)} ${symbol} por ${formatMoney(value)}.\n▸ Preço: ${formatMoney(r.price)}/${symbol}`
+          `✅ *Compra realizada*\n▸ ${r.amount.toFixed(6)} ${symbol} por ${formatMoney(value)}.\n▸ Preço da janela: ${formatMoney(r.price)}/${symbol}`
         );
-      } catch (_) {
+      } catch (err) {
         await ctx.reply('💸 Saldo insuficiente para comprar.');
       }
     },
@@ -84,15 +94,25 @@ module.exports = [
     name: 'vendercripto',
     commands: ['vendercripto', 'vendercrypto', 'sellcrypto'],
     category: 'rpg',
-    description: 'Vende criptomoedas por LuaCoins.',
-    usage: '!vendercripto <BTC|ETH|DOGE|LUA> <quantidade|tudo>',
+    description: 'Vende criptomoedas por LuaCoins com validação de cotação.',
+    usage: '!vendercripto <BTC|ETH|DOGE|LUA> <quantidade|tudo> [cotacao_min]',
     cooldown: 3000,
     execute: async (ctx) => {
       const symbol = (ctx.args[0] || '').toUpperCase();
       if (!crypto.coin(symbol)) return ctx.reply('⚠️ Moedas: BTC, ETH, DOGE ou LUA.');
       const arg = (ctx.args[1] || '').toLowerCase();
       const amount = arg === 'tudo' || arg === 'all' ? null : parseFloat(ctx.args[1]);
+      const minPrice = ctx.args[2] && arg !== 'tudo' && arg !== 'all' ? parseInt(ctx.args[2], 10) : null;
+
       if (amount !== null && (!Number.isFinite(amount) || amount <= 0)) return ctx.reply('⚠️ Use: !vendercripto <moeda> <quantidade|tudo>');
+
+      const q = crypto.quote(symbol);
+      if (minPrice && q.price < minPrice) {
+        return ctx.reply(
+          `⚠️ Cotação atual (${formatMoney(q.price)}) está abaixo do piso estipulado (${formatMoney(minPrice)}). Operação abortada.`
+        );
+      }
+
       try {
         const r = await withLock(ctx.sender, () => crypto.sell(ctx.sender, symbol, amount));
         const lucro = r.gain - r.cost;
@@ -100,7 +120,7 @@ module.exports = [
           [
             '💰 *Venda realizada*',
             `▸ Vendeu ${r.amount.toFixed(6)} ${symbol} por ${formatMoney(r.gain)}.`,
-            `▸ Preço: ${formatMoney(r.price)}/${symbol}`,
+            `▸ Preço da janela: ${formatMoney(r.price)}/${symbol}`,
             `▸ ${lucro >= 0 ? '📈 Lucro' : '📉 Prejuízo'}: ${formatMoney(Math.abs(lucro))}`,
           ].join('\n')
         );

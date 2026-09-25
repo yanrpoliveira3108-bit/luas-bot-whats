@@ -46,6 +46,26 @@ function price(symbol, now = Date.now()) {
   return Math.max(1, p);
 }
 
+/** Retorna cotação com metadados de validade da janela (tick atual e tempo restante). */
+function quote(symbol, now = Date.now()) {
+  const c = coin(symbol);
+  if (!c) return null;
+  const tick = Math.floor(now / TICK_MS);
+  const p = price(symbol, now);
+  const ch = changePct(symbol, now);
+  const nextTickAt = (tick + 1) * TICK_MS;
+  const remainingMs = Math.max(0, nextTickAt - now);
+  return {
+    symbol: c.symbol,
+    name: c.name,
+    emoji: c.emoji,
+    price: p,
+    changePct: ch,
+    tick,
+    remainingMs,
+  };
+}
+
 /** Variação percentual vs o período anterior (para exibir ▲/▼). */
 function changePct(symbol, now = Date.now()) {
   const c = coin(symbol);
@@ -124,4 +144,4 @@ function sell(userId, symbol, amountOrNull, now = Date.now()) {
   return { symbol: c.symbol, amount, price: p, gain, cost };
 }
 
-module.exports = { COINS, coin, price, changePct, get, portfolio, buy, sell };
+module.exports = { COINS, coin, price, quote, changePct, get, portfolio, buy, sell, TICK_MS };

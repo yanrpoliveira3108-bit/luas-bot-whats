@@ -79,36 +79,19 @@ function doBackup(reason = 'auto') {
 
     let count = 0;
 
-    // database
+    // database com checkpoint WAL preventivo para garantir consistência
+    try {
+      const dbModule = require('../database/database');
+      const dbc = dbModule.get();
+      if (dbc) dbc.pragma('wal_checkpoint(TRUNCATE)');
+    } catch (_) {}
+
     if (fs.existsSync(CONFIG.paths.databaseFile)) {
       if (copyFileSafe(CONFIG.paths.databaseFile, path.join(destRoot, 'lua.db'))) count++;
     }
     // database dir (outros arquivos .db)
     if (fs.existsSync(CONFIG.paths.databaseDir)) {
       count += copyDirSafe(CONFIG.paths.databaseDir, path.join(destRoot, 'database'));
-    }
-
-    // .env (importante, mas sem expor no log)
-    const envPath = path.join(CONFIG.paths.root, '.env');
-    if (copyFileSafe(envPath, path.join(destRoot, '.env'))) count++;
-
-    // session (apenas creds essenciais, não tudo)
-    const sessionDir = CONFIG.paths.sessionDir;
-    if (fs.existsSync(sessionDir)) {
-      // copia só arquivos pequenos de creds, não cache grande
-      const files = fs.readdirSync(sessionDir).slice(0, 20);
-      const destSess = path.join(destRoot, 'session');
-      fs.mkdirSync(destSess, { recursive: true });
-      for (const f of files) {
-        const src = path.join(sessionDir, f);
-        try {
-          const stat = fs.statSync(src);
-          if (stat.isFile() && stat.size < 5 * 1024 * 1024) {
-            fs.copyFileSync(src, destSess + '/' + f);
-            count++;
-          }
-        } catch (_) {}
-      }
     }
 
     // config.js e settings

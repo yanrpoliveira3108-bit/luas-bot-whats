@@ -70,13 +70,37 @@ module.exports = [
               return ctx.reply('❌ Troca cancelada: o destinatário não possui mais saldo suficiente.');
             }
 
-            // Transferências atômicas via economy_ledger
+            // Validação de itens
+            for (const it of trade.offer1.items) {
+              const has = economy.getItem(trade.p1, it.id);
+              if (!has || has.quantity < it.qty) {
+                return ctx.reply(`❌ Troca cancelada: proponente não possui mais ${it.qty}x de ${it.id}.`);
+              }
+            }
+            for (const it of trade.offer2.items) {
+              const has = economy.getItem(trade.p2, it.id);
+              if (!has || has.quantity < it.qty) {
+                return ctx.reply(`❌ Troca cancelada: destinatário não possui mais ${it.qty}x de ${it.id}.`);
+              }
+            }
+
+            // Transferências atômicas via economy_ledger e inventário
             const tradeId = `trade-${Date.now()}`;
             if (trade.offer1.money > 0) {
               economy.applyIdempotentTransfer(`${tradeId}-m1`, trade.p1, trade.p2, trade.offer1.money, 'troca entre jogadores');
             }
             if (trade.offer2.money > 0) {
               economy.applyIdempotentTransfer(`${tradeId}-m2`, trade.p2, trade.p1, trade.offer2.money, 'troca entre jogadores');
+            }
+
+            // Transferência indivisível de itens
+            for (const it of trade.offer1.items) {
+              economy.removeItem(trade.p1, it.id, it.qty);
+              economy.addItem(trade.p2, it.id, it.qty);
+            }
+            for (const it of trade.offer2.items) {
+              economy.removeItem(trade.p2, it.id, it.qty);
+              economy.addItem(trade.p1, it.id, it.qty);
             }
 
             return ctx.reply(
@@ -120,19 +144,58 @@ module.exports = [
         return ctx.reply('❌ Você não pode fazer uma troca consigo mesmo.');
       }
 
-      // Analisar oferta (dar e pedir)
-      let giveMoney = 0;
-      let askMoney = 0;
+      // Analisar tokens da oferta descartando a menção ao alvo
+      const tokens = ctx.args.filter((t) => !t.startsWith('@') && !t.includes('@'));
 
-      const argsStr = ctx.args.join(' ').toLowerCase();
-      const giveMatch = argsStr.match(/dar\s+(\d+)/);
-      const askMatch = argsStr.match(/pedir\s+(\d+)/);
+      function parseTradeOffer(list) {
+        let giveMoney = 0;
+        let askMoney = 0;
+        const giveItems = [];
+        const askItems = [];
+        let mode = null;
 
-      if (giveMatch) giveMoney = parseInt(giveMatch[1], 10) || 0;
-      if (askMatch) askMoney = parseInt(askMatch[1], 10) || 0;
+        for (let i = 0; i < list.length; i++) {
+          const raw = list[i].trim();
+          if (!raw) continue;
+          const lower = raw.toLowerCase();
 
-      if (giveMoney <= 0 && askMoney <= 0) {
-        return ctx.reply('⚠️ Informe os valores da troca. Ex: *!troca @usuario dar 300 pedir 150*');
+          if (lower === 'dar' || lower === 'oferecer' || lower === 'envia' || lower === 'dou') {
+            mode = 'dar';
+            continue;
+          }
+          if (lower === 'pedir' || lower === 'receber' || lower === 'quer' || lower === 'peco') {
+            mode = 'pedir';
+            continue;
+          }
+          if (!mode) continue;
+
+          if (/^\d+$/.test(lower)) {
+            const num = parseInt(lower, 10);
+            const next = list[i + 1] ? list[i + 1].trim().toLowerCase() : null;
+            if (next && next !== 'dar' && next !== 'oferecer' && next !== 'pedir' && next !== 'receber' && !/^\d+$/.test(next)) {
+              const targetList = mode === 'dar' ? giveItems : askItems;
+              targetList.push({ id: next, qty: num });
+              i++;
+            } else {
+              if (mode === 'dar') giveMoney += num;
+              else askMoney += num;
+            }
+          } else {
+            const targetList = mode === 'dar' ? giveItems : askItems;
+            targetList.push({ id: lower, qty: 1 });
+          }
+        }
+        return { giveMoney, askMoney, giveItems, askItems };
+      }
+
+      const parsed = parseTradeOffer(tokens);
+      let giveMoney = parsed.giveMoney;
+      let askMoney = parsed.askMoney;
+      const giveItems = parsed.giveItems;
+      const askItems = parsed.askItems;
+
+      if (giveMoney <= 0 && askMoney <= 0 && giveItems.length === 0 && askItems.length === 0) {
+        return ctx.reply('⚠️ Informe os recursos da troca. Ex: *!troca @usuario dar 300 espada_ferro pedir 150*');
       }
 
       const eco1 = economy.get(sender);
@@ -140,26 +203,43 @@ module.exports = [
         return ctx.reply(`❌ Você não tem ${formatMoney(giveMoney)} na carteira para oferecer.`);
       }
 
+      for (const it of giveItems) {
+        const has = economy.getItem(sender, it.id);
+        if (!has || has.quantity < it.qty) {
+          return ctx.reply(`❌ Você não possui ${it.qty}x de ${it.id} para oferecer.`);
+        }
+      }
+
       const trade = {
         id: `trade-${Date.now()}`,
         p1: sender,
         p2: target,
-        offer1: { money: giveMoney, items: [] },
-        offer2: { money: askMoney, items: [] },
+        offer1: { money: giveMoney, items: giveItems },
+        offer2: { money: askMoney, items: askItems },
         accepted: new Set([sender]), // Quem propôs já sinaliza aceite
         expiresAt: Date.now() + TRADE_TIMEOUT_MS,
       };
 
       ACTIVE_TRADES.set(chatId, trade);
 
+      const offer1Desc = [
+        giveMoney > 0 ? formatMoney(giveMoney) : null,
+        ...giveItems.map((i) => `${i.qty}x ${i.id}`),
+      ].filter(Boolean).join(' + ') || 'Nada';
+
+      const offer2Desc = [
+        askMoney > 0 ? formatMoney(askMoney) : null,
+        ...askItems.map((i) => `${i.qty}x ${i.id}`),
+      ].filter(Boolean).join(' + ') || 'Nada';
+
       const msg = [
         '🤝 *PROPOSTA DE TROCA DE RECURSOS*',
         '━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
         `👤 *De:* @${sender.split('@')[0]}`,
-        `   └ Oferece: ${formatMoney(giveMoney)}`,
+        `   └ Oferece: ${offer1Desc}`,
         '',
         `👤 *Para:* @${target.split('@')[0]}`,
-        `   └ Solicita: ${formatMoney(askMoney)}`,
+        `   └ Solicita: ${offer2Desc}`,
         '━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
         `⏳ _A proposta expira em 3 minutos._`,
         `👉 @${target.split('@')[0]}, para aceitar digite: *${ctx.prefix}troca aceitar*`,

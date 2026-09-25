@@ -682,6 +682,32 @@ const MIGRATIONS = [
   );
   CREATE INDEX IF NOT EXISTS idx_economy_ledger_user ON economy_ledger(user_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_economy_ledger_target ON economy_ledger(target_id, created_at);`,
+
+  // 39 — EVENTOS COOPERATIVOS PERSISTENTES (Etapa 2)
+  `CREATE TABLE IF NOT EXISTS coop_events (
+    id TEXT PRIMARY KEY,
+    chat_id TEXT NOT NULL,
+    boss_name TEXT NOT NULL,
+    boss_emoji TEXT DEFAULT '🐉',
+    max_hp INTEGER NOT NULL,
+    hp INTEGER NOT NULL,
+    total_reward INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    expires_at INTEGER NOT NULL,
+    created_at TEXT DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS idx_coop_events_chat ON coop_events(chat_id, status);`,
+
+  // 40 — PARTICIPANTES DE EVENTOS COOPERATIVOS (Etapa 2)
+  `CREATE TABLE IF NOT EXISTS coop_participants (
+    event_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    damage INTEGER NOT NULL DEFAULT 0,
+    last_action INTEGER NOT NULL DEFAULT 0,
+    rewarded INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(event_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_coop_part_event ON coop_participants(event_id);`,
 ];
 
 /* ----------------------------- core ------------------------------ */
@@ -759,27 +785,6 @@ function open() {
   seed();
   logger.info({ file: CONFIG.paths.databaseFile }, 'banco aberto');
   return db;
-}
-
-/**
- * Nome estável de uma migração — é POR ELE que a aplicação decide o que falta.
- *
- * Por que não confiar só no número (`version`): a `version` é o índice + 1, e um
- * banco que passou por outro deploy pode ter números À FRENTE dos que este
- * código tem. Nesse caso `version > current` nunca é verdade e as migrações
- * NOVAS deste código nunca rodariam — foi essa a origem dos "algo deu errado"
- * nos jogos (tabelas ausentes com o número já "batido" por outra linhagem).
- */
-function nomeDaMigracao(i) {
-  return `v${i + 1}`;
-}
-
-/** Existe essa coluna? (usado no ALTER idempotente da coluna `nome`.) */
-function colunaExiste(tabela, coluna) {
-  return db
-    .prepare(`PRAGMA table_info(${tabela})`)
-    .all()
-    .some((c) => c.name === coluna);
 }
 
 /**
