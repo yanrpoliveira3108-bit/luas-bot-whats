@@ -180,6 +180,7 @@ async function ensureWhatsAppCompatible(filePath) {
 
   const outPath = filePath.replace(/\.[^.]+$/, '_whatsapp.mp4');
   try {
+    console.log('[MEDIA 7] iniciando conversão', { inputExt: ext });
     // converte para h264 + aac, preset ultrafast para velocidade, qualidade alta
     await execFfmpeg([
       '-y',
@@ -195,6 +196,7 @@ async function ensureWhatsAppCompatible(filePath) {
 
     // verifica tamanho
     const bytes = fs.statSync(outPath).size;
+    console.log('[MEDIA 8] conversão concluída', { bytes });
     if (bytes > MAX_BYTES) {
       deleteFile(outPath);
       return filePath; // mantém original se conversão estourar limite
@@ -353,7 +355,15 @@ async function runYtdlpAttempt(url, suggestedName, base, outTemplate, kind, att,
     }
   }
 
-  const stdout = await execYtdlp(args, CONFIG.limits.downloadTimeoutMs);
+  console.log('[MEDIA 5] iniciando download yt-dlp', { kind, android: att.android });
+  let stdout;
+  try {
+    stdout = await execYtdlp(args, CONFIG.limits.downloadTimeoutMs);
+    console.log('[MEDIA 6] download yt-dlp concluído', { kind, android: att.android });
+  } catch (err) {
+    console.error('[MEDIA ERROR] yt-dlp', { message: err && err.message, name: err && err.name, code: err && err.code, stack: err && err.stack, cause: err && err.cause });
+    throw err;
+  }
   // o `--print` emite uma linha por campo, mas downloads repetidos (ou o
   // `after_move` de uma tentativa anterior) podem deixar linhas extras: por
   // isso os cinco campos são lidos das ÚLTIMAS linhas.
@@ -541,14 +551,18 @@ function friendlyError(err) {
 }
 
 async function getInfo(url) {
+  console.log('[MEDIA 1] obtendo informações (ytdl.getInfo)');
   // A validação síncrona no comando não protege chamadas feitas por outros
   // comandos. Valide novamente no ponto que realmente abre a conexão.
   await assertSafeDestination(url);
   let lastErr;
   for (const clients of [PLAYER_CLIENTS, ['ANDROID', 'IOS']]) {
     try {
-      return await ytdl.getInfo(url, { playerClients: clients });
+      const info = await ytdl.getInfo(url, { playerClients: clients });
+      console.log('[MEDIA 2] informações obtidas', { formats: Array.isArray(info.formats) ? info.formats.length : 0 });
+      return info;
     } catch (err) {
+      console.error('[MEDIA ERROR] getInfo', { message: err && err.message, code: err && err.code, stack: err && err.stack });
       lastErr = err;
       logger.warn({ err: err.message, clients }, 'ytdl getInfo falhou, tentando próximo');
     }
@@ -612,6 +626,7 @@ function pickVideoFormat(info) {
 }
 
 function streamToFile(stream, dest, maxBytes, timeoutMs = 180000) {
+  console.log('[MEDIA 5] iniciando download HTTP/stream');
   return new Promise((resolve, reject) => {
     let received = 0;
     let tooBig = false;
@@ -644,7 +659,7 @@ function streamToFile(stream, dest, maxBytes, timeoutMs = 180000) {
     file.on('error', err => { stream.destroy(); finish(err); });
     file.on('finish', () => {
       if (tooBig) finish(new Error('FILE_TOO_BIG'));
-      else finish(null, received);
+      else { console.log('[MEDIA 6] download concluído', { bytes: received }); finish(null, received); }
     });
     stream.pipe(file);
   });
@@ -689,7 +704,9 @@ async function downloadAudio(url, suggestedName) {
   }
   try {
     const info = await getInfo(url);
+    console.log('[MEDIA 3] selecionando formato de áudio');
     const { format, combined } = pickAudioFormat(info);
+    console.log('[MEDIA 4] formato de áudio', { itag: format && format.itag, mimeType: format && format.mimeType, hasAudio: !!(format && format.hasAudio), hasVideo: !!(format && format.hasVideo), hasUrl: Boolean(format && format.url) });
     const ext = combined ? 'mp4' : format.container === 'm4a' ? 'm4a' : format.container === 'mp3' ? 'mp3' : 'webm';
     const dest = path.join(CONFIG.paths.tmpDir, safeFileName(suggestedName || info.videoDetails.title, ext));
 
@@ -709,6 +726,7 @@ async function downloadAudio(url, suggestedName) {
       combined,
     };
   } catch (err) {
+    console.error('[MEDIA ERROR] áudio pipeline', { message: err && err.message, name: err && err.name, code: err && err.code, stack: err && err.stack, cause: err && err.cause });
     throw friendlyError(err);
   }
 }
@@ -754,7 +772,9 @@ async function downloadVideo(url, suggestedName) {
   }
   try {
     const info = await getInfo(url);
+    console.log('[MEDIA 3] selecionando formato de vídeo');
     const format = pickVideoFormat(info);
+    console.log('[MEDIA 4] formato de vídeo', { itag: format && format.itag, mimeType: format && format.mimeType, hasAudio: !!(format && format.hasAudio), hasVideo: !!(format && format.hasVideo), hasUrl: Boolean(format && format.url) });
     const dest = path.join(CONFIG.paths.tmpDir, safeFileName(suggestedName || info.videoDetails.title, 'mp4'));
 
     const stream = ytdl(url, {
@@ -772,6 +792,7 @@ async function downloadVideo(url, suggestedName) {
       mimetype: 'video/mp4',
     };
   } catch (err) {
+    console.error('[MEDIA ERROR] vídeo pipeline', { message: err && err.message, name: err && err.name, code: err && err.code, stack: err && err.stack, cause: err && err.cause });
     throw friendlyError(err);
   }
 }

@@ -52,7 +52,9 @@ function avisoBloqueio(kind, reason) {
 async function enviarArquivo(ctx, kind, filePath, send) {
   let res;
   try {
+    console.log('[MEDIA 9] enviando para WhatsApp', { kind });
     res = await send();
+    console.log('[MEDIA 10] envio concluído', { kind, hasResult: Boolean(res), id: res && res.key && res.key.id ? String(res.key.id).slice(0, 32) : undefined });
   } finally {
     // o arquivo dentro do cache de mídia é o próprio cache — não pode ser
     // apagado, senão o próximo pedido baixa tudo de novo.

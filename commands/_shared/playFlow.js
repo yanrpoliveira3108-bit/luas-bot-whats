@@ -67,31 +67,12 @@ async function selectedTrackDetails(track) {
   const key = canonicalTrackKey(track.url);
   const cached = detailsCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return { ...track, ...cached.data };
-  let data = {};
-  try {
-    let timer;
-    const info = await Promise.race([
-      youtube.getInfo(track.url),
-      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('metadata timeout')), 4000); }),
-    ]);
-    clearTimeout(timer);
-    const d = info && info.videoDetails;
-    if (d) {
-      data = {
-        title: d.title || track.title,
-        channel: d.author && d.author.name || track.author || '',
-        duration: d.lengthSeconds || track.duration,
-        views: d.viewCount,
-        likes: d.likeCount,
-        publishDate: d.publishDate || d.uploadDate || '',
-        description: d.description || '',
-        thumbnail: d.thumbnails && d.thumbnails.length ? d.thumbnails[d.thumbnails.length - 1].url : track.thumbnail,
-      };
-    }
-  } catch (_) {
-    // Metadados são opcionais: não impedem a entrega da mídia.
-  }
-  data = { ...track, ...data };
+  // O card é enviado antes da mídia. Não faça um segundo getInfo aqui:
+  // além de duplicar a consulta que o downloader fará logo depois, o
+  // Promise.race anterior deixava a requisição de metadados original viva
+  // quando o timeout do card expirava. Isso introduzia duas consultas
+  // concorrentes ao YouTube justamente na regressão de ordem.
+  const data = { ...track };
   detailsCache.set(key, { expiresAt: Date.now() + DETAILS_TTL, data });
   while (detailsCache.size > 100) detailsCache.delete(detailsCache.keys().next().value);
   return data;
@@ -157,10 +138,12 @@ async function sendPlayDetailCard(ctx, track, prefix, kind = 'audio') {
   }
   try {
     if (ctx.socket && typeof ctx.socket.sendMessage === 'function') {
-      await antiBan.enqueueOutbound(() => ctx.socket.sendMessage(ctx.remoteJid, {
+      console.log('[WA] chamando sendMessage');
+      const sendResult = await antiBan.enqueueOutbound(() => ctx.socket.sendMessage(ctx.remoteJid, {
         text: card,
         contextInfo: { externalAdReply: preview },
       }, { quoted: ctx.message }));
+      console.log('[WA] sendMessage resolveu', { hasResult: Boolean(sendResult), id: sendResult && sendResult.key && sendResult.key.id ? String(sendResult.key.id).slice(0, 32) : undefined });
       return true;
     }
     await ctx.reply(card);
@@ -280,7 +263,12 @@ async function executeMediaAction(ctx, session, trackIndex, action) {
       }
     });
   } catch (err) {
-    logger.error({ err: err.message, action, url: track.url }, 'falha no download do play');
+    console.error('[MEDIA ERROR] message:', err && err.message);
+    console.error('[MEDIA ERROR] name:', err && err.name);
+    console.error('[MEDIA ERROR] code:', err && err.code);
+    console.error('[MEDIA ERROR] stack:', err && err.stack);
+    console.error('[MEDIA ERROR] cause:', err && err.cause);
+    logger.error({ err: err.message, action }, 'falha no download do play');
     const msg = (err && err.message) || '';
     if (msg.includes('FILE_TOO_BIG')) {
       await ctx.reply('📦 O arquivo excedeu o limite máximo de download.');
