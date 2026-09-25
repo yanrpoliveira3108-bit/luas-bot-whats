@@ -55,6 +55,15 @@ function setButtonsEnabled(enabled) {
   set('buttons_enabled', enabled ? 'true' : 'false');
 }
 
+/** Preferência global do card HTML PLAY (persistida, padrão do .env). */
+function htmlPlayEnabled() {
+  return getBool('html_play_enabled', CONFIG.htmlPlay && CONFIG.htmlPlay.enabled);
+}
+
+function setHtmlPlayEnabled(enabled) {
+  set('html_play_enabled', enabled ? 'true' : 'false');
+}
+
 /**
  * Menus em HTML (card richResponseMessage) — `!modohtml on/off`.
  *
@@ -83,6 +92,8 @@ module.exports = {
   effectivePrefix,
   buttonsEnabled,
   setButtonsEnabled,
+  htmlPlayEnabled,
+  setHtmlPlayEnabled,
   menuHtmlEnabled,
   setMenuHtmlEnabled,
 };
