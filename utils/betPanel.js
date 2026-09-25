@@ -127,7 +127,7 @@ function montar(o) {
   color:#fff;letter-spacing:.5px}
 .bp-go[disabled]{opacity:.45;cursor:not-allowed;letter-spacing:normal}
 .bp-cmd{margin-top:8px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:#a7f3d0;
-  min-height:16px;word-break:break-all}
+  min-height:16px;word-break:break-all;-webkit-user-select:text;user-select:text}
 .bp-regras{margin-top:10px;font-size:12px;color:rgba(255,233,173,.9)}
 .bp-regras summary{cursor:pointer;font-weight:bold;min-height:44px;display:flex;align-items:center;color:#ffc63c}
 .bp-regras ul{margin:6px 0 0;padding-left:18px}
@@ -292,12 +292,20 @@ function montar(o) {
     '  try{if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(texto).then(function(){pronto(true)},function(){pronto(legado())});return}}catch(e){}\n' +
     '  pronto(legado());\n' +
     '}\n' +
+    // sem área de transferência (WebView sem permissão): o comando fica
+    // SELECIONADO na tela, para o toque-e-segure poder copiar
+    'function selecionar(el){try{if(!el)return;var r=document.createRange();r.selectNodeContents(el);\n' +
+    '  var s=window.getSelection();if(s){s.removeAllRanges();s.addRange(r)}}catch(e){}}\n' +
+    'function publicar(texto,ok,extra){\n' +
+    '  if(!saida)return;saida.textContent=(ok?"✅ Comando copiado: ":"⚠️ Toque e segure para copiar: ")+texto+" — "+(extra||"");\n' +
+    '  if(!ok)selecionar(saida);\n' +
+    '}\n' +
     'function comandoCom(v){return CMD.replace("{valor}",String(v))}\n' +
     'function confirma(){\n' +
     '  var r=validar(inp.value);if(!r.ok||BLOQUEIO)return;\n' +
     '  var cmd=comandoCom(r.v);\n' +
     '  copiar(cmd,function(ok){\n' +
-    '    saida.textContent=(ok?"✅ Comando copiado: ":"⚠️ Copie manualmente: ")+cmd+" — envie esta mensagem no chat para o bot processar.";\n' +
+    '    publicar(cmd,ok,"envie esta mensagem no chat para o bot processar.");\n' +
     '  });\n' +
     '}\n' +
     'function passo(d){var r=validar(inp.value);var base=r.ok?r.v:(Number(limpa(inp.value))||0);\n' +
@@ -317,7 +325,7 @@ function montar(o) {
     'var ref=document.getElementById("bp-ref-' + id + '");\n' +
     'if(ref)ref.addEventListener("click",function(){\n' +
     '  copiar(REFRESH,function(ok){\n' +
-    '    saida.textContent=(ok?"✅ Comando copiado: ":"⚠️ Copie manualmente: ")+REFRESH+" — envie no chat para o bot reenviar o painel com o saldo atualizado.";\n' +
+    '    publicar(REFRESH,ok,"envie no chat para o bot reenviar o painel com o saldo atualizado.");\n' +
     '  });\n' +
     '});\n' +
     'pintar();\n' +

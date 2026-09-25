@@ -174,6 +174,13 @@ Outras regras:
   diz que ainda não houve giro e o card convida a jogar;
 - reabrir o card mostra **o mesmo** resultado (não sorteia de novo) e o **mesmo**
   painel: nada é sorteado, cobrado ou alterado só por abrir a tela;
+- **um card por conversa** (pedido do dono: “não criar vários html”). `!tigrinho
+  saldo` (ou `!tigrinho`, `!tigrinho fichas`) manda o card **uma vez** — com o
+  valor já preenchido (o que o jogador adiciona) e o botão 🎰 de girar. O
+  **giro responde em TEXTO** (rolos, aposta, prêmio, retorno, lucro e saldo) e
+  **não** manda outro HTML; pedir o card de novo na mesma conversa dentro de
+  ~2 min também responde em texto, dizendo que o card já está aberto acima. Em
+  outra conversa (ou depois da janela) o card sai normalmente;
 - o card usa a **moldura livre** de `menus/html/moldura.js` (`cssLivre()`): sem
   altura declarada. O WebView do card se dimensiona pelo conteúdo — altura fixa
   menor que o conteúdo **corta** (era o que escondia o botão de girar). O menu

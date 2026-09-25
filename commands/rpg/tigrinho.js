@@ -210,7 +210,9 @@ function buildMachineHtml({ balance, jackpots, coin, prefix, painel, ultima, rec
     '<div class="r">🔔×5 <b>32x</b></div><div class="r">🍒×5 <b>16x</b></div><div class="r">🍊×5 <b>16x</b></div>' +
     '<div class="r">🍋×5 <b>12x</b></div><div class="r">3/4 iguais <b>menor</b></div><div class="r">2 iguais <b>0,2x</b></div>' +
     '</div></details>' +
-    '<div class="foot">O bot decide aposta, sorteio e prêmio: <code>' +
+    '<div class="foot">▸ UM card por vez: o resultado de cada giro chega em TEXTO ' +
+    'nesta conversa — o card é o painel de controle (não é reenviado a cada giro).<br>' +
+    'O bot decide aposta, sorteio e prêmio: <code>' +
     betPanel.esc(`${prefix}tigrinho jogar <valor>`) +
     '</code> · ' +
     betPanel.esc(`${prefix}tigrinho fichas`) +
@@ -597,11 +599,12 @@ async function handleSpin(ctx, prefix) {
         : `♻️ Rodada anterior pendente concluída: +${formatMoney(rec.reward)}`
     );
   }
-  lines.push(`_${prefix}tigrinho para a interface visual._`);
+  // 10) SEM card novo aqui (pedido do dono: "não criar vários html"): o
+  //     resultado vai na conversa, em texto, e o card da carteira continua sendo
+  //     o painel de controle — UM por vez, aberto/atualizado por `tigrinho saldo`.
+  lines.push(`▸ Girar pela tela: \`${prefix}tigrinho saldo\` (o card já aberto continua valendo)`);
+  lines.push(`▸ Histórico: \`${prefix}tigrinho historico\``);
   await ctx.reply(lines.join('\n'));
-
-  // 10) card com o resultado VALIDADO e a carteira atualizada (quando permitido)
-  await enviarCard(ctx, prefix, { ultima: rodadaValidada(ctx.sender), recuperada: rec });
 }
 
 /** Um giro validado em texto (usado no histórico e na mensagem repetida). */
@@ -614,13 +617,61 @@ function renderRodadaTexto(r) {
 }
 
 /**
- * Envia o card (máquina + painel) quando o modo HTML permite; devolve false se
- * caiu no texto (o chamador decide o que dizer).
+ * Memória do ÚLTIMO card por conversa+jogador. Pedir o card de novo segundos
+ * depois, com o MESMO saldo, responde em texto em vez de mandar outro HTML
+ * (pedido do dono: "não criar vários html"). Some quando o saldo muda — ou seja,
+ * depois de girar o próximo pedido traz card novo.
+ */
+const ultimoCard = new Map();
+/**
+ * Por quanto tempo um card já aberto conta como "o card da conversa". Antes
+ * disso, pedir o card de novo (ou girar) responde em texto. Curto o bastante
+ * para um pedido novo (minutos depois) trazer um card atualizado; longo o
+ * bastante para parar de criar um HTML por giro.
+ */
+const JANELA_CARD_MS = 2 * 60 * 1000;
+const MAX_CARDS_MEMORIA = 500;
+const HINT_JA_ABERTO =
+  '♻️ O card da carteira já está aberto acima — NÃO mandei outro HTML igual (o dono pediu: um card por vez). ' +
+  'Toque em 🎰 Girar nele: o botão copia o comando com o valor que você digitar. ' +
+  'O resultado de cada giro chega nesta conversa, em texto.';
+
+function chaveCardDe(ctx) {
+  return `${(ctx && ctx.remoteJid) || ''}::${(ctx && ctx.sender) || ''}`;
+}
+
+/* (o detalhamento da carteira continua no TEXTO dessas respostas — nunca se
+ *  perde informação por não reenviar o card.) */
+
+/** Já existe card do jogador aberto nesta conversa (dentro da janela)? */
+function cardAbertoAgora(ctx) {
+  const m = ultimoCard.get(chaveCardDe(ctx));
+  if (!m) return false;
+  return Date.now() - m.quando <= JANELA_CARD_MS;
+}
+
+function anotarCard(ctx) {
+  if (ultimoCard.size > MAX_CARDS_MEMORIA) ultimoCard.clear();
+  ultimoCard.set(chaveCardDe(ctx), { quando: Date.now() });
+}
+
+/**
+ * Envia o card (máquina + painel) quando o modo HTML permite.
+ *
+ * @returns {Promise<{enviado:boolean, repetido:boolean}>}
+ *   `enviado:false` → o chamador responde pelo TEXTO equivalente;
+ *   `repetido:true` → havia um card igual aberto agora há pouco (não mandar HTML).
  */
 async function enviarCard(ctx, prefix, extra = {}) {
-  if (!menuFormat.usarHtmlJogo().usar) return false;
+  if (!menuFormat.usarHtmlJogo().usar) return { enviado: false, repetido: false };
   const { painel, dados } = montarPainel(ctx.sender, prefix);
   const p = store.getPlayer(ctx.sender);
+  // UM card por conversa+jogador dentro da janela: pedir de novo responde em
+  // TEXTO (mesmos dados) em vez de encher a conversa de HTML
+  if (extra.forcar !== true && cardAbertoAgora(ctx)) {
+    logger.info({ user: ctx.sender }, '[LUA TIGRINHO] já existe card aberto nesta conversa — respondendo em texto');
+    return { enviado: false, repetido: true };
+  }
   const ultima = extra.ultima === undefined ? rodadaValidada(ctx.sender) : extra.ultima;
   let html = null;
   try {
@@ -636,15 +687,16 @@ async function enviarCard(ctx, prefix, extra = {}) {
     });
   } catch (err) {
     logger.error({ err: err && err.message }, '[LUA TIGRINHO] falha ao montar o card — seguindo no texto');
-    return false;
+    return { enviado: false, repetido: false };
   }
-  if (!html) return false;
+  if (!html) return { enviado: false, repetido: false };
   try {
     await richHtml.sendHtml(ctx.socket, ctx.remoteJid, html, { title: '🐯 Lua Tigrinho' });
-    return true;
+    anotarCard(ctx);
+    return { enviado: true, repetido: false };
   } catch (err) {
     logger.warn({ err: (err && err.message) || String(err) }, '[LUA TIGRINHO] HTML falhou — usando fallback textual');
-    return false;
+    return { enviado: false, repetido: false };
   }
 }
 
@@ -664,17 +716,20 @@ async function handleChips(ctx, prefix) {
       ].join('\n')
     : '';
   // Com o card ligado, `saldo`/`fichas` abre a MESMA tela do tigrinho: saldo real
-  // (lido pelo bot) + BOTÃO DE JOGAR com a aposta padrão já preenchida.
-  if (await enviarCard(ctx, prefix, { aviso: detalhe })) return true;
+  // (lido pelo bot) + BOTÃO DE GIRAR com o valor já preenchido (o que o jogador
+  // adiciona na máquina). UM card por vez: pedir de novo em seguida responde em
+  // texto em vez de mandar outro HTML.
+  const r = await enviarCard(ctx, prefix, { aviso: detalhe });
+  if (r.enviado) return true;
   const saldoTxt = p
     ? `💰 Saldo: ${formatMoney(p.balance)}`
     : '💰 Saldo: — (não consegui consultar agora — tente de novo)';
   await ctx.reply(
     [
-      '🐯 *LUA TIGRINHO — SALDO*',
+      r.repetido ? HINT_JA_ABERTO : '🐯 *LUA TIGRINHO — SALDO*',
       saldoTxt,
       detalhe,
-      `▸ Jogar: \`${prefix}tigrinho jogar <valor>\``,
+      `▸ Girar valendo: \`${prefix}tigrinho jogar <valor>\``,
       `▸ Histórico: \`${prefix}tigrinho historico\``,
     ]
       .filter(Boolean)
@@ -750,31 +805,19 @@ async function handleOpen(ctx, prefix) {
   }
 
   const p = store.getPlayer(ctx.sender);
-  const { painel, dados } = montarPainel(ctx.sender, prefix);
+  const { dados } = montarPainel(ctx.sender, prefix);
   const ultima = rodadaValidada(ctx.sender);
   logger.info({ user: ctx.sender, saldo: dados.saldo.wallet }, '[LUA TIGRINHO] Interface aberta');
 
-  if (menuFormat.usarHtmlJogo().usar) {
-    try {
-      const html = buildMachineHtml({
-        balance: dados.indisponivel ? null : dados.saldo.wallet,
-        jackpots: p.jackpots,
-        coin: moeda().emoji,
-        prefix,
-        painel,
-        ultima,
-        recuperada: rec,
-        aviso: dados.indisponivel ? dados.bloqueio : '',
-      });
-      await richHtml.sendHtml(ctx.socket, ctx.remoteJid, html, { title: '🐯 Lua Tigrinho' });
-      return;
-    } catch (err) {
-      logger.warn({ err: (err && err.message) || String(err) }, '[LUA TIGRINHO] HTML falhou — usando fallback textual');
-    }
-  }
+  // UM caminho só para o card (o mesmo do `saldo`/`fichas`): evita HTML repetido
+  const r = await enviarCard(ctx, prefix, { recuperada: rec, ultima });
+  if (r.enviado) return;
 
   // fallback textual: MESMOS dados (carteira, limites, última rodada) e ações
-  await ctx.reply(textoPainel(ctx.sender, prefix, { dados, ultima, recuperada: rec, p }));
+  await ctx.reply(
+    (r.repetido ? `${HINT_JA_ABERTO}\n\n` : '') +
+      textoPainel(ctx.sender, prefix, { dados, ultima, recuperada: rec, p })
+  );
 }
 
 /** Texto equivalente ao card (fluxo sem HTML). */

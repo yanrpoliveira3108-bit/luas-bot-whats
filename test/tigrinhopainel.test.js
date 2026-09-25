@@ -43,8 +43,12 @@ function skip(l, motivo) {
   console.log('⏭  ' + l + ' — pulado: ' + motivo);
 }
 
+let chatsCriados = 0;
 function fakeCtx(opts = {}) {
   const enviados = [];
+  // cada ctx nasce num chat próprio: o tigrinho manda UM card por conversa
+  // (quando o teste precisa repetir o MESMO chat, ele passa opts.remoteJid)
+  chatsCriados++;
   const ctx = {
     enviados,
     socket: {
@@ -54,7 +58,7 @@ function fakeCtx(opts = {}) {
         return { key: { id: 'XYZ' } };
       },
     },
-    remoteJid: '120363000000000000@g.us',
+    remoteJid: opts.remoteJid || `12036300000000${String(chatsCriados).padStart(4, '0')}@g.us`,
     isGroup: true,
     prefix: '!',
     sender: opts.sender || '5511999999999@s.whatsapp.net',
@@ -104,7 +108,8 @@ async function main() {
   /* ------------- 1) abrir: carteira no card, sem sorteio -------------- */
   try {
     economy.setWallet(U, 1000);
-    const ctx = fakeCtx({ args: [], msgId: 'OPEN-1' });
+    const mesmoChat = '120363000000000000@g.us'; // este teste repete o MESMO chat
+    const ctx = fakeCtx({ args: [], msgId: 'OPEN-1', remoteJid: mesmoChat });
     await cmd.execute(ctx);
     const html = card(ctx);
     assert.ok(/LUA TIGRINHO/.test(html), 'card do tigrinho');
@@ -116,13 +121,18 @@ async function main() {
     assert.ok(/tigrinho jogar \{valor\}|tigrinho jogar &lt;valor&gt;/.test(html), 'comando do giro no card');
     assert.ok(/NENHUMA RODADA VALIDADA|ULTIMA RODADA VALIDADA|ÚLTIMA RODADA VALIDADA/.test(html), 'estado da rodada informado');
     assert.ok(/nada foi cobrado|Nada é cobrado/.test(html), 'deixa claro que abrir/consultar não cobra');
-    // reabrir não sorteia: o mesmo estado aparece de novo
-    const ctx2 = fakeCtx({ args: [], msgId: 'OPEN-2' });
+    // reabrir NA MESMA CONVERSA não manda outro HTML: responde em texto com os
+    // mesmos dados (é a regra "um card por vez" — pedido do dono)
+    const ctx2 = fakeCtx({ args: [], msgId: 'OPEN-2', remoteJid: mesmoChat });
     await cmd.execute(ctx2);
-    const html2 = card(ctx2);
+    assert.strictEqual(ctx2.enviados.length, 0, 'o segundo pedido não criou outro card');
+    const txt2 = ctx2.replies.join('\n');
+    assert.ok(/já está aberto acima/.test(txt2), 'explica que o card já está aberto acima');
+    assert.ok(/Saldo/.test(txt2) && /Disponível para apostar/.test(txt2), 'o texto traz saldo e disponível');
+    // e o card continua o mesmo (mesmos rolos do bot, sem sorteio no card)
     const reels = (h) => (h.match(/class="cell">([^<]+)</g) || []).join('|');
-    assert.strictEqual(reels(html2), reels(html), 'reabrir mostra os MESMOS rolos (sem sorteio no card)');
-    ok('1: card abre com a carteira real, sem sortear nada');
+    assert.ok(reels(html).length > 0, 'o card aberto tem os rolos do último resultado validado');
+    ok('1: card abre com a carteira real, sem sortear nada (e não duplica HTML na mesma conversa)');
   } catch (e) {
     fail('1: abrir', e);
   }
@@ -470,6 +480,43 @@ async function main() {
     ok('13: card do tigrinho cresce com o conteúdo — botão de girar antes da paytable, sem corte');
   } catch (e) {
     fail('13: moldura', e);
+  }
+
+  /* ---- 14) UM card por conversa: `tigrinho saldo` abre e já dá para girar ----
+   * Pedido do dono: "quero que rode tigrinho saldo, mostre valor a adicionar e
+   * já possa girar, não criar vários html". Aqui: o card aparece no `saldo` (com
+   * o valor já preenchido e o botão de girar), o GIRO responde em texto (sem
+   * card novo) e pedir o saldo de novo na mesma conversa responde em texto. */
+  try {
+    const V = '5511933330001@s.whatsapp.net';
+    economy.setWallet(V, 900);
+    const conversa = '120363000000999999@g.us';
+
+    const abertura = fakeCtx({ args: ['saldo'], msgId: 'UM-1', sender: V, remoteJid: conversa });
+    await cmd.execute(abertura);
+    const html = card(abertura);
+    assert.ok(/value="100"/.test(html), 'o card do saldo já vem com o VALOR preenchido (o que ele adiciona)');
+    assert.ok(/Jogar agora/.test(html), 'e com o botão de girar pronto');
+    assert.ok(/bp-go/.test(html), 'botão de girar presente no painel');
+
+    const giro = fakeCtx({ args: ['jogar', '100'], msgId: 'UM-2', sender: V, remoteJid: conversa });
+    await cmd.execute(giro);
+    assert.strictEqual(giro.enviados.length, 0, 'o GIRO não manda card novo (só o card da carteira existe)');
+    const txt = giro.replies.join('\n');
+    assert.ok(/LUA TIGRINHO/.test(txt) && /Saldo:/.test(txt), 'o resultado sai em texto, com o saldo');
+
+    const denovo = fakeCtx({ args: ['saldo'], msgId: 'UM-3', sender: V, remoteJid: conversa });
+    await cmd.execute(denovo);
+    assert.strictEqual(denovo.enviados.length, 0, 'pedir o saldo de novo na mesma conversa não cria outro HTML');
+    assert.ok(/já está aberto acima/.test(denovo.replies.join('\n')), 'diz onde está o card e o que fazer');
+    assert.ok(/Saldo/.test(denovo.replies.join('\n')), 'e mesmo assim informa o saldo no texto');
+
+    const outra = fakeCtx({ args: ['saldo'], msgId: 'UM-4', sender: V, remoteJid: '120363000000888888@g.us' });
+    await cmd.execute(outra);
+    assert.strictEqual(outra.enviados.length, 1, 'em outra conversa o card sai normalmente');
+    ok('14: `tigrinho saldo` abre o card com valor e botão; giro e pedidos repetidos não criam vários HTML');
+  } catch (e) {
+    fail('14: um card por conversa', e);
   }
 
   console.log(`\n${feitos} ✅ · ${falhas} ❌`);
