@@ -179,8 +179,8 @@ function secaoDeCategoria(cat, comandos, opts = {}) {
  */
 function painelIdentidade(ident, extra = {}) {
   const id = ident || {};
-  const celula = (rotulo, valorHtml, titulo) =>
-    `<span class="idp-c" title="${escapeAttr(titulo)}">${rotulo} ${valorHtml}</span>`;
+  const celula = (rotulo, valorHtml, titulo, extraClass = '') =>
+    `<span class="idp-c${extraClass ? ' ' + extraClass : ''}" title="${escapeAttr(titulo)}">${rotulo} ${valorHtml}</span>`;
   const sol = id.solicitante && id.solicitante.texto;
   const dono = id.dono && id.dono.texto;
   const botNum = id.bot && id.bot.numero;
@@ -194,12 +194,12 @@ function painelIdentidade(ident, extra = {}) {
       : '<i>indisponível</i>';
   return (
     '<div class="idp" role="group" aria-label="Identificação deste menu">' +
-    // grade 2x2: [pedido por | prefixo] / [dono | bot]. No Bot o NÚMERO vem
-    // antes do nome: se precisar de reticências, corta o nome, não o número
-    celula('Pedido por', sol ? `<b>${escapeHtml(sol)}</b>` : '<i>não identificado</i>', `Solicitado por: ${sol || 'não identificado'}`) +
-    celula('Prefixo', `<b>${escapeHtml(prefixo)}</b>${total}`, `Prefixo deste chat: ${prefixo}`) +
-    celula('Dono', dono ? `<b>${escapeHtml(dono)}</b>` : '<i>não configurado</i>', `Dono do bot: ${dono || 'não configurado'}`) +
-    celula('Bot', botHtml, `Conta conectada: ${[botNum, botNome].filter(Boolean).join(' · ') || 'indisponível'}`) +
+    // grade 2x2: [pedido por | prefixo] / [dono | bot].
+    // Mantém `Prefixo <b>${escapeHtml(prefixo)}</b>` para compatibilidade estrita com testes e contratos.
+    celula('Pedido por', sol ? `<b>${escapeHtml(sol)}</b>` : '<i>não identificado</i>', `Solicitado por: ${sol || 'não identificado'}`, 'idp-user') +
+    celula('Prefixo', `<b>${escapeHtml(prefixo)}</b>${total}`, `Prefixo deste chat: ${prefixo}`, 'idp-prefix') +
+    celula('Dono', dono ? `<b>${escapeHtml(dono)}</b>` : '<i>não configurado</i>', `Dono do bot: ${dono || 'não configurado'}`, 'idp-sec') +
+    celula('Bot', botHtml, `Conta conectada: ${[botNum, botNome].filter(Boolean).join(' · ') || 'indisponível'}`, 'idp-sec') +
     '</div>'
   );
 }
