@@ -612,6 +612,62 @@ async function main() {
     assert.ok(/broadcast_identico/.test(saida), 'mostra o motivo');
     assert.ok(/Comandos recebidos neste chat : 1/.test(saida), 'acha o comando no log pelo chat');
     ok('15: `npm run chat:doctor <jid>` diz, com dado do aparelho, se o freio barrou ou se o envio saiu');
+
+    /* 15b) o doctor também diz QUAL código está no ar (o `git pull` sozinho não
+       troca o processo — foi o que confundiu o dono em 25/09/2026) */
+    const revAntigo = 'deadbee';
+    fs.appendFileSync(
+      path.join(dir, 'logs', 'lua-2026-01-01.log'),
+      [
+        JSON.stringify({
+          level: 30,
+          time: agora - 3600000,
+          tag: 'BOOT',
+          rev: revAntigo,
+          mtimeMs: agora - 3600000,
+          msg: `[LUA][BOOT] código carregado: ${revAntigo}`,
+        }),
+        JSON.stringify({
+          level: 40,
+          time: agora - 1800000,
+          module: 'sendguard',
+          chat: alvo,
+          err: "Cannot read properties of undefined (reading 'toString')",
+          frame: 'at NodeCache.formatKey (node_modules/@cacheable/node-cache/dist/index.cjs:509:16)',
+          stack:
+            'TypeError: Cannot read properties of undefined (reading \'toString\')\n' +
+            '    at NodeCache.formatKey (node_modules/@cacheable/node-cache/dist/index.cjs:509:16)\n' +
+            '    at NodeCache.get (node_modules/@cacheable/node-cache/dist/index.cjs:319:40)',
+          msg: '[FREIO] falha ao MONTAR a mensagem citada — reenviando sem citação',
+        }),
+      ].join('\n') + '\n'
+    );
+    const saida2 = execFileSync(process.execPath, [path.join(RAIZ, 'scripts', 'chat-doctor.js'), alvo], {
+      cwd: RAIZ,
+      encoding: 'utf8',
+      env: Object.assign({}, process.env, {
+        SEND_STATE_DIR: './tmp/chatdoc-test/state',
+        LOG_DIR: './tmp/chatdoc-test/logs',
+      }),
+    });
+    assert.ok(
+      /0\) CÓDIGO NO AR × CÓDIGO NO DISCO/.test(saida2),
+      'a seção 0 compara o processo com o disco'
+    );
+    assert.ok(
+      /BOT NO AR É DE ANTES DO CÓDIGO ATUAL — REINICIE/.test(saida2),
+      'avisa que falta reiniciar (o caso do dono: pull sem restart)'
+    );
+    assert.ok(/rev|deadbee/.test(saida2), 'mostra a versão que está no ar');
+    assert.ok(
+      /\[FREIO\] falha ao MONTAR a mensagem citada/.test(saida2) && /NodeCache\.formatKey/.test(saida2),
+      'e mostra a pilha do erro de montagem'
+    );
+    assert.ok(
+      /CAUSA CONHECIDA \(confirmada pelo frame acima\)/.test(saida2),
+      'reconhece a causa raiz (participante sem id → cache da biblioteca)'
+    );
+    ok('15b: o doctor separa código no ar × disco e reconhece a causa raiz do TypeError');
   } catch (e) {
     fail('15: chat-doctor', e);
   }

@@ -126,6 +126,14 @@ function statusText() {
     `▸ Envios travados (sem resposta): ${s.travados.total}${s.travados.ultimo ? ` · último ${s.travados.ultimo.jid} (${s.travados.ultimo.kind})` : ''}${
       s.travados.emAndamento ? ` · AGORA: ${s.travados.emAndamento.kind} há ${Math.round(s.travados.emAndamento.ms / 1000)}s` : ''
     }`,
+    // qual código está no ar: o `git pull` sozinho NÃO troca o processo
+    `▸ Código no ar: ${(() => {
+      try {
+        return require('../../utils/buildInfo').resumo();
+      } catch (_) {
+        return '—';
+      }
+    })()}`,
     `▸ Conversas conhecidas (PV): ${s.chatsConhecidos}`,
     s.lastRestriction ? `▸ Última restrição detectada: ${s.lastRestriction.at}` : '▸ Nenhuma restrição detectada 🎉',
     ...bloqueiosText(),

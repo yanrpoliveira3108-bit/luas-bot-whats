@@ -152,6 +152,93 @@ try {
   estado = null;
 }
 
+let arquivos = [];
+try {
+  arquivos = fs
+    .readdirSync(CONFIG.paths.logsDir)
+    .filter((f) => f.startsWith('lua-') && f.endsWith('.log'))
+    .sort()
+    .slice(-DIAS);
+} catch (_) {
+  arquivos = [];
+}
+
+const achados = {
+  comandos: [],
+  falhaEnvio: [],
+  freio: [],
+  comunidade: [],
+  lidNaoResolvido: [],
+  outros: [],
+};
+// QUANDO O BOT SUBIU (o processo que está rodando agora). É a informação que
+// evita o erro de ler falhas de ANTES da correção e concluir que "continua
+// quebrado": só o que aconteceu DEPOIS do último start vale como teste.
+let ultimoStart = 0;
+let bootRev = null;
+let bootMtime = 0;
+for (const f of arquivos) {
+  const caminho = path.join(CONFIG.paths.logsDir, f);
+  const linhas = lerJsonl(caminho);
+  for (const l of linhas) {
+    const m = String(l.msg || '');
+    // o boot registra QUAL código o processo carregou (rev + mtime do disco)
+    if (/\[LUA\]\[BOOT\] código carregado/i.test(m)) {
+      const t = quandoLinha(l);
+      if (t >= ultimoStart) {
+        ultimoStart = t;
+        bootRev = l.rev || null;
+        bootMtime = Number(l.mtimeMs) || 0;
+      }
+    } else if (/socket criado|conectado ao WhatsApp/i.test(m) && !ultimoStart) {
+      ultimoStart = Math.max(ultimoStart, quandoLinha(l));
+    }
+  }
+  for (const linha of linhas) {
+    if (String(linha.chat || '') !== JID) continue;
+    if (linha.t && quando(linha.t) < DESDE) continue;
+    const msg = String(linha.msg || '');
+    if (/não consegui resolver LID/i.test(msg)) achados.lidNaoResolvido.push(linha);
+    else if (/sendMessage FALHOU|falha ao enviar/i.test(msg)) achados.falhaEnvio.push(linha);
+    else if (/FREIO/i.test(msg)) achados.freio.push(linha);
+    else if (/COMMAND|Comando recebido/i.test(msg)) achados.comandos.push(linha);
+    else if (/COMMUNITY|comunidade|LID/i.test(msg)) achados.comunidade.push(linha);
+    else achados.outros.push(linha);
+  }
+}
+
+
+/* ------------------- 1.0) VERSÃO NO AR × VERSÃO NO DISCO ----------------- */
+
+let versaoNoAr = null;
+try {
+  const buildInfo = require('../utils/buildInfo');
+  versaoNoAr = buildInfo.comparar(bootRev || bootMtime ? { rev: bootRev, mtimeMs: bootMtime } : null);
+} catch (_) {
+  versaoNoAr = null;
+}
+
+H('0) CÓDIGO NO AR × CÓDIGO NO DISCO (o `git pull` sozinho não troca o processo)');
+if (!versaoNoAr || versaoNoAr.igual === null) {
+  L('⚠️  Não achei o registro de boot nos logs (versão antiga do bot ou log limpo).');
+  L('   Depois de reiniciar com esta versão, esta seção passa a comparar sozinha.');
+} else {
+  L(`Processo no ar...: ${bootRev || 'sem git'}${ultimoStart ? ` (subiu ${hhmmss(ultimoStart)})` : ''}`);
+  L(`Disco agora......: ${versaoNoAr.agora.rev || 'sem git'}`);
+  if (versaoNoAr.igual) {
+    L('✅ O PROCESSO NO AR JÁ É O CÓDIGO ATUAL — o que estiver nas seções abaixo aconteceu com o código novo.');
+  } else {
+    L('');
+    L('🚨 O BOT NO AR É DE ANTES DO CÓDIGO ATUAL — REINICIE ANTES DE TESTAR.');
+    L(`   motivo: ${versaoNoAr.motivo}`);
+    L('   ▸ Pare o bot (Ctrl+C no terminal dele, ou `pkill -f index.js`) e suba de');
+    L('     novo (`npm start`). O `git pull` muda o DISCO; o processo em execução');
+    L('     continua com o código que carregou quando subiu.');
+    L('   ▸ Só depois disso as mensagens abaixo (falhas, bloqueios) separam o que já');
+    L('     foi corrigido do que ainda acontece.');
+  }
+}
+
 /* --------------------------- 2) auditoria do freio ---------------------- */
 
 const eventos = lerJsonl(AUDIT).filter((e) => quando(e.t) >= DESDE);
@@ -238,50 +325,6 @@ if (top.length) {
 /* ------------------------------- 4) logs -------------------------------- */
 
 H('3) LOGS DO BOT PARA ESTE CHAT (últimos dias)');
-let arquivos = [];
-try {
-  arquivos = fs
-    .readdirSync(CONFIG.paths.logsDir)
-    .filter((f) => f.startsWith('lua-') && f.endsWith('.log'))
-    .sort()
-    .slice(-DIAS);
-} catch (_) {
-  arquivos = [];
-}
-
-const achados = {
-  comandos: [],
-  falhaEnvio: [],
-  freio: [],
-  comunidade: [],
-  lidNaoResolvido: [],
-  outros: [],
-};
-// QUANDO O BOT SUBIU (o processo que está rodando agora). É a informação que
-// evita o erro de ler falhas de ANTES da correção e concluir que "continua
-// quebrado": só o que aconteceu DEPOIS do último start vale como teste.
-let ultimoStart = 0;
-for (const f of arquivos) {
-  const caminho = path.join(CONFIG.paths.logsDir, f);
-  const linhas = lerJsonl(caminho);
-  for (const l of linhas) {
-    if (/socket criado|conectado ao WhatsApp/i.test(String(l.msg || ''))) {
-      ultimoStart = Math.max(ultimoStart, quandoLinha(l));
-    }
-  }
-  for (const linha of linhas) {
-    if (String(linha.chat || '') !== JID) continue;
-    if (linha.t && quando(linha.t) < DESDE) continue;
-    const msg = String(linha.msg || '');
-    if (/não consegui resolver LID/i.test(msg)) achados.lidNaoResolvido.push(linha);
-    else if (/sendMessage FALHOU|falha ao enviar/i.test(msg)) achados.falhaEnvio.push(linha);
-    else if (/FREIO/i.test(msg)) achados.freio.push(linha);
-    else if (/COMMAND|Comando recebido/i.test(msg)) achados.comandos.push(linha);
-    else if (/COMMUNITY|comunidade|LID/i.test(msg)) achados.comunidade.push(linha);
-    else achados.outros.push(linha);
-  }
-}
-
 if (!arquivos.length) {
   L('⚠️  Nenhum arquivo de log encontrado em ' + CONFIG.paths.logsDir);
 } else {
@@ -321,7 +364,11 @@ if (!arquivos.length) {
 
 /* ------------------------- 3.1 assinaturas de erro ---------------------- */
 
-const comErro = achados.falhaEnvio.concat(achados.outros.filter((l) => l.err || l.stack));
+const comErro = achados.falhaEnvio
+  .concat(achados.outros.filter((l) => l.err || l.stack))
+  // as linhas do freio com erro/pilha TAMBÉM entram: é nelas que fica o frame
+  // exato do erro de montagem (o "Cannot read properties…" do aparelho)
+  .concat(achados.freio.filter((l) => l.err || l.stack || l.frame));
 if (comErro.length) {
   const contagem = new Map();
   for (const l of comErro) {
@@ -420,6 +467,11 @@ if (barrados.length) {
     const atuais = achados.falhaEnvio.filter((l) => quandoLinha(l) >= ultimoStart);
     L('🎯 CAUSA CONFIRMADA: cache de dispositivos da biblioteca recebendo chave');
     L('   inválida (participante de grupo LID sem id). TODO envio neste grupo falhava.');
+    if (versaoNoAr && versaoNoAr.igual === false) {
+      L('');
+      L('   🚨 PRIMEIRO REINICIE: o código no disco é mais novo que o do processo no');
+      L('      ar (seção 0). Sem reiniciar, o erro continua igual — e não é regressão.');
+    }
     if (ultimoStart && !atuais.length) {
       L('');
       L(`   ⚠️ ATENÇÃO: TODAS as falhas acima são de ANTES do último start (${hhmmss(ultimoStart)}).`);

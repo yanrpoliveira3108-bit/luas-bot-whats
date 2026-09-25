@@ -113,6 +113,20 @@ ui.ok('Comandos carregados');
 ui.ok('Menus carregados');
 logger.info(`🌙 ${CONFIG.bot.name} v${CONFIG.bot.version} — ${registry.count()} comandos em ${registry.plugins.size} plugins`);
 logger.info({ tag: 'BOOT' }, `[LUA][BOOT] Baileys: @lucasmod/boruto-vk7-baileys@${BAILEYS_VERSION}`);
+// QUAL CÓDIGO ESTE PROCESSO CARREGOU. O doctor compara com o disco e diz se
+// falta reiniciar (o `git pull` muda o disco, não o processo em execução — foi
+// exatamente o que confundiu em 25/09/2026). Ver utils/buildInfo.js.
+try {
+  const info = require('./utils/buildInfo');
+  const marca = info.assinatura();
+  logger.info(
+    { tag: 'BOOT', rev: marca.rev, mtimeMs: marca.mtimeMs },
+    `[LUA][BOOT] código carregado: ${marca.rev || 'sem git'}`
+  );
+  ui.ok(`Código no ar: ${marca.rev || 'sem git'}`);
+} catch (_) {
+  /* nunca impede o boot */
+}
 logger.info({ tag: 'OWNER' }, '[LUA][OWNER] Owner carregado do .env');
 
 // handlers
