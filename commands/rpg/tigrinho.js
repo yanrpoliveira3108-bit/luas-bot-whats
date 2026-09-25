@@ -602,7 +602,9 @@ async function handleSpin(ctx, prefix) {
   // 10) SEM card novo aqui (pedido do dono: "não criar vários html"): o
   //     resultado vai na conversa, em texto, e o card da carteira continua sendo
   //     o painel de controle — UM por vez, aberto/atualizado por `tigrinho saldo`.
-  lines.push(`▸ Girar pela tela: \`${prefix}tigrinho saldo\` (o card já aberto continua valendo)`);
+  lines.push(
+    `▸ Girar pela tela: no card da carteira acima, toque em 🎰 (fora daqui: \`${prefix}tigrinho saldo\`)`
+  );
   lines.push(`▸ Histórico: \`${prefix}tigrinho historico\``);
   await ctx.reply(lines.join('\n'));
 }
