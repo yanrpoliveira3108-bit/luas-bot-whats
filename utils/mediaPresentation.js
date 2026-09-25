@@ -95,6 +95,32 @@ function parseArtistAndTitle(rawTitle, rawAuthor) {
  * @param {string} [params.prefix] Prefixo ativo do bot
  * @returns {string} Ficha técnica formatada
  */
+function formatPlayDetailCard(params) {
+  const title = sanitizeContent(params.title) || 'Sem título';
+  const lines = [`*${title}*`, '━━━━━━━━━━━━━━'];
+  const channel = sanitizeContent(params.channel);
+  const artist = sanitizeContent(params.artist);
+  if (artist) lines.push(`🎙️ Artista: ${artist}`);
+  if (channel) lines.push(`📺 Canal: ${channel}`);
+  lines.push(`⏱️ Duração: ${params.duration || 'Não informado'}`);
+  lines.push(`👁️ Visualizações: ${formatMetric(params.views)}`);
+  lines.push(`👍 Curtidas: ${formatMetric(params.likes)}`);
+  if (params.publishDate) lines.push(`📅 Publicado em: ${sanitizeContent(params.publishDate)}`);
+  lines.push('━━━━━━━━━━━━━━');
+  if (params.about) lines.push(`*Sobre a música*\n${sanitizeContent(params.about)}`);
+  if (params.description) lines.push(`*Descrição*\n${summarizeDescription(params.description, 180)}`);
+  lines.push('━━━━━━━━━━━━━━');
+  lines.push(`🔗 ${params.url}`);
+  lines.push(`📄 Consultar letra\n${params.prefix || '!'}letra ${params.url}`);
+  return lines.join('\n');
+}
+
+function formatMetric(value) {
+  if (value === undefined || value === null || value === '') return 'Não informado';
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? formatNumber(n) : sanitizeContent(value);
+}
+
 function formatMediaCard(params) {
   const isAudio = params.kind === 'audio';
   const headerIcon = isAudio ? '🎧 ÁUDIO' : '🎬 VÍDEO';
@@ -202,4 +228,6 @@ module.exports = {
   summarizeDescription,
   parseArtistAndTitle,
   formatMediaCard,
+  formatPlayDetailCard,
+  formatMetric,
 };

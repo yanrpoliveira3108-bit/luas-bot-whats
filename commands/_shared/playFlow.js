@@ -22,6 +22,7 @@
 
 const youtube = require('../../downloaders/youtube');
 const playPresentation = require('../../utils/playPresentation');
+const mediaPresentation = require('../../utils/mediaPresentation');
 const playSession = require('../../utils/playSession');
 const urlSecurity = require('../../utils/urlSecurity');
 const downloadQueue = require('../../utils/downloadQueue');
@@ -56,22 +57,124 @@ function safeProviderTrack(track) {
   return { ...track, url: checked.url };
 }
 
+const detailsCache = new Map();
+const DETAILS_TTL = 10 * 60 * 1000;
+const MAX_THUMBNAIL_BYTES = 512 * 1024;
+
+async function selectedTrackDetails(track) {
+  const key = canonicalTrackKey(track.url);
+  const cached = detailsCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return { ...track, ...cached.data };
+  let data = {};
+  try {
+    let timer;
+    const info = await Promise.race([
+      youtube.getInfo(track.url),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('metadata timeout')), 8000); }),
+    ]);
+    clearTimeout(timer);
+    const d = info && info.videoDetails;
+    if (d) {
+      data = {
+        title: d.title || track.title,
+        channel: d.author && d.author.name || track.author || '',
+        duration: d.lengthSeconds || track.duration,
+        views: d.viewCount,
+        likes: d.likeCount,
+        publishDate: d.publishDate || d.uploadDate || '',
+        description: d.description || '',
+        thumbnail: d.thumbnails && d.thumbnails.length ? d.thumbnails[d.thumbnails.length - 1].url : track.thumbnail,
+      };
+    }
+  } catch (_) {
+    // Metadados são opcionais: não impedem a entrega da mídia.
+  }
+  data = { ...track, ...data };
+  detailsCache.set(key, { expiresAt: Date.now() + DETAILS_TTL, data });
+  while (detailsCache.size > 100) detailsCache.delete(detailsCache.keys().next().value);
+  return data;
+}
+
+async function fetchThumbnail(rawUrl) {
+  if (!rawUrl) return null;
+  let parsed;
+  try { parsed = new URL(rawUrl); } catch (_) { return null; }
+  const host = parsed.hostname.toLowerCase().replace(/\\.$/, '');
+  if (!['ytimg.com', 'img.youtube.com'].some((d) => host === d || host.endsWith(`.${d}`))) return null;
+  try {
+    await urlSecurity.assertSafeDestination(parsed.toString(), ['ytimg.com', 'img.youtube.com']);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const response = await fetch(parsed, { signal: controller.signal, redirect: 'manual' });
+    clearTimeout(timer);
+    if (!response.ok || response.headers.get('location')) return null;
+    const length = Number(response.headers.get('content-length') || 0);
+    if (length > MAX_THUMBNAIL_BYTES) return null;
+    const buffer = Buffer.from(await response.arrayBuffer());
+    return buffer.length <= MAX_THUMBNAIL_BYTES ? buffer : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function sendPlayDetailCard(ctx, track, prefix, kind = 'audio') {
+  const details = await selectedTrackDetails(track);
+  const parsed = mediaPresentation.parseArtistAndTitle(details.title, details.channel || details.author);
+  const card = mediaPresentation.formatPlayDetailCard({
+    title: parsed.title || details.title,
+    artist: parsed.isChannel ? '' : parsed.artist,
+    channel: parsed.isChannel ? (details.channel || details.author) : '',
+    duration: playPresentation.formatPlayDuration(details.duration),
+    views: details.views,
+    likes: details.likes,
+    publishDate: details.publishDate,
+    about: details.about,
+    description: details.description,
+    url: details.url || track.url,
+    prefix,
+  });
+  const thumb = await fetchThumbnail(details.thumbnail);
+  const preview = {
+    title: parsed.title || details.title || 'LUA • PLAY',
+    body: details.channel || 'LUA • PLAY',
+    sourceUrl: details.url || track.url,
+    mediaType: 1,
+    renderLargerThumbnail: true,
+  };
+  if (thumb) preview.jpegThumbnail = thumb;
+  try {
+    if (ctx.socket && typeof ctx.socket.sendMessage === 'function') {
+      await ctx.socket.sendMessage(ctx.remoteJid, {
+        text: card,
+        contextInfo: { externalAdReply: preview },
+      }, { quoted: ctx.message });
+      return true;
+    }
+    await ctx.reply(card);
+    return true;
+  } catch (err) {
+    // Fallback apenas quando o mecanismo nativo falha; não reenvia mídia.
+    try {
+      if (thumb && ctx.socket && typeof ctx.socket.sendMessage === 'function') {
+        await ctx.socket.sendMessage(ctx.remoteJid, { image: thumb, caption: card }, { quoted: ctx.message });
+      } else {
+        await ctx.reply(card);
+      }
+      return true;
+    } catch (_) {
+      logger.warn({ err: err.message }, 'falha ao enviar card complementar do play');
+      return false;
+    }
+  }
+}
+
 /**
  * Envia mensagem complementar pós-envio com link e comando de letra
  */
 async function sendComplementaryMessage(ctx, track, prefix) {
-  try {
-    // Nunca ecoe uma URL que não tenha passado pelo mesmo allowlist do
-    // download. A mensagem posterior usa apenas a URL pública original.
-    const safe = urlSecurity.validateSafeUrl(track && track.url);
-    if (!safe.valid) throw new Error('URL complementar inválida');
-    const text = playPresentation.formatComplementaryMessage(track.title, safe.url, prefix || ctx.prefix || '!');
-    await ctx.reply(text);
-  } catch (err) {
-    // A mídia já foi entregue: não tente reenviá-la. O log não inclui URL,
-    // tokens ou metadados externos desnecessários.
-    logger.warn({ err: err.message }, 'falha ao enviar mensagem complementar do play (mídia já entregue)');
-  }
+  // Compatibilidade para integrações antigas: o complemento agora é sempre o
+  // card completo, com a mesma seleção e a mesma URL pública.
+  return sendPlayDetailCard(ctx, track, prefix, 'audio');
 }
 
 /**
@@ -105,7 +208,7 @@ async function executeMediaAction(ctx, session, trackIndex, action) {
   // Se a ação solicitada for somente o Link
   if (action === 'link') {
     try {
-      await sendComplementaryMessage(ctx, track, session.prefix);
+      await sendPlayDetailCard(ctx, track, session.prefix, 'link');
     } finally {
       // Keep the lock through the send so a repeated click cannot emit the
       // same link block twice concurrently.
@@ -137,7 +240,7 @@ async function executeMediaAction(ctx, session, trackIndex, action) {
         }
         const sendRes = await sendVideoResult(ctx, video, `🎬 *${playPresentation.sanitizeTitle(track.title)}*`);
         if (sendRes && sendRes.entregue) {
-          await sendComplementaryMessage(ctx, track, session.prefix);
+          await sendPlayDetailCard(ctx, track, session.prefix, action);
         }
       } else {
         const audio = await youtube.downloadAudio(track.url, track.title);
@@ -147,7 +250,7 @@ async function executeMediaAction(ctx, session, trackIndex, action) {
         }
         const sendRes = await sendAudioResult(ctx, audio);
         if (sendRes && sendRes.entregue) {
-          await sendComplementaryMessage(ctx, track, session.prefix);
+          await sendPlayDetailCard(ctx, track, session.prefix, action);
         }
       }
     });
@@ -283,6 +386,12 @@ async function handlePlay(ctx) {
         url: safeCheck.url,
         duration: (info.videoDetails && info.videoDetails.lengthSeconds) || '',
         author: (info.videoDetails && info.videoDetails.author && info.videoDetails.author.name) || '',
+        views: info.videoDetails && info.videoDetails.viewCount,
+        likes: info.videoDetails && info.videoDetails.likeCount,
+        publishDate: info.videoDetails && (info.videoDetails.publishDate || info.videoDetails.uploadDate),
+        description: info.videoDetails && info.videoDetails.description,
+        thumbnail: info.videoDetails && info.videoDetails.thumbnails && info.videoDetails.thumbnails.length
+          ? info.videoDetails.thumbnails[info.videoDetails.thumbnails.length - 1].url : '',
       };
 
       const session = playSession.createSession({
@@ -356,7 +465,9 @@ async function handlePlay(ctx) {
     });
 
     const ok = await interactive.sendList(ctx.socket, ctx.remoteJid, {
-      title: 'LUA • PLAY',
+      // O cabeçalho já está no corpo; repetir no título do payload cria
+      // duplicação em clientes que exibem ambos.
+      title: 'Escolher música',
       text: initialText,
       footer: `${cleanResults.length} opção(ões) encontrada(s)`,
       buttonText: '🌙 Escolher Música',
