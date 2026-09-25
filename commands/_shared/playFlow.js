@@ -128,17 +128,18 @@ async function sendPlayDetailCard(ctx, track, prefix, kind = 'audio') {
     thumbnailUrl: details.thumbnail || undefined,
   };
   if (thumb) preview.jpegThumbnail = thumb;
-  if (CONFIG.htmlPlay && CONFIG.htmlPlay.enabled) {
-    try {
-      const info = htmlPlay.normalizeMediaInfo({ ...details, thumbnail: thumb ? `data:image/jpeg;base64,${thumb.toString('base64')}` : '' }, { kind, format: kind === 'video' ? 'MP4' : 'M4A' });
-      console.log('[PLAY CARD] payloadType=richHtml/relayMessage targetJid=', targetJid);
-      await htmlPlay.send(ctx, info, prefix, { audio: 'ytmp3', video: 'ytmp4', lyrics: 'letra', search: 'play' });
+  try {
+    const info = htmlPlay.normalizeMediaInfo({ ...details, thumbnail: thumb ? `data:image/jpeg;base64,${thumb.toString('base64')}` : '' }, { kind, format: kind === 'video' ? 'MP4' : 'M4A' });
+    console.log('[PLAY CARD] payloadType=richHtml/relayMessage targetJid=', targetJid);
+    const htmlSent = await htmlPlay.send(ctx, info, prefix, { audio: 'ytmp3', video: 'ytmp4', lyrics: 'letra', search: 'play' });
+    if (htmlSent) {
       console.log('[PLAY CARD] HTML/info confirmado targetJid=', targetJid);
       return true;
-    } catch (err) {
-      console.error('[PLAY CARD] HTML falhou; usando fallback textual', { targetJid, code: err && err.code, message: err && err.message });
-      logger.warn({ err: err.message }, 'HTML PLAY indisponível; mantendo card tradicional');
     }
+    console.log('[PLAY CARD] HTML desativado; usando fallback textual targetJid=', targetJid);
+  } catch (err) {
+    console.error('[PLAY CARD] HTML falhou; usando fallback textual', { targetJid, code: err && err.code, message: err && err.message });
+    logger.warn({ err: err.message }, 'HTML PLAY indisponível; mantendo card tradicional');
   }
   try {
     if (ctx.socket && typeof ctx.socket.sendMessage === 'function') {
