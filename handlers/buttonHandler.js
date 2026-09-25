@@ -44,6 +44,10 @@ function count() {
   return handlers.size;
 }
 
+function unregister(id) {
+  return handlers.delete(id);
+}
+
 /**
  * Processa uma mensagem de resposta interativa.
  * @returns {Promise<boolean>} true se a mensagem era um botão/lista e foi tratada
@@ -75,4 +79,4 @@ function listIds() {
   return [...handlers.keys()].sort();
 }
 
-module.exports = { register, has, count, process, listIds };
+module.exports = { register, unregister, has, count, process, listIds };

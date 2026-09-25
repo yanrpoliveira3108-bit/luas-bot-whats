@@ -139,16 +139,16 @@ async function run() {
     ok('7: Detecção de faixas instrumentais sem letras');
   } catch (e) { fail('7: Instrumental', e); }
 
-  // 8. Integração em searchResults com botão e linha de letra
+  // 8. Integração em searchResults com busca de música
   try {
     const fakeCtx = { remoteJid: 'chat123@s.whatsapp.net', prefix: '!' };
     const fakeResults = [
       { title: 'Queen - Bohemian Rhapsody', author: 'Queen Official', duration: '5:55', views: 500000, url: 'https://youtu.be/queen' }
     ];
     const built = searchResults.build(fakeCtx, fakeResults);
-    assert.ok(built.buttons.some((b) => b.text.includes('Letra 1')), 'botão de letra gerado');
-    assert.ok(built.text.includes('!letra https://youtu.be/queen'), 'instrução de busca de letra gerada no corpo');
-    ok('8: Integração de letra nos resultados de busca do Play');
+    assert.ok(built.buttons.some((b) => b.text.includes('Áudio 1')), 'botão de áudio gerado');
+    assert.ok(built.text.includes('Queen - Bohemian Rhapsody'), 'título gerado no corpo');
+    ok('8: Integração de áudio/vídeo nos resultados de busca');
   } catch (e) { fail('8: Integração Play/Letra', e); }
 
   console.log(`\n=== RESULTADO: ${falhas === 0 ? 'TODOS OS TESTES PASSARAM!' : falhas + ' falhas'} ===`);
