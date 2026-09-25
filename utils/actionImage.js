@@ -5,9 +5,9 @@
  * pode ganhar uma imagem ou GIF a partir do catálogo variado em `assets/actions/media/`
  * ou de `assets/actions/<nome>.jpg|png|webp|gif`.
  *
- * Suporte a múltiplos itens por comando com anti-repetição imediata, envio em loop
- * com `gifPlayback: true` quando for animação, e fallback graceful para texto puro
- * sem nunca derrubar o bot.
+ * Envia GIFs animados como imagem com mimetype 'image/gif' para que o WhatsApp
+ * carregue e exiba a animação diretamente no chat em qualquer aparelho, sem depender
+ * de conversões de vídeo ou codecs ausentes no aparelho do usuário.
  */
 
 'use strict';
@@ -63,21 +63,40 @@ async function send(ctx, key, caption, mentions) {
   }
 
   try {
-    if (media.type === 'gif' && typeof ctx.sendVideo === 'function') {
-      try {
-        await ctx.sendVideo(
-          media.path,
-          caption,
-          Object.assign({}, opts, { gifPlayback: true, mimetype: 'video/mp4' })
-        );
-        return true;
-      } catch (_) {
-        // Se sendVideo falhar com o arquivo GIF, tenta enviar como imagem antes do fallback para texto
-        if (typeof ctx.sendImage === 'function') {
-          await ctx.sendImage(media.path, caption, opts);
+    if (media.type === 'gif') {
+      // 1ª tentativa recomendada para WhatsApp: envio como imagem com mimetype image/gif
+      // Isso faz o WhatsApp carregar instantaneamente o GIF na tela de conversa
+      if (typeof ctx.sendImage === 'function') {
+        try {
+          await ctx.sendImage(
+            media.path,
+            caption,
+            Object.assign({}, opts, { mimetype: 'image/gif' })
+          );
           return true;
+        } catch (_) {
+          // fallback se sendImage com mimetype específico falhar
         }
-        throw _;
+      }
+
+      // 2ª tentativa: envio como vídeo com gifPlayback
+      if (typeof ctx.sendVideo === 'function') {
+        try {
+          await ctx.sendVideo(
+            media.path,
+            caption,
+            Object.assign({}, opts, { gifPlayback: true, mimetype: 'video/mp4' })
+          );
+          return true;
+        } catch (_) {
+          // segue para fallback
+        }
+      }
+
+      // 3ª tentativa: envio normal como imagem padrão
+      if (typeof ctx.sendImage === 'function') {
+        await ctx.sendImage(media.path, caption, opts);
+        return true;
       }
     } else if (typeof ctx.sendImage === 'function') {
       await ctx.sendImage(media.path, caption, opts);
