@@ -56,7 +56,7 @@ function emojiDeComando(cmd) {
  * Altura do card: valor FIXO em px (igual à versão que renderizava bem).
  *
  * A implementação (e o histórico da regressão com `vh`) ficou em
- * `./moldura.js`, junto da mesma moldura usada pelos cards dos JOGOS — assim os
+ * `./moldura.js` — os cards dos JOGOS não declaram altura (moldura livre) — assim os
  * três cards (menu, caça e tigrinho) têm uma altura declarada só.
  */
 const { travarAltura } = require('./moldura');

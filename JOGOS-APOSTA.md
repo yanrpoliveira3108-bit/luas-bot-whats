@@ -174,10 +174,11 @@ Outras regras:
   diz que ainda não houve giro e o card convida a jogar;
 - reabrir o card mostra **o mesmo** resultado (não sorteia de novo) e o **mesmo**
   painel: nada é sorteado, cobrado ou alterado só por abrir a tela;
-- o card tem a **mesma moldura** do menu (`menus/html/moldura.js`): altura FIXA
-  em px e rolagem por dentro. Sem ela o WebView mede o conteúdo e o card sai
-  minúsculo/“tremendo” — foi por isso que os cards dos jogos apareciam
-  pequenos;
+- o card usa a **moldura livre** de `menus/html/moldura.js` (`cssLivre()`): sem
+  altura declarada. O WebView do card se dimensiona pelo conteúdo — altura fixa
+  menor que o conteúdo **corta** (era o que escondia o botão de girar). O menu
+  continua com altura fixa + rolagem por setas, porque é uma lista longa
+  (§2.4 do `MENUS-HTML.md`);
 - rodada pendente (queda no meio) é concluída ao reabrir/usar: paga uma vez e
   registra a estatística uma vez. Rodada **sem resultado** registrado devolve a
   aposta (não houve giro a concluir).
@@ -205,9 +206,11 @@ Três causas **encontradas no código** (cada uma com teste que a trava de volta
    todo mundo — agora a aposta vale com ou sem personagem (o personagem só
    entra no XP).
 
-Além disso, o **card dos jogos passou a ter a moldura do menu** (altura fixa em
-px — §2.4 do MENUS-HTML.md): sem altura declarada o WebView mede o conteúdo e o
-card saía minúsculo no aparelho.
+Além disso, o card dos jogos passou a usar a **moldura livre** de
+`menus/html/moldura.js` (§2.4 do `MENUS-HTML.md`): altura fixa em px cortava o
+botão de girar no tigrinho e deixava partes do caça inalcançáveis. Sem altura
+declarada, o card cresce com o conteúdo e a ação principal ganhou prioridade
+(botão colado no tabuleiro, painel em modo compacto).
 
 ## 6. Comandos
 
@@ -287,16 +290,17 @@ Automatizados:
   extremos, janela 13×13, painel validando/prévia/cópia; **aposta sem
   personagem** (carteira decide) com o resultado de CADA escavação em texto,
   **XP 5/tesouro + 20 na vitória pago UMA vez** (Lua Life) e **moldura do card**
-  (altura fixa em px compartilhada com o menu, `MENU_HTML_HEIGHT` valendo nos
-  dois).
+  (livre, sem altura fixa, com o número medido dentro do card; a ordem
+  casas → Escavar → progresso é conferida pelo teste).
 - `test/tigrinhopainel.test.js` — **13/13**: card com carteira e sem sorteio ao
   abrir (reabrir mostra o mesmo), giro com cobrança/prêmio/estatística únicos,
   card com o resultado validado, mensagem repetida e cooldown sem giro novo,
   rodada pendente paga uma vez, rodada sem resultado devolve a aposta, recusa por
   saldo, texto equivalente com `!modohtml off`, subcomandos preservados, apostas
   simultâneas entre jogos, jsdom (painel valida/copia + card = resultado do bot),
-  reinício sem perder rodada/saldo/estatística e **moldura** do card (altura fixa,
-  CSS dentro de `<style>` e divs balanceadas).
+  reinício sem perder rodada/saldo/estatística e **moldura** do card (sem altura
+  fixa, botão de girar antes da tabela de prêmios, CSS dentro de `<style>` e
+  divs balanceadas).
 - `test/esquemajogos.test.js` — **10/10**: integridade do array `MIGRATIONS`
   (sem buracos de vírgula), as 3 tabelas com as colunas usadas, banco com
   version adiantada + tabelas ausentes **curado** na abertura, coluna ausente
@@ -338,8 +342,8 @@ migrações o código tem**, as tabelas
 `game_bets`/`treasure_games`/`game_rounds` com as colunas, o estado do
 `menu_html`/modo seguro, e executa `!cacatesouro`, `!cacatesouro 3`, `!tigrinho`
 e `!menu` registrando **o erro completo com stack**, **a moldura de cada card
-enviado** (linha `moldura: altura fixa 640px + #__wrap ok`) e “card enviado” quando
-está tudo certo). Salva o relatório em `tmp/jogos-doctor.txt`.
+enviado** (linha `moldura: LIVRE (cresce com o conteúdo, nada é cortado)` nos
+jogos e `moldura: FIXA 640px ... + #__wrap ok` no menu) e “card enviado” quando está tudo certo). Salva o relatório em `tmp/jogos-doctor.txt`.
 
 **Causa tratada de forma automática — duas garantias independentes.**
 

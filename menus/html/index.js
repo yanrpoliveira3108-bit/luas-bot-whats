@@ -43,8 +43,10 @@ const CAP_PADRAO = 30;
 const { PASSO_PADRAO } = require('./client');
 
 /**
- * Altura fixa do card, em pixels (MENU_HTML_HEIGHT sobrescreve) — definida em
- * `./moldura.js` e compartilhada com os cards dos jogos.
+ * Altura fixa do card do MENU, em pixels (`MENU_HTML_HEIGHT` sobrescreve) —
+ * definida em `./moldura.js`. Os cards dos JOGOS não usam altura declarada
+ * (moldura livre: `moldura.cssLivre()`), porque o corte por altura fixa
+ * escondia botões no aparelho (ver MENUS-HTML.md §2.4).
  */
 const { alturaDoCard } = require('./moldura');
 

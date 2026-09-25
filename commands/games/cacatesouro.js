@@ -252,23 +252,30 @@ function tabuleiroHtml(g, prefix, { cols = JANELA.cols, linhas = JANELA.linhas }
     `<button type="button" class="tnav" id="tb-u-${idEsc}" aria-label="Ver linhas acima">↑</button>` +
     `<button type="button" class="tnav" id="tb-d-${idEsc}" aria-label="Ver linhas abaixo">↓</button>` +
     '</div>' +
+    '<div class="tb-sel">▸ selecionada: <b id="tb-sel-' + idEsc + '">nenhuma</b></div>' +
+    '<div class="tb-acoes">' +
+    `<button type="button" class="tb-cavar" id="tb-go-${idEsc}" disabled aria-label="Escavar a casa selecionada">⛏️ Escavar</button>` +
+    `<span class="tb-hint">Toque numa casa e depois aqui: o card copia ` +
+    `<code>${betPanel.esc(prefix)}cacatesouro cavar ${idEsc} A1</code> para você enviar. ` +
+    'Copiar não executa — quem escava é o bot, quando recebe o comando.</span>' +
+    '</div>' +
     '<div class="tb-stats">' +
     `<span>💎 ${g.treasuresFound}/${g.treasuresTotal} tesouros</span>` +
     `<span>⛏️ ${restantes} escavações restantes</span>` +
     `<span>💰 aposta ${betPanel.valor(g.bet)} ${betPanel.esc(moeda().simbolo)} (pela expedição inteira)</span>` +
     '</div>' +
     `<div class="tb-ult">▸ último resultado: <b id="tb-ult-${idEsc}">${betPanel.esc(ultimoTxt)}</b></div>` +
-    `<div class="tb-sel">▸ selecionada: <b id="tb-sel-${idEsc}">nenhuma</b></div>` +
-    `<div class="tb-acoes">` +
-    `<button type="button" class="tb-cavar" id="tb-go-${idEsc}" disabled aria-label="Escavar a casa selecionada">⛏️ Escavar</button>` +
-    `<span class="tb-hint">Escolha uma casa e toque em Escavar: o card copia o comando completo` +
-    ` <code>${betPanel.esc(prefix)}cacatesouro cavar ${idEsc} A1</code> (troque A1 pela casa) para você enviar no chat. ` +
-    'Copiar não executa: quem escava é o bot, quando recebe o comando.</span>' +
-    '</div>' +
+    '<details class="tb-legenda-det"><summary>Legenda das casas</summary>' +
     '<div class="tb-legenda">' +
     '<span><b>▫️</b> não escavada</span><span><b>💎</b> tesouro</span><span><b>💥</b> armadilha</span>' +
     '<span><b>·</b> vazio (mostra quantos tesouros há nas casas vizinhas)</span>' +
-    '</div></div>'
+    '</div></details>' +
+    // o card é uma FOTO do estado: cada escavação manda outro. Sem dizer isso, o
+    // jogador fica tocando no card antigo (que não muda e não responde).
+    '<div class="tb-nota">▸ Este card é a foto do momento em que foi enviado: ' +
+    'ele não se atualiza sozinho. Cada escavação aceita pelo bot manda um card ' +
+    'novo — o antigo pode ser ignorado (este é o da partida ' +
+    betPanel.esc(g.id) + ').</div></div>'
   );
 }
 
@@ -334,10 +341,10 @@ function cssBase() {
   return (
     '*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}\n' +
     'body{margin:0;background:#0b0614;font-family:Arial,sans-serif;color:#efe7ff}\n' +
-    // #__wrap = moldura de altura cheia; a rolagem fica AQUI dentro (gesto de
-    // arrastar na página viraria "responder" no WhatsApp)
-    '.wrap{width:100%;max-width:560px;margin:0 auto;padding:10px;flex:1 1 auto;min-height:0;' +
-    'overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}\n' +
+    // SEM altura fixa e SEM corte: medido no aparelho (25/09) — a altura fixa
+    // cortava o card e escondia os botões. Sem `height` declarado o WebView do
+    // card se dimensiona pelo conteúdo (ver menus/html/moldura.js: cssLivre).
+    '.wrap{width:100%;max-width:560px;margin:0 auto;padding:10px}\n' +
     '.head{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:14px;' +
     'padding:6px 2px 2px;border-bottom:1px solid rgba(199,146,255,.25)}\n' +
     '.head span{font-size:11px;color:rgba(199,146,255,.9)}\n' +
@@ -383,7 +390,10 @@ function cssTabuleiro() {
     '.tb-cavar[disabled]{opacity:.45;cursor:not-allowed}\n' +
     '.tb-hint{flex:1 1 180px;font-size:11px;color:rgba(239,231,255,.8)}\n' +
     '.tb-hint code{color:#d8b4fe;font-weight:bold;word-break:break-all}\n' +
-    '.tb-legenda{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;font-size:10.5px;color:rgba(239,231,255,.8)}\n' +
+    '.tb-legenda{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:6px;font-size:10.5px;color:rgba(239,231,255,.8)}\n' +
+    '.tb-legenda-det{margin-top:6px;font-size:11px;color:rgba(199,146,255,.9)}\n' +
+    '.tb-legenda-det summary{cursor:pointer}\n' +
+    '.tb-nota{margin-top:8px;font-size:10.5px;color:rgba(199,146,255,.8);border-top:1px dashed rgba(199,146,255,.3);padding-top:6px}\n' +
     '@media (prefers-reduced-motion: reduce){.tb *{animation:none!important;transition:none!important}}\n'
   );
 }
@@ -400,6 +410,8 @@ function buildHtml(g, prefix) {
   const ativa = g.status === store.STATUS.ATIVA;
   const painel = betPanel.montar({
     id: 'tesouro',
+    // card curto: a ação (valor + botão) vem antes do detalhamento da carteira
+    compacto: true,
     moeda: moeda(),
     saldo: p.saldo,
     limites: p.limites,
@@ -422,13 +434,15 @@ function buildHtml(g, prefix) {
     : `🗺️ <b>CAÇA AO TESOURO</b><span>${fimTexto(g)}</span>`;
 
   return (
-    '<style>' + moldura.css() + cssBase() + cssTabuleiro() + painel.css + '</style>' +
-    '<body><div id="__wrap"><div class="wrap"><div class="head">' + cabecalho + '</div>' +
+    '<style>' + moldura.cssLivre() + cssBase() + cssTabuleiro() + moldura.cssMedida() + painel.css + '</style>' +
+    '<body><div class="wrap"><div class="head" title="Toque aqui para ver a área do card">' + cabecalho + '</div>' +
+    moldura.htmlMedida() +
     tabuleiroHtml(g, prefix, {}) +
     painel.markup +
-    '</div></div></body>' +
+    '</div></body>' +
     '<script>' + painel.js + '</script>' +
-    '<script>' + tabuleiroJs(g, prefix) + '</script>'
+    '<script>' + tabuleiroJs(g, prefix) + '</script>' +
+    '<script>' + moldura.jsMedida() + '</script>'
   );
 }
 
@@ -599,6 +613,8 @@ async function abrirPainel(ctx, prefix, size) {
   const p = dadosDoPainel(ctx.sender, cfg.size, prefix);
   const painel = betPanel.montar({
     id: 'tesouro',
+    // card curto: tamanhos + valor + botão primeiro; carteira detalhada a um toque
+    compacto: true,
     moeda: moeda(),
     saldo: p.saldo,
     limites: p.limites,
@@ -618,15 +634,18 @@ async function abrirPainel(ctx, prefix, size) {
   let doc = null;
   try {
     doc =
-      '<style>' + moldura.css() + cssBase() + painel.css + '</style><body><div id="__wrap"><div class="wrap">' +
-      '<div class="head">🗺️ <b>CAÇA AO TESOURO</b><span>escolha o tamanho e a aposta</span></div>' +
+      '<style>' + moldura.cssLivre() + cssBase() + moldura.cssMedida() + painel.css + '</style>' +
+      '<body><div class="wrap">' +
+      '<div class="head" title="Toque aqui para ver a área do card">🗺️ <b>CAÇA AO TESOURO</b>' +
+      '<span>escolha o tamanho e a aposta</span></div>' +
+      moldura.htmlMedida() +
       '<div class="tb-tamanhos">' +
       jogo.TAMANHOS.map((n) => `<span class="tb-tam${n === cfg.size ? ' on' : ''}">${n}×${n}</span>`).join('') +
       '</div>' +
       `<p class="tb-jan">Para outro tamanho: <code>${betPanel.esc(prefix)}cacatesouro &lt;3 a 13&gt;</code> · ` +
       `casual sem aposta: <code>${betPanel.esc(prefix)}cacatesouro jogar ${cfg.size} casual</code></p>` +
       painel.markup +
-      '</div></div></body><script>' + painel.js + '</script>';
+      '</div></body><script>' + painel.js + '</script><script>' + moldura.jsMedida() + '</script>';
   } catch (err) {
     logger.error({ err: err && err.message }, '[TESOURO] falha ao montar o painel — usando texto');
   }

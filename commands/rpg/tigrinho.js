@@ -139,8 +139,9 @@ function buildMachineHtml({ balance, jackpots, coin, prefix, painel, ultima, rec
   const css =
     `*{-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;box-sizing:border-box}\n` +
     `body{margin:0;background:transparent;font-family:Arial,sans-serif;color:#f6d77a;touch-action:manipulation}\n` +
-    `.wrap{width:100%;max-width:560px;margin:auto;padding:10px;flex:1 1 auto;min-height:0;` +
-    `overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}\n` +
+    // SEM altura fixa e SEM corte (medido no aparelho em 25/09: com
+    // height:640px o botão de girar ficava fora da área visível)
+    `.wrap{width:100%;max-width:560px;margin:auto;padding:10px}\n` +
     `.card{position:relative;background:linear-gradient(165deg,#180902,#2a0d04 40%,#120602);border:1px solid rgba(255,190,60,.5);border-radius:20px;overflow:hidden;box-shadow:0 0 44px rgba(255,150,20,.25),0 12px 36px rgba(0,0,0,.65)}\n` +
     `.marquee{overflow:hidden;background:linear-gradient(90deg,#8b0000,#c02800 50%,#8b0000);border-bottom:1px solid rgba(255,190,60,.5);white-space:nowrap;padding:5px 0}\n` +
     `.marquee span{display:inline-block;padding-left:100%;animation:scroll 14s linear infinite;font-size:10px;letter-spacing:2px;color:#ffd86b;font-weight:bold}\n` +
@@ -153,13 +154,13 @@ function buildMachineHtml({ balance, jackpots, coin, prefix, painel, ultima, rec
     `.stats{display:flex;gap:14px;text-align:right}\n` +
     `.value{font:700 17px monospace;color:#ffd54a}\n` +
     `.label{font-size:8px;color:rgba(255,196,60,.65);letter-spacing:1px;text-transform:uppercase}\n` +
-    `.main{padding:14px 14px 12px}\n` +
-    `.machine{position:relative;background:radial-gradient(130% 130% at 50% -10%,rgba(139,0,0,.45),rgba(0,0,0,.8));border:2px solid rgba(255,190,60,.55);border-radius:16px;padding:14px 10px 12px;margin-bottom:14px;box-shadow:inset 0 0 30px rgba(139,0,0,.4)}\n` +
+    `.main{padding:10px 12px 8px}\n` +
+    `.machine{position:relative;background:radial-gradient(130% 130% at 50% -10%,rgba(139,0,0,.45),rgba(0,0,0,.8));border:2px solid rgba(255,190,60,.55);border-radius:16px;padding:10px 8px 8px;margin-bottom:8px;box-shadow:inset 0 0 30px rgba(139,0,0,.4)}\n` +
     `.payline{display:flex;justify-content:center;gap:8px;margin-bottom:8px}\n` +
-    `.payline i{width:46px;text-align:center;font-style:normal;color:#ffb830;font-size:9px;letter-spacing:1px;opacity:.8}\n` +
+    `.payline i{width:38px;text-align:center;font-style:normal;color:#ffb830;font-size:9px;letter-spacing:1px;opacity:.8}\n` +
     `.reels{display:flex;gap:6px;justify-content:center}\n` +
     `.reel{flex:1;max-width:64px;background:rgba(0,0,0,.6);border:1px solid rgba(255,190,60,.4);border-radius:10px;padding:4px 0;box-shadow:inset 0 0 14px rgba(0,0,0,.7);overflow:hidden}\n` +
-    `.cell{height:46px;display:flex;align-items:center;justify-content:center;font-size:28px;line-height:1;transition:none}\n` +
+    `.cell{height:34px;display:flex;align-items:center;justify-content:center;font-size:22px;line-height:1;transition:none}\n` +
     `.reel.spinning .cell{filter:blur(1.2px)}\n` +
     `.machine.win .reels{animation:winGlow .55s ease 3}\n` +
     `.machine.jackpot .reels{animation:jackGlow .45s ease 5}\n` +
@@ -167,8 +168,9 @@ function buildMachineHtml({ balance, jackpots, coin, prefix, painel, ultima, rec
     `@keyframes jackGlow{0%,100%{box-shadow:0 0 0 rgba(255,120,20,0);transform:scale(1)}50%{box-shadow:0 0 52px rgba(255,150,20,.95);transform:scale(1.03)}}\n` +
     `.rodada{width:100%;min-height:44px;display:flex;align-items:center;justify-content:center;border:1px dashed rgba(255,190,60,.55);border-radius:12px;color:#ffd86b;font-weight:bold;font-size:13px;background:rgba(0,0,0,.35);padding:6px 8px;text-align:center}\n` +
     `.status{text-align:center;font:10px monospace;color:rgba(255,196,60,.85);margin-top:12px;min-height:12px;letter-spacing:.4px}\n` +
-    `.paytable{padding:10px 14px;border-top:1px dashed rgba(255,190,60,.25);background:rgba(0,0,0,.35)}\n` +
-    `.paytable .pt{font-size:8px;letter-spacing:1.5px;color:rgba(255,196,60,.6);text-transform:uppercase;margin-bottom:6px}\n` +
+    `.paytable{padding:8px 14px;border-top:1px dashed rgba(255,190,60,.25);background:rgba(0,0,0,.35);font-size:11px}\n` +
+    `.paytable summary{cursor:pointer;list-style:none}\n` +
+    `.paytable .pt{font-size:9px;letter-spacing:1.2px;color:rgba(255,196,60,.75);text-transform:uppercase;margin-bottom:4px}\n` +
     `.paytable .rows{display:flex;flex-wrap:wrap;gap:4px 12px}\n` +
     `.paytable .r{font-size:11px;color:#ffe9ad}\n` +
     `.foot{padding:10px 16px;border-top:1px solid rgba(255,190,60,.2);font-size:10px;color:rgba(255,196,60,.7);text-align:center;background:rgba(0,0,0,.4)}\n` +
@@ -178,11 +180,13 @@ function buildMachineHtml({ balance, jackpots, coin, prefix, painel, ultima, rec
     `@media (prefers-reduced-motion: reduce){.marquee span,.tiger{animation:none!important}.machine,.machine *{animation:none!important;transition:none!important}}\n`;
 
   const html =
-    '<body><div id="__wrap"><div class="wrap"><div class="card">' +
+    '<body><div class="wrap"><div class="card">' +
     `<div class="marquee"><span>✦ LUA TIGRINHO ✦ VALENDO ${coinEmoji} ✦ O RESULTADO VEM DO BOT ✦ LUA TIGRINHO ✦ VALENDO ${coinEmoji} ✦</span></div>` +
-    '<div class="head"><div class="brand"><div class="tiger">🐯</div><div><div class="tt">LUA TIGRINHO</div></div></div>' +
+    '<div class="head" title="Toque aqui para ver a área do card">' +
+    '<div class="brand"><div class="tiger">🐯</div><div><div class="tt">LUA TIGRINHO</div></div></div>' +
     `<div class="stats"><div><div class="label">SALDO</div><div class="value" id="chips">${b === null ? '—' : b}</div></div>` +
     `<div><div class="label">JACKPOTS</div><div class="value" id="jackpots">${j}</div></div></div></div>` +
+    moldura.htmlMedida() +
     '<div class="main"><div class="machine" id="machine">' +
     '<div class="payline"><i>1</i><i>2</i><i>3</i><i>4</i><i>5</i></div>' +
     `<div class="reels">${reelsHtml}</div></div>` +
@@ -201,11 +205,11 @@ function buildMachineHtml({ balance, jackpots, coin, prefix, painel, ultima, rec
       : '') +
     '</div>' +
     (painel ? painel.markup : '') +
-    '<div class="paytable"><div class="pt">Tabela de premios</div><div class="rows">' +
+    '<details class="paytable"><summary class="pt">Tabela de premios (toque para abrir)</summary><div class="rows">' +
     '<div class="r">🐯×5 <b>425x</b></div><div class="r">👑×5 <b>130x</b></div><div class="r">💎×5 <b>65x</b></div>' +
     '<div class="r">🔔×5 <b>32x</b></div><div class="r">🍒×5 <b>16x</b></div><div class="r">🍊×5 <b>16x</b></div>' +
     '<div class="r">🍋×5 <b>12x</b></div><div class="r">3/4 iguais <b>menor</b></div><div class="r">2 iguais <b>0,2x</b></div>' +
-    '</div></div>' +
+    '</div></details>' +
     '<div class="foot">O bot decide aposta, sorteio e prêmio: <code>' +
     betPanel.esc(`${prefix}tigrinho jogar <valor>`) +
     '</code> · ' +
@@ -213,7 +217,7 @@ function buildMachineHtml({ balance, jackpots, coin, prefix, painel, ultima, rec
     ' · ' +
     betPanel.esc(`${prefix}tigrinho historico`) +
     '</div>' +
-    '</div></div></div>';
+    '</div></div>';
 
   // JS: só apresenta o resultado VALIDADO (nada de sorteio nem cálculo de prêmio)
   const js =
@@ -237,8 +241,13 @@ function buildMachineHtml({ balance, jackpots, coin, prefix, painel, ultima, rec
     'window.__tigrinho={resultado:function(){return R},texto:texto};\n' +
     '})();';
 
-  const estilos = moldura.css() + css + (painel ? painel.css : '');
-  const scripts = painel ? '<script>' + painel.js + '</script><script>' + js + '</script>' : '<script>' + js + '</script>';
+  // diagnóstico de área dentro do card (toque no cabeçalho): é o número que o
+  // dono consegue ler e mandar — sem ele, ajustar altura é chute
+  const estilos = moldura.cssLivre() + css + moldura.cssMedida() + (painel ? painel.css : '');
+  const scripts =
+    (painel ? '<script>' + painel.js + '</script>' : '') +
+    '<script>' + js + '</script>' +
+    '<script>' + moldura.jsMedida() + '</script>';
   return '<style>' + estilos + '</style>' + html + scripts;
 }
 
@@ -318,6 +327,9 @@ function montarPainel(userId, prefix, extra = {}) {
   const d = dadosPainel(userId);
   const painel = betPanel.montar({
     id: 'tigrinho',
+    // card curto: valor, atalhos e o botão de girar primeiro; o detalhamento da
+    // carteira fica a um toque (medido no aparelho: o botão caía fora da área)
+    compacto: true,
     moeda: moeda(),
     saldo: d.saldo,
     limites: d.limites,

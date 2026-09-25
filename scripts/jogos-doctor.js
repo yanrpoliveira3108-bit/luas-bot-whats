@@ -185,13 +185,18 @@ async function main() {
         if (payload) {
           const html = JSON.parse(payload.unifiedResponse.data.toString('utf8')).sections[0].view_model.primitive.payload;
           linha(`   card: ${(Buffer.byteLength(html) / 1024).toFixed(1)} KB`);
-          // MOLDURA: o card precisa declarar altura FIXA em px. Sem isso o host
-          // mede o conteúdo e o card pode sair minúsculo ("encolhido").
-          const m = /html,body\{margin:0;padding:0;height:(\d+)px;max-height:\d+px;overflow:hidden\}/.exec(html);
+          // MOLDURA: o menu usa altura FIXA (lista longa, rolagem com setas);
+          // os jogos usam moldura LIVRE (o card cresce com o conteúdo — medido
+          // no aparelho em 25/09: altura fixa cortava o botão de girar).
+          const fixa = /html,body\{margin:0;padding:0;height:(\d+)px;max-height:\d+px;overflow:hidden\}/.exec(html);
+          const livre = /html,body\{margin:0;padding:0;overflow-x:hidden\}/.test(html);
+          const medida = /id="lua-medida"/.test(html);
           linha(
-            m
-              ? `   moldura: altura fixa ${m[1]}px + #__wrap ${/id="__wrap"/.test(html) ? 'ok' : 'AUSENTE'} ✅`
-              : '   moldura: ❌ SEM altura fixa — o card pode sair pequeno (ver menus/html/moldura.js)'
+            fixa
+              ? `   moldura: FIXA ${fixa[1]}px (menu: lista com rolagem e setas) + #__wrap ${/id="__wrap"/.test(html) ? 'ok' : 'AUSENTE'}`
+              : livre
+                ? `   moldura: LIVRE (cresce com o conteúdo, nada é cortado)${medida ? ' · diagnóstico de área no card' : ''} ✅`
+                : '   moldura: ⚠️  sem regra de moldura conhecida — confira menus/html/moldura.js'
           );
         }
       }
@@ -212,7 +217,7 @@ async function main() {
       `altura declarada : ${menus.alturaDoCard()} px (faixa ${DIM.alturaMin}–${DIM.alturaMax}) — piso do encaixe: ${DIM.alturaEncolhidaMin} px ` +
         '(medida menor que isso é ignorada: o card não encolhe por medida transitória)'
     );
-    linha('moldura          : mesma para menu, caça e tigrinho (menus/html/moldura.js)');
+    linha('moldura          : MENU = altura fixa + rolagem por setas; JOGOS = livre (cresce com o conteúdo, nada é cortado)');
     linha(`escala do texto  : ${ESCALA}`);
     linha(`passo das setas  : ${menus.passoDoCard()}`);
     linha(`largura máxima   : ${DIM.larguraMax} px em tela larga (celular usa 100% da bolha)`);
@@ -225,7 +230,10 @@ async function main() {
   linha('Se algum jogo falhou acima, o stack mostra o motivo real.');
   linha('Se um card está pequeno, toque no TÍTULO da seção DENTRO do card:');
   linha('  ▸ "área do card aqui: NNNpx" é a altura REAL que o aplicativo está dando.');
-  linha('  ▸ MENU_HTML_HEIGHT no .env muda a altura declarada (de fábrica: 640 px) — MENUS-HTML.md §2.2/§2.4.');
+  linha('  ▸ MENU_HTML_HEIGHT no .env muda a altura declarada do MENU (de fábrica: 640 px) — MENUS-HTML.md §2.2/§2.4.');
+  linha('  ▸ Nos JOGOS não há altura declarada: sem `height`, o card cresce com o conteúdo.');
+  linha('  ▸ Se um BOTÃO de jogo não aparece/não toca, mande o número acima: é o que');
+  linha('    permite cortar o card no tamanho certo em vez de adivinhar.');
 
   const destino = path.join(CONFIG.paths.tmpDir || 'tmp', 'jogos-doctor.txt');
   try {

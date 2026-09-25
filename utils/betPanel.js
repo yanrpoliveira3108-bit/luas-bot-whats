@@ -134,16 +134,36 @@ function montar(o) {
 .bp-regras li{margin:3px 0}
 .bp-aviso{margin:8px 0 0;font-size:11px;color:rgba(255,233,173,.75)}
 .bp-pend{margin-top:6px;font-size:11px;color:#fde68a}
+.bp-resumo{margin:2px 0 8px;font-size:13px;color:#ffe9ad}
+.bp-resumo b{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#ffd54a}
+.bp-mais{margin-top:10px;font-size:12px;color:#ffc63c}
+.bp-mais summary{cursor:pointer;font-weight:bold;min-height:44px;display:flex;align-items:center;color:#ffc63c}
+.bp-mais .bp-grid{margin:6px 0 0}
 @media (prefers-reduced-motion: reduce){.bp *{animation:none!important;transition:none!important}}
 `;
 
-  const markup =
-    `<div class="bp" id="bp-${esc(id)}" data-min="${esc(lim.min)}" data-max="${esc(lim.max)}"` +
-    ` data-disp="${esc(saldo.disponivel)}" data-teto="${lim.tetoJogo == null ? '' : esc(lim.tetoJogo)}"` +
-    ` data-passo="${esc(passo)}" data-cmd="${comando}" data-refresh="${comandoRefresh}"` +
-    ` data-bloqueio="${esc(bloqueio)}" data-indisponivel="${indisponivel ? '1' : ''}">` +
+  // ---------------------------------------------------------------- markup --
+  // `compacto` (usado nos CARDS dos jogos): a parte acionável — valor, prévia e
+  // os botões — fica no topo, e o detalhamento da carteira (grade, limites e
+  // atalhos) vai para um <details>. Motivo medido no aparelho (25/09): o WebView
+  // do card dimensiona a viewport pelo CONTEÚDO, mas o host ainda limita a área;
+  // com o detalhamento aberto, o botão de jogar/escavar caía fora da parte
+  // visível. Em modo normal (o painel de abertura do caça) nada muda.
+  const compacto = o.compacto === true;
+  const bHead =
     `<div class="bp-head"><span>${esc(o.titulo || '💼 Carteira e aposta')}</span>` +
-    `<span class="bp-tag">saldo do bot · ${esc(saldo.quando || 'agora')}</span></div>` +
+    `<span class="bp-tag">saldo do bot · ${esc(saldo.quando || 'agora')}</span></div>`;
+  const bResumo =
+    `<div class="bp-resumo">💼 Saldo <b>${fmt(saldo.wallet)}</b> · disponível <b>${fmt(saldo.disponivel)}</b>` +
+    (temComprometido ? ` · comprometido <b>${fmt(saldo.comprometido)}</b>` : '') +
+    '</div>' +
+    (o.rodada ? `<div class="bp-pend">▸ Partida em andamento: <b>${esc(o.rodada)}</b></div>` : '') +
+    (pendentes.length
+      ? `<div class="bp-pend">▸ Já comprometido em: ${pendentes
+          .map((p) => esc(`${p.game} (${valor(p.bet)})`))
+          .join(' · ')}</div>`
+      : '');
+  const bGrade =
     '<div class="bp-grid">' +
     linha('Saldo na carteira', fmt(saldo.wallet)) +
     (temComprometido ? linha('Comprometido agora', fmt(saldo.comprometido)) : '') +
@@ -157,7 +177,8 @@ function montar(o) {
       ? `<div class="bp-pend">▸ Já comprometido em: ${pendentes
           .map((p) => esc(`${p.game} (${valor(p.bet)})`))
           .join(' · ')}</div>`
-      : '') +
+      : '');
+  const bCampo =
     `<label class="bp-lbl" for="bp-in-${esc(id)}">Valor da aposta</label>` +
     '<div class="bp-field">' +
     `<button type="button" class="bp-menos" id="bp-menos-${esc(id)}" aria-label="Diminuir aposta">−</button>` +
@@ -169,28 +190,51 @@ function montar(o) {
     '</div>' +
     `<div class="bp-lim" id="bp-lim-${esc(id)}">Mínimo ${valor(lim.min)} · Máximo ${valor(lim.max)} ${esc(moeda.simbolo)}` +
     (lim.tetoJogo != null ? ` · limite do jogo ${valor(lim.tetoJogo)}` : '') +
-    '</div>' +
+    '</div>';
+  const bChips =
     `<div class="bp-chips">${chips}` +
     `<button type="button" class="bp-chip" data-pct="100" aria-label="Apostar o máximo permitido">Máx (${valor(lim.max)})</button>` +
-    '</div>' +
-    `<div class="bp-est" id="bp-est-${esc(id)}">Saldo estimado depois da aposta: —</div>` +
+    '</div>';
+  const bEst = `<div class="bp-est" id="bp-est-${esc(id)}">Saldo estimado depois da aposta: —</div>`;
+  const bErro =
     `<div class="bp-erro" id="bp-erro-${esc(id)}" role="alert">${
       bloqueio ? esc(bloqueio) : 'Digite um valor para continuar.'
-    }</div>` +
+    }</div>`;
+  const bBtns =
     '<div class="bp-btns">' +
     `<button type="button" class="bp-refresh" id="bp-ref-${esc(id)}" aria-label="Atualizar saldo">🔄 Atualizar saldo</button>` +
     `<button type="button" class="bp-go" id="bp-go-${esc(id)}" disabled>` +
     `${esc(o.rotuloConfirmar || '✅ Confirmar aposta e iniciar')}</button>` +
-    '</div>' +
-    `<div class="bp-cmd" id="bp-cmd-${esc(id)}" aria-live="polite"></div>` +
+    '</div>';
+  const bCmd = `<div class="bp-cmd" id="bp-cmd-${esc(id)}" aria-live="polite"></div>`;
+  const bRegras =
     `<details class="bp-regras"><summary>Regras de pagamento</summary><ul>${
       (o.regras || []).map((r) => `<li>${esc(r)}</li>`).join('')
-    }</ul></details>` +
+    }</ul></details>`;
+  const bAviso =
     `<p class="bp-aviso">O saldo é lido pelo bot na sua carteira — o card só mostra. ` +
     'Nada é cobrado ao abrir a tela ou ao digitar: a aposta só entra quando você envia o comando. ' +
-    'Os valores do card vêm do momento em que ele foi enviado; o bot confere tudo de novo ao receber o comando.</p>' +
-    '</div>';
+    'Os valores do card vêm do momento em que ele foi enviado; o bot confere tudo de novo ao receber o comando.</p>';
 
+  const markup =
+    `<div class="bp" id="bp-${esc(id)}" data-min="${esc(lim.min)}" data-max="${esc(lim.max)}"` +
+    ` data-disp="${esc(saldo.disponivel)}" data-teto="${lim.tetoJogo == null ? '' : esc(lim.tetoJogo)}"` +
+    ` data-passo="${esc(passo)}" data-cmd="${comando}" data-refresh="${comandoRefresh}"` +
+    ` data-bloqueio="${esc(bloqueio)}" data-indisponivel="${indisponivel ? '1' : ''}">` +
+    (compacto
+      ? bHead +
+        bResumo +
+        bCampo +
+        bChips +
+        bEst +
+        bErro +
+        bBtns +
+        bCmd +
+        `<details class="bp-mais"><summary>💼 Carteira e limites (toque para abrir)</summary>${bGrade}</details>` +
+        bRegras +
+        bAviso
+      : bHead + bGrade + bCampo + bChips + bEst + bErro + bBtns + bCmd + bRegras + bAviso) +
+    '</div>';
   // JS do painel: validação de conveniência (o servidor revalida), prévia,
   // atalhos e cópia do comando. Sem template literal e sem `${` para poder ser
   // embutido no payload sem surpresa de escape.

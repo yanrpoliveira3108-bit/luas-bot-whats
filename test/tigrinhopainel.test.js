@@ -436,27 +436,38 @@ async function main() {
     fail('12: reinício', e);
   }
 
-  /* ------------- 13) moldura: altura fixa (card nunca minúsculo) ------------- */
+  /* ---------- 13) card sem altura fixa: o botão de girar nunca é cortado ---------- */
   try {
-    const moldura = require('../menus/html/moldura');
-    const altura = moldura.alturaDoCard();
     const M = '5511955550001@s.whatsapp.net';
     economy.setWallet(M, 400);
     const ctx = fakeCtx({ args: [], sender: M, msgId: 'MOLD-TIG' });
     await cmd.execute(ctx);
     const html = card(ctx);
-    assert.ok(
-      new RegExp(`html,body\\{margin:0;padding:0;height:${altura}px;max-height:${altura}px;overflow:hidden\\}`).test(html),
-      `o card do tigrinho declara altura FIXA de ${altura}px`
+    assert.ok(!/html,body\{[^}]*height:\d+px/.test(html), 'sem altura fixa (medido no aparelho: cortava o botão de girar)');
+    assert.ok(!/id="__wrap"/.test(html), 'sem contêiner de altura cheia');
+    assert.ok(/overflow-x:hidden/.test(html), 'moldura livre (cresce com o conteúdo)');
+    assert.ok(/id="lua-medida"/.test(html), 'tem o diagnóstico de área (toque no cabeçalho)');
+    assert.ok(/<details class="paytable"/.test(html), 'tabela de prêmios recolhida (card mais curto)');
+    assert.ok(/height:34px/.test(html), 'rolos mais compactos');
+    const corpo = html.slice(html.indexOf('<body'), html.indexOf('<script>'));
+    const iMaq = corpo.indexOf('machine');
+    const iPainel = corpo.indexOf('bp-');
+    const iPay = corpo.indexOf('paytable');
+    assert.ok(iMaq > 0 && iPainel > iMaq && iPainel < iPay, 'ordem: máquina → painel (botão girar) → paytable');
+    assert.ok(/<details class="bp-mais"><summary>💼 Carteira e limites/.test(html), 'painel compacto: carteira detalhada a um toque');
+    ['Saldo na carteira', 'Disponível para apostar', 'Aposta mínima', 'Máximo neste jogo'].forEach((t) =>
+      assert.ok(html.includes(t), `o painel do tigrinho ainda mostra "${t}"`)
     );
-    assert.ok(/id="__wrap"/.test(html), 'usa a mesma moldura dos outros cards');
-    assert.ok(/<style>/.test(html) && /<\/style>/.test(html), 'o CSS vai dentro de <style> (sem isso o card sai sem estilo)');
-    assert.ok(/overflow-y:auto/.test(html), 'rolagem interna (a página não rola)');
-    assert.ok(!/\d+vh/.test(html), 'nenhuma medida de viewport');
+    assert.ok(/data-pct="100"/.test(html), 'o atalho Máx continua no card (aposta pré-selecionada nunca é o saldo todo)');
+    const iCampoT = html.indexOf('bp-lbl');
+    const iBtnsT = html.indexOf('bp-btns');
+    const iDetT = html.indexOf('<details class="bp-mais"');
+    assert.ok(iCampoT > 0 && iCampoT < iBtnsT && iBtnsT < iDetT, 'no card: valor → botões (girar) → detalhes da carteira');
     const aberturas = (html.match(/<div/g) || []).length;
     const fechamentos = (html.match(/<\/div>/g) || []).length;
-    assert.strictEqual(aberturas, fechamentos, 'as divs estão balanceadas (moldura fechada)');
-    ok('13: moldura do tigrinho — altura fixa em px, CSS no <style> e divs balanceadas');
+    assert.strictEqual(aberturas, fechamentos, 'divs balanceadas');
+    assert.ok(/<style>/.test(html) && /<\/style>/.test(html), 'CSS dentro de <style>');
+    ok('13: card do tigrinho cresce com o conteúdo — botão de girar antes da paytable, sem corte');
   } catch (e) {
     fail('13: moldura', e);
   }

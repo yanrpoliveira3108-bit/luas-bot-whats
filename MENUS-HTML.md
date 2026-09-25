@@ -310,24 +310,45 @@ Sem editar código: `MENU_HTML_HEIGHT` e `MENU_HTML_STEP` (§3).
 
 ---
 
-### 2.4 A moldura é a mesma para o menu E para os jogos (caça/tigrinho)
+### 2.4 Duas molduras de propósito: MENU fixo, JOGOS livres
 
-A regra de altura fixa (e o histórico da regressão com `vh`) mudou para
-`menus/html/moldura.js`:
+`menus/html/moldura.js` é a fonte única, mas existem **duas** molduras — e isso é
+proposital:
 
-- `alturaDoCard()` — número único (`dimensoes.js`, com `MENU_HTML_HEIGHT`
-  sobrescrevendo). O card do menu, o painel do caça e o card do tigrinho usam
-  **esse mesmo** número;
-- `css(altura)` — as regras `html,body{height:NNNpx;max-height:NNNpx;
-  overflow:hidden}` + `#__wrap` (contêiner de altura cheia);
-- a rolagem fica **dentro** do card (`.wrap` com `overflow-y:auto`), nunca na
-  página: o gesto de arrastar na página viraria “responder” no WhatsApp.
+| Card | Moldura | Por quê |
+|---|---|---|
+| **Menu** | `css()`: `height` em px fixo (`MENU_HTML_HEIGHT`, 640 de fábrica) + `overflow:hidden` na página + `#__wrap`; rolagem **dentro** (`#lua-list`, `#lua-tabs`, `#lua-panel-body`) pelas setas ↑ ↓ ← → | é uma lista longa e o gesto de arrastar dentro da mensagem briga com o WhatsApp (“responder”). O corte aqui é esperado e **navegável** |
+| **Jogos** (caça e tigrinho) | `cssLivre()`: **nenhuma altura declarada**, sem `#__wrap` | a ação principal (girar/escavar) precisa estar visível sem rolagem. Com altura fixa o conteúdo que passa do número era **cortado sem rolagem** |
 
-Os cards dos jogos usavam só CSS próprio, **sem altura declarada** — e o WebView
-do card se dimensiona pelo conteúdo quando não há altura em px. Resultado no
-aparelho: o card saía minúsculo (“encolhido”). Agora os três cards declaram a
-altura e o `npm run jogos:doctor` confere isso em cada card enviado (linha
-`moldura: altura fixa 640px + #__wrap ok`).
+**Regra aprendida no aparelho (25/09 — “o html do tigrinho ficou pequeno e tá
+cortando o botão de girar”):** o WebView do card dimensiona a viewport pelo
+**conteúdo**; declarar altura **menor** que o conteúdo não cria rolagem — cria
+**corte puro**. O card do tigrinho passava de 640 px (rolos + faixa do resultado +
+painel da carteira), então o botão de girar ficava fora da área visível; no caça,
+os controles de baixo (Escavar, progresso) não podiam ser alcançados — “poucos
+botões clicáveis”. Nos jogos, portanto, **a moldura é livre** e o card cresce até
+caber tudo.
+
+Três reforços que vieram junto:
+
+1. **Painel em modo compacto** (`betPanel.montar({compacto:true})`, usado só nos
+   cards dos jogos): valor, atalhos (10%/25%/50%/Máx) e os botões (🔄 / ✅) vêm
+   **primeiro**; o detalhamento da carteira (saldo, comprometido, disponível,
+   mín, máx, limite do jogo) vai para um `<details>` — presente, mas a um toque.
+   O painel de abertura do caça e o do `tigrinho saldo` usam o mesmo componente.
+2. **Ordem por importância** nos cards dos jogos: no caça, “Escavar” fica **colado
+   no tabuleiro** (casas → Escavar → progresso → legenda recolhida); no tigrinho,
+   máquina → painel → tabela de prêmios recolhida.
+3. **Diagnóstico dentro do card**: a linha `area do card aqui: Npx de altura x
+   Mpx de largura (conteudo ... , janela ...)` aparece ao tocar no
+   **cabeçalho** (`moldura.htmlMedida()`), escondida por padrão. É o número que o
+   dono consegue ler no aparelho e mandar de volta — sem ele, ajustar altura é
+   chute. O `npm run jogos:doctor` agora descreve cada card como
+   `moldura: LIVRE (cresce com o conteúdo, nada é cortado) · diagnóstico de área no card`.
+
+**O que o doctor NÃO prova:** uma linha “moldura ok” só diz que o HTML declara a
+moldura certa — não prova que o botão aparece no aparelho. O critério é o uso
+real; por isso o número medido dentro do card é o dado que fecha a discussão.
 
 ## 3. Configuração e escopo
 

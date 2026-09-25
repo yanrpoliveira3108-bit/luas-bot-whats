@@ -908,38 +908,42 @@ async function main() {
     fail('24: XP', e);
   }
 
-  /* ---------- 25) moldura do card: altura FIXA em px + rolagem interna ---------- */
+  /* ---------- 25) card do jogo NÃO tem altura fixa (não corta botão) ---------- */
   try {
     const moldura = require('../menus/html/moldura');
-    const altura = moldura.alturaDoCard();
     const Z = '5511700000001@s.whatsapp.net';
     comCarteira(life, Z, 800);
 
     const painelCtx = fakeCtx({ args: [], sender: Z, msgId: 'MOLD-1' });
     await cmd.execute(painelCtx);
     const hPainel = card(painelCtx);
-    assert.ok(
-      new RegExp(`html,body\\{margin:0;padding:0;height:${altura}px;max-height:${altura}px;overflow:hidden\\}`).test(hPainel),
-      `o painel do caça declara altura FIXA de ${altura}px (mesmo número do card do menu)`
-    );
-    assert.ok(/id="__wrap"/.test(hPainel), 'e usa a moldura #__wrap (a altura não depende do conteúdo)');
-    assert.ok(/overflow-y:auto/.test(hPainel), 'a rolagem fica DENTRO do card (a página não rola)');
-    assert.ok(!/\d+vh/.test(hPainel), 'nenhuma unidade de viewport no card (regressão do card de 1px)');
+    assert.ok(!/height:\d+px;max-height/.test(hPainel), 'o painel do caça NÃO declara altura fixa (medido no aparelho: cortava o botão)');
+    assert.ok(!/id="__wrap"/.test(hPainel), 'sem contêiner de altura cheia');
+    assert.ok(/html,body\{margin:0;padding:0;overflow-x:hidden\}/.test(hPainel), 'moldura livre: o card cresce com o conteúdo');
+    assert.ok(/id="lua-medida"/.test(hPainel), 'tem a linha de diagnóstico de área (toque no cabeçalho)');
+    assert.ok(/ctx.sender|área do card aqui|area do card aqui/.test(moldura.jsMedida()), 'o diagnóstico mede a área real');
 
     const jogoCtx = fakeCtx({ args: ['jogar', '3', '100'], sender: Z, msgId: 'MOLD-2' });
     await cmd.execute(jogoCtx);
     const hJogo = card(jogoCtx);
-    assert.ok(new RegExp(`height:${altura}px;max-height:${altura}px`).test(hJogo), 'o tabuleiro usa a MESMA altura declarada');
-    assert.ok(/id="__wrap"/.test(hJogo), 'tabuleiro também dentro da moldura');
-    // MENU_HTML_HEIGHT continua sendo o único botão de ajuste de altura
-    const antesEnv = process.env.MENU_HTML_HEIGHT;
-    process.env.MENU_HTML_HEIGHT = '700';
-    const envCtx = fakeCtx({ args: [], sender: Z, msgId: 'MOLD-3' });
-    await cmd.execute(envCtx);
-    assert.ok(/height:700px;max-height:700px/.test(card(envCtx)), 'MENU_HTML_HEIGHT muda o card do jogo também');
-    if (antesEnv === undefined) delete process.env.MENU_HTML_HEIGHT;
-    else process.env.MENU_HTML_HEIGHT = antesEnv;
-    ok('25: moldura do card — altura fixa em px compartilhada com o menu (fim do card minúsculo)');
+    assert.ok(!/height:\d+px;max-height/.test(hJogo), 'o tabuleiro também é livre (sem corte)');
+    assert.ok(/id="lua-medida"/.test(hJogo), 'tabuleiro com o diagnóstico de área');
+    const corpo = hJogo.slice(hJogo.indexOf('<body'));
+    const iGrid = corpo.indexOf('tb-grid');
+    const iGo = corpo.indexOf('tb-go-');
+    const iStats = corpo.indexOf('tb-stats');
+    assert.ok(iGrid > 0 && iGrid < iGo && iGo < iStats, 'a ordem é: casas → Escavar → progresso (o botão fica colado no tabuleiro)');
+    assert.ok(/<details class="tb-legenda-det"/.test(corpo), 'a legenda fica recolhida (menos rolagem)');
+    assert.ok(/Toque numa casa e depois aqui/.test(corpo), 'hint curto e direto');
+    assert.ok(/<details class="bp-mais"><summary>💼 Carteira e limites/.test(corpo), 'painel compacto: detalhamento da carteira a um toque');
+    ['Saldo na carteira', 'Disponível para apostar', 'Aposta mínima', 'Máximo neste jogo'].forEach((t) =>
+      assert.ok(corpo.includes(t), `o painel do tabuleiro ainda mostra "${t}"`)
+    );
+    const iCampo = corpo.indexOf('bp-lbl');
+    const iBtns = corpo.indexOf('bp-btns');
+    const iDet = corpo.indexOf('<details class="bp-mais"');
+    assert.ok(iCampo > 0 && iCampo < iBtns && iBtns < iDet, 'no card: valor → botões → detalhes da carteira');
+    ok('25: card do caça sem altura fixa — botão Escavar colado no tabuleiro e diagnóstico de área');
   } catch (e) {
     fail('25: moldura do card', e);
   }
