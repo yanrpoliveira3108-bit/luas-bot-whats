@@ -290,7 +290,7 @@ function filtrar(termo){
   if(vazio)vazio.hidden=!!total;
   if(q){
     tabs.forEach(function(t){t.classList.remove("active");t.setAttribute("aria-selected","false")});
-    if(rotulo)rotulo.textContent="🔎 "+q+" ("+total+")";
+    if(rotulo)rotulo.textContent=(document.body.getAttribute("data-emojis")==="0"?"":"🔎 ")+q+" ("+total+")";
     /* resultado novo começa do topo; a posição da categoria volta ao limpar */
     alvo=null;
     if(lista){try{lista.scrollTop=0}catch(e){}}

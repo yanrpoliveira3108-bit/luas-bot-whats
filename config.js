@@ -106,6 +106,19 @@ const CONFIG = {
     author: envStr('AUTHOR_NAME', 'Lua Dev'),
     prefix: botPrefix(),
     language: envStr('LANGUAGE', 'pt-BR'),
+    // Fuso horário do BOT (IANA). Fonte ÚNICA para agendamentos (ex.:
+    // !horariogrupo). Não usa o fuso do servidor nem deslocamento fixo de UTC:
+    // o padrão centralizado é America/Sao_Paulo; um valor inválido em
+    // BOT_TIMEZONE também volta para ele (ver utils/tzTime.js).
+    timezone: (() => {
+      const tz = envStr('BOT_TIMEZONE', 'America/Sao_Paulo');
+      try {
+        new Intl.DateTimeFormat('en-US', { timeZone: tz });
+        return tz;
+      } catch (_) {
+        return 'America/Sao_Paulo';
+      }
+    })(),
     startedAt: Date.now(),
   },
 

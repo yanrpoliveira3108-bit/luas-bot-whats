@@ -4,6 +4,32 @@ const groups = require('../../database/groups');
 const { getParticipants } = require('../_shared/admin');
 const commandHandler = require('../../handlers/commandHandler');
 
+/**
+ * Aviso para abrir/fechar MANUAL quando há programação diária ativa
+ * (!horariogrupo): a alteração manual não apaga a programação, e o próximo
+ * horário automático (ou a reconciliação ao reiniciar) volta ao estado
+ * programado. Sem programação ativa, não acrescenta nada.
+ */
+function notaHorario(ctx) {
+  try {
+    const schedule = require('../../utils/groupSchedule');
+    const cfg = schedule.getConfig(ctx.remoteJid);
+    if (!cfg.enabled || !schedule.completa(cfg)) return '';
+    const tzTime = require('../../utils/tzTime');
+    const [prox] = schedule.proximosEventos(cfg, schedule.agora(), 1);
+    const quando = prox
+      ? `${prox.kind === 'open' ? 'abertura' : 'fechamento'} em ${tzTime.formatLocal(prox.at, cfg.tz)} (${cfg.tz})`
+      : 'o próximo horário';
+    return (
+      `\n⏰ A programação diária continua ativa: a próxima execução automática (${quando}) ` +
+      `ou uma reconciliação ao reiniciar pode reaplicar o estado programado. ` +
+      `Veja com ${ctx.prefix}horariogrupo.`
+    );
+  } catch (_) {
+    return '';
+  }
+}
+
 module.exports = [
   {
     name: 'grupo',
@@ -42,7 +68,7 @@ module.exports = [
     cooldown: 3000,
     execute: async (ctx) => {
       await ctx.socket.groupSettingUpdate(ctx.remoteJid, 'not_announcement');
-      await ctx.reply('🔓 Grupo aberto: todos podem enviar mensagens.');
+      await ctx.reply('🔓 Grupo aberto: todos podem enviar mensagens.' + notaHorario(ctx));
     },
   },
   {
@@ -57,7 +83,7 @@ module.exports = [
     cooldown: 3000,
     execute: async (ctx) => {
       await ctx.socket.groupSettingUpdate(ctx.remoteJid, 'announcement');
-      await ctx.reply('🔒 Grupo fechado: apenas administradores podem enviar mensagens.');
+      await ctx.reply('🔒 Grupo fechado: apenas administradores podem enviar mensagens.' + notaHorario(ctx));
     },
   },
   {

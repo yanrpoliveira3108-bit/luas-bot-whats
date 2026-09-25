@@ -29,13 +29,13 @@ const CATEGORY_EMOJI = {
 const COMMAND_EMOJI = {
   // general
   menu: '🏠', menucompleto: '📋', help: '❓', info: 'ℹ️', id: '🆔', ping: '🏓',
-  config: '⚙️', botao: '🔘', lermais: '📖', prefix: '🔤', owner: '👤',
+  config: '⚙️', botao: '🔘', temahtml: '🎨', modohtml: '🖥️', lermais: '📖', prefix: '🔤', owner: '👤',
   menuadm: '🛡️', menuautomod: '🤖', menudono: '👑', menulifeadmin: '👑',
   menudownload: '📥', menurpg: '⚔️', menulife: '🌎', menuanime: '🍥',
   menugames: '🎮', menuzoeira: '😂', menuutil: '🛠️', menumembros: '👥',
   menuia: '🤖', menusticker: '🎨', menumedia: '🖼️',
   // admin
-  abrirgrupo: '🔓', fechargrupo: '🔒', admins: '👑', membros: '👥', inativos: '😴',
+  abrirgrupo: '🔓', fechargrupo: '🔒', horariogrupo: '⏰', admins: '👑', membros: '👥', inativos: '😴',
   advertir: '⚠️', warnings: '📋', resetadv: '🧹', rmadv: '🧹', mute: '🔇',
   unmute: '🔊', kick: '👢', ban: '🚫', unban: '✅', promover: '⬆️', rebaixar: '⬇️',
   marcar: '📢', hidetag: '🤫', nomegrupo: '🏷️', descgrupo: '📝', foto: '🖼️',

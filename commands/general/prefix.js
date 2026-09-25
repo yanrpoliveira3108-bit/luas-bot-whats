@@ -14,7 +14,8 @@ module.exports = [
     execute: async (ctx) => {
       const novo = (ctx.args[0] || '').trim();
       if (!novo) {
-        await ctx.reply(`🔤 Prefixo atual: *${settings.effectivePrefix()}*`);
+        // mesma resposta do pedido "prefixo" (utils/prefixReply) — com o atalho do menu
+        await ctx.reply(require('../../utils/prefixReply').textoPrefixo(ctx));
         return;
       }
       if (!ctx.isOwner) {
