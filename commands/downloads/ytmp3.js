@@ -3,6 +3,7 @@
 const youtube = require('../../downloaders/youtube');
 const { sendAudioResult } = require('../_shared/downloads');
 const { parseArtistAndTitle, formatMediaCard } = require('../../utils/mediaPresentation');
+const htmlPlay = require('../../utils/htmlPlay');
 const errorHandler = require('../../handlers/errorHandler');
 
 module.exports = [
@@ -34,7 +35,8 @@ module.exports = [
           prefix: ctx.prefix,
         });
 
-        await ctx.reply(card);
+        const htmlSent = await htmlPlay.send(ctx, htmlPlay.normalizeMediaInfo(audio, { ...parsed, url, kind: 'audio', format: audio.mimetype || 'audio' }), ctx.prefix, { audio: 'ytmp3', lyrics: 'letra', search: 'play' }).catch(() => false);
+        if (!htmlSent) await ctx.reply(card);
         await sendAudioResult(ctx, audio);
       } catch (err) {
         await errorHandler.handle(ctx, err, { name: 'ytmp3' });

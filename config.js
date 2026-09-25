@@ -151,6 +151,12 @@ const CONFIG = {
     buttonsEnabled: envBool('BUTTONS_ENABLED', true),
   },
 
+  // Interface HTML opcional para resultados de mídia. O downloader não depende
+  // dela: quando desligada, o fluxo tradicional permanece intacto.
+  htmlPlay: {
+    enabled: envBool('HTML_PLAY_ENABLED', false),
+  },
+
   /* ------------- segurança de envio (anti-restrição de conta) -------------
    *
    * Contexto real: os números do dono caíram em "conta restrita" logo nos

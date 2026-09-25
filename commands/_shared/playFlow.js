@@ -22,6 +22,7 @@
 
 const youtube = require('../../downloaders/youtube');
 const playPresentation = require('../../utils/playPresentation');
+const htmlPlay = require('../../utils/htmlPlay');
 const mediaPresentation = require('../../utils/mediaPresentation');
 const playSession = require('../../utils/playSession');
 const urlSecurity = require('../../utils/urlSecurity');
@@ -144,6 +145,15 @@ async function sendPlayDetailCard(ctx, track, prefix, kind = 'audio') {
     thumbnailUrl: details.thumbnail || undefined,
   };
   if (thumb) preview.jpegThumbnail = thumb;
+  if (CONFIG.htmlPlay && CONFIG.htmlPlay.enabled) {
+    try {
+      const info = htmlPlay.normalizeMediaInfo({ ...details, thumbnail: thumb ? `data:image/jpeg;base64,${thumb.toString('base64')}` : '' }, { kind, format: kind === 'video' ? 'MP4' : 'M4A' });
+      await htmlPlay.send(ctx, info, prefix, { audio: 'ytmp3', video: 'ytmp4', lyrics: 'letra', search: 'play' });
+      return true;
+    } catch (err) {
+      logger.warn({ err: err.message }, 'HTML PLAY indisponível; mantendo card tradicional');
+    }
+  }
   try {
     if (ctx.socket && typeof ctx.socket.sendMessage === 'function') {
       await antiBan.enqueueOutbound(() => ctx.socket.sendMessage(ctx.remoteJid, {
