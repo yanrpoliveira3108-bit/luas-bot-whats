@@ -3,10 +3,10 @@
 const { runInteraction } = require('../../engine/interactionEngine');
 const R = require('./_responses');
 
-function make(name, desc, bank, selfBank, karma = 1) {
+function make(name, desc, bank, selfBank, karma = 1, commands = null) {
   return {
     name,
-    commands: [name],
+    commands: commands || [name],
     category: 'fun',
     description: desc,
     usage: `!${name} [@usuario]`,
@@ -28,4 +28,6 @@ module.exports = [
   make('tapinha', 'Dá um tapinha amigável.', R.tapinha, R.tapinhaSelf),
   make('cumprimento', 'Cumprimenta alguém.', R.cumprimento, R.cumprimentoSelf),
   make('cafune', 'Faz um cafuné em alguém.', R.cafune, R.cafuneSelf),
+  make('bater', 'Dá um tapa/bofetão em alguém.', R.bater, R.baterSelf, 1, ['bater', 'tapa']),
+  make('sirrica', 'Manda aquela reação de duplo sentido ou constrangimento.', R.sirrica, R.sirricaSelf, 1, ['sirrica', 'siririca']),
 ];

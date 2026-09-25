@@ -1,20 +1,43 @@
 /**
  * commands/fun/_responses.js — banco de respostas dos comandos de zueira.
- * Conteúdo leve e sem conotação sexual.
+ * Conteúdo irreverente, cômico e descontraído.
  */
 
 'use strict';
 
 module.exports = {
   beijo: [
-    '{actor} mandou um beijo para {target}! 😘',
-    '{actor} deu um beijinho na bochecha de {target}! 🥰',
-    '{actor} soprou um beijo voador para {target}! 💋✈️',
-    'Muuuah! {actor} beijou {target}! 😚',
+    '{actor} puxou {target} para um beijo de cinema! 💋🔥',
+    '{actor} mandou um beijo apaixonado para {target}! 😘✨',
+    '{actor} deu um beijo roubado em {target}! Muuuah! 😚💥',
+    'O clima esquentou: {actor} beijou {target} com vontade! 💋👀',
+    '{actor} soprou um beijo voador irresistível para {target}! 💋✈️',
   ],
   beijoSelf: [
     '{actor} mandou um beijo para si mesmo(a)... que carência! 😘',
     '{actor} beijou o espelho! 😂',
+  ],
+  sirrica: [
+    '{actor} pegou {target} no flagra pensando besteira! 😳🔥',
+    'Ih rapaz... {actor} deixou {target} morrendo de vergonha e vermelho(a)! 🫣🌡️',
+    '{actor} soltou aquele duplo sentido e {target} não soube onde enfiar a cara! 🙈😂',
+    '{target} corou dos pés à cabeça com o que {actor} disse! 😳💨',
+    'Clima de constrangimento total entre {actor} e {target}! 🫣👀',
+  ],
+  sirricaSelf: [
+    '{actor} ficou vermelho(a) sozinho(a) lembrando de coisa errada! 😳🙈',
+    '{actor} se auto-constrangeu no grupo... que fase! 😂🫣',
+  ],
+  bater: [
+    '{actor} deu um tapão estalado na cara de {target}! 💥👋',
+    '{actor} meteu a mão na cara de {target} estilo anime! 🌪️👋😵',
+    '{actor} desferiu um tapa educativo em {target}! ✋💥',
+    'POW! {actor} acertou {target} em cheio com um bofetão! 💥👊',
+    '{actor} deu um tapa cinematográfico em {target}! Acorda pra vida! 😤👋',
+  ],
+  baterSelf: [
+    '{actor} deu um tapa na própria testa de tanta vergonha alheia! 🤦💥',
+    '{actor} se estapeou para ver se estava sonhando! 👋😂',
   ],
   abraco: [
     '{actor} deu um abraço apertado em {target}! 🤗',
