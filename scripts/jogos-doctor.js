@@ -77,6 +77,35 @@ async function main() {
       linha(`   colunas: ${colunas.join(', ')}`);
     }
   }
+  // Últimos registros de cada tabela: é aqui que aparece uma aposta/rodada que
+  // ficou no meio do caminho (o bot conclui sozinho na próxima mensagem, mas o
+  // dono precisa ver que existe — e que o dinheiro não sumiu).
+  const ultimos = [
+    ['última aposta (game_bets)', 'SELECT game, bet, status, reward, ref_id, created_at FROM game_bets ORDER BY created_at DESC LIMIT 1'],
+    ['última rodada (game_rounds)', 'SELECT game, bet, reward, state, created_at FROM game_rounds ORDER BY created_at DESC LIMIT 1'],
+    [
+      'última expedição (treasure_games)',
+      'SELECT size, status, bet, reward, treasures_found, treasures_total, digs_used, digs_total, created_at FROM treasure_games ORDER BY created_at DESC LIMIT 1',
+    ],
+  ];
+  for (const [rotulo, sql] of ultimos) {
+    try {
+      const r = db.prepare(sql).get();
+      if (!r) {
+        linha(`${rotulo}: nenhum registro ainda`);
+      } else {
+        const partes = Object.entries(r)
+          .filter(([, v]) => v !== null && v !== undefined && v !== '')
+          .map(([k, v]) => `${k}=${v}`);
+        linha(`${rotulo}: ${partes.join(' · ')}`);
+        if (String(r.status || r.state || '').toLowerCase().match(/pending|pendente/)) {
+          linha('   ⚠️  está PENDENTE: na próxima mensagem do jogo o bot conclui e paga/devolve UMA vez.');
+        }
+      }
+    } catch (err) {
+      linha(`${rotulo}: não consegui ler (${(err && err.message) || err})`);
+    }
+  }
   const ajustes = database.ensureEsquemaReal();
   linha(
     ajustes.length
@@ -179,7 +208,11 @@ async function main() {
   try {
     const menus = require('../menus/html');
     const { DIM, ESCALA } = require('../menus/html/dimensoes');
-    linha(`altura declarada : ${menus.alturaDoCard()} px (faixa ${DIM.alturaMin}–${DIM.alturaMax}) — teto do host: ${DIM.alturaCurta} px`);
+    linha(
+      `altura declarada : ${menus.alturaDoCard()} px (faixa ${DIM.alturaMin}–${DIM.alturaMax}) — piso do encaixe: ${DIM.alturaEncolhidaMin} px ` +
+        '(medida menor que isso é ignorada: o card não encolhe por medida transitória)'
+    );
+    linha('moldura          : mesma para menu, caça e tigrinho (menus/html/moldura.js)');
     linha(`escala do texto  : ${ESCALA}`);
     linha(`passo das setas  : ${menus.passoDoCard()}`);
     linha(`largura máxima   : ${DIM.larguraMax} px em tela larga (celular usa 100% da bolha)`);
