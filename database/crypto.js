@@ -85,7 +85,10 @@ function buy(userId, symbol, valueCoins, now = Date.now()) {
   if (!c) throw new Error('UNKNOWN_COIN');
   const p = price(c.symbol, now);
   const amount = valueCoins / p;
-  economy.addWallet(userId, -valueCoins); // lança INSUFFICIENT_FUNDS
+
+  // Movimenta carteira e grava na transactions / ledger
+  economy.applyIdempotentOperation(`crypto-buy-${Date.now()}-${userId}`, userId, -valueCoins, 'cripto_compra', `Compra de ${amount.toFixed(6)} ${c.symbol}`);
+
   const row = get(userId, c.symbol);
   const nextAmount = row.amount + amount;
   const nextCost = row.total_cost + valueCoins;
@@ -114,7 +117,10 @@ function sell(userId, symbol, amountOrNull, now = Date.now()) {
     `INSERT INTO crypto_wallet (user_id, symbol, amount, total_cost) VALUES (?, ?, ?, ?)
      ON CONFLICT(user_id, symbol) DO UPDATE SET amount = excluded.amount, total_cost = excluded.total_cost`
   ).run(userId, c.symbol, nextAmount, nextCost);
-  economy.addWallet(userId, gain);
+
+  // Movimenta carteira e grava na transactions / ledger
+  economy.applyIdempotentOperation(`crypto-sell-${Date.now()}-${userId}`, userId, gain, 'cripto_venda', `Venda de ${amount.toFixed(6)} ${c.symbol}`);
+
   return { symbol: c.symbol, amount, price: p, gain, cost };
 }
 

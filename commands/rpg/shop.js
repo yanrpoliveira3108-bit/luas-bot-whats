@@ -83,6 +83,22 @@ module.exports = [
     execute: async (ctx) => {
       const items = economy.inventory(ctx.sender);
       if (!items.length) return ctx.reply('🎒 Seu inventário está vazio. Compre itens na loja!');
+
+      const settings = require('../../database/settings');
+      if (settings.menuHtmlEnabled()) {
+        try {
+          const rpgHtmlViews = require('../../utils/rpgHtmlViews');
+          const richHtml = require('../../utils/richHtml');
+          const users = require('../../database/users');
+          const u = users.get(ctx.sender);
+          const uName = (u && u.name) || ctx.sender.split('@')[0];
+
+          const html = rpgHtmlViews.renderInventoryHtml(items, uName);
+          await richHtml.sendHtml(ctx.socket, ctx.remoteJid, html, { title: `INVENTÁRIO • ${uName}` });
+          return;
+        } catch (_) {}
+      }
+
       const lines = items.map((i) => `${i.emoji || '📦'} *${i.name || i.item_id}* x${i.quantity}`);
       await ctx.reply(`🎒 *Inventário*\n${lines.join('\n')}`);
     },

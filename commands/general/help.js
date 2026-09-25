@@ -80,17 +80,35 @@ module.exports = [
         .map((t) => `${ctx.prefix}${t}`);
 
       const emoji = commandEmoji(cmd);
+
+      // Requisitos e contexto
+      const reqs = [];
+      if (cmd.ownerOnly) reqs.push('Apenas Dono do Bot');
+      if (cmd.adminOnly) reqs.push('Apenas Administrador do Grupo');
+      if (cmd.groupOnly) reqs.push('Apenas em Grupos');
+      if (cmd.privateOnly) reqs.push('Apenas no Privado');
+      if (cmd.mediaRequired) reqs.push('Requer imagem/vídeo anexado ou respondido');
+      if (cmd.mentionRequired) reqs.push('Requer menção (@usuário) ou resposta');
+
+      const dynamicUsage = cmd.usage
+        ? cmd.usage.replace(/^[!/.]/, ctx.prefix)
+        : `${ctx.prefix}${cmd.name}`;
+
       const lines = [
         `${emoji} *${ctx.prefix}${cmd.name}* — ${cmd.category}`,
-        `▸ Descrição: ${cmd.description || '-'}`,
-        `▸ Uso: ${cmd.usage || ctx.prefix + cmd.name}`,
-        `▸ Aliases: ${aliases.length ? aliases.join(', ') : '-'}`,
+        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+        `▸ Finalidade: ${cmd.description || '-'}`,
+        `▸ Sintaxe/Uso: \`${dynamicUsage}\``,
+        `▸ Aliases: ${aliases.length ? aliases.join(', ') : '(nenhum)'}`,
         `▸ Permissão: ${permissionLabel(cmd)}`,
         `▸ Cooldown: ${cmd.cooldown ? Math.round(cmd.cooldown / 1000) + 's' : CONFIG.limits.defaultCooldownMs / 1000 + 's (padrão)'}`,
+        reqs.length ? `▸ Requisitos: ${reqs.join(' • ')}` : '',
         '',
-        `💡 Digite *${ctx.prefix}${cmd.name}* para usar agora`,
-        `📋 ${ctx.prefix}menu ${cmd.category} para ver mais da categoria`,
-      ];
+        `💡 Exemplo: *${dynamicUsage}*`,
+        `⭐ Adicionar aos favoritos: *${ctx.prefix}favorito adicionar ${cmd.name}*`,
+        `📋 Ver categoria: *${ctx.prefix}menu ${cmd.category}*`,
+        '━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+      ].filter((l) => l !== '');
 
       const { maybeReadMore } = require('../../utils/readmore');
 

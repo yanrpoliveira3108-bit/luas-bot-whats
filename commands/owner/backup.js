@@ -19,7 +19,7 @@ module.exports = [
     execute: async (ctx) => {
       const sub = (ctx.args[0] || '').toLowerCase();
 
-      if (sub === 'lista' || sub === 'list' || sub === 'auto') {
+      if (sub === 'listar' || sub === 'lista' || sub === 'list' || sub === 'auto') {
         const list = autoBackup.listBackups();
         const manual = fs
           .readdirSync(CONFIG.paths.backupDir)
@@ -27,7 +27,7 @@ module.exports = [
           .sort()
           .slice(-5);
 
-        let msg = '*💾 BACKUPS*\n\n';
+        let msg = '*💾 LISTA DE BACKUPS*\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
         msg += `*Manuais (últimos 5):*\n${manual.length ? manual.map((f) => '▸ ' + f).join('\n') : '(nenhum)'}\n\n`;
         msg += `*Automáticos (${list.length}):*\n`;
         if (!list.length) {
@@ -36,11 +36,63 @@ module.exports = [
           for (const b of list.slice(0, 5)) {
             const date = b.mtime ? b.mtime.toLocaleString('pt-BR') : b.name;
             const reason = b.info && b.info.reason ? ` (${b.info.reason})` : '';
-            msg += `▸ ${b.name} — ${date}${reason}\n`;
+            msg += `▸ \`${b.name}\` — ${date}${reason}\n`;
           }
         }
-        msg += `\n💡 Use !backup criar para backup manual, !backup auto para forçar auto backup`;
+        msg += `\n💡 Para restaurar use: *${ctx.prefix}backup restaurar <identificador>* ou *${ctx.prefix}restore*`;
         return ctx.reply(msg);
+      }
+
+      if (sub === 'restaurar' || sub === 'restore') {
+        const targetId = ctx.args[1];
+        let fileToRestore = null;
+
+        if (targetId) {
+          const autoPath = path.join(autoBackup.AUTO_DIR, targetId, 'lua.db');
+          const manualPath = path.join(CONFIG.paths.backupDir, targetId);
+          if (fs.existsSync(autoPath)) fileToRestore = autoPath;
+          else if (fs.existsSync(manualPath)) fileToRestore = manualPath;
+        }
+
+        if (!fileToRestore) {
+          const files = fs
+            .readdirSync(CONFIG.paths.backupDir)
+            .filter((f) => f.startsWith('lua-backup-'))
+            .sort();
+          if (files.length) fileToRestore = path.join(CONFIG.paths.backupDir, files[files.length - 1]);
+        }
+
+        if (!fileToRestore) {
+          return ctx.reply(`❌ Nenhum backup encontrado para restaurar. Use *${ctx.prefix}backup listar*`);
+        }
+
+        // Validação de integridade antes da restauração
+        const Database = require('better-sqlite3');
+        try {
+          const testConn = new Database(fileToRestore, { readonly: true });
+          const integrity = testConn.prepare('PRAGMA integrity_check').get();
+          testConn.close();
+          if (!integrity || integrity.integrity_check !== 'ok') {
+            return ctx.reply('❌ Falha na verificação de integridade do arquivo de backup.');
+          }
+        } catch (errTest) {
+          return ctx.reply(`❌ Backup corrompido ou ilegível: ${errTest.message}`);
+        }
+
+        const bName = path.basename(fileToRestore);
+        await confirmAction(ctx, `restaurar o backup ${bName}`, async (c) => {
+          try {
+            // Snapshot preventivo do estado atual
+            const safetySnap = path.join(CONFIG.paths.backupDir, `pre-restore-snap-${Date.now()}.db`);
+            await db.backup(safetySnap);
+
+            db.restore(fileToRestore);
+            await c.reply(`✅ Backup \`${bName}\` restaurado com sucesso! Cópia de segurança criada em \`${path.basename(safetySnap)}\`.`);
+          } catch (err) {
+            await c.reply(`❌ Falha ao restaurar: ${err.message}`);
+          }
+        });
+        return;
       }
 
       if (sub === 'criar' || sub === 'now' || sub === 'forcar' || !sub) {

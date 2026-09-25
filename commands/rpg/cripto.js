@@ -31,6 +31,19 @@ module.exports = [
     cooldown: 3000,
     execute: async (ctx) => {
       const eco = economy.get(ctx.sender);
+
+      // Card visual em HTML se o modo HTML estiver ativo
+      const settings = require('../../database/settings');
+      if (settings.menuHtmlEnabled()) {
+        try {
+          const cryptoHtmlView = require('../../utils/cryptoHtmlView');
+          const richHtml = require('../../utils/richHtml');
+          const html = cryptoHtmlView.renderCryptoMarketHtml(ctx.sender, ctx.prefix);
+          await richHtml.sendHtml(ctx.socket, ctx.remoteJid, html, { title: 'MERCADO DE CRIPTOMOEDAS' });
+          return;
+        } catch (_) {}
+      }
+
       await ctx.reply(
         [
           '🪙 *MERCADO CRIPTO*',

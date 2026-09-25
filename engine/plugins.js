@@ -93,6 +93,14 @@ class PluginRegistry {
     return this.triggers.get(String(trigger || '').toLowerCase()) || null;
   }
 
+  getCanonicalName(nameOrTrigger) {
+    if (!nameOrTrigger) return null;
+    const clean = String(nameOrTrigger).toLowerCase().trim();
+    if (this.commands.has(clean)) return clean;
+    const resolved = this.triggers.get(clean);
+    return resolved ? resolved.name : null;
+  }
+
   getCommand(name) {
     return this.commands.get(String(name || '').toLowerCase()) || null;
   }

@@ -40,6 +40,36 @@ module.exports = [
         `▸ Carteira: ${formatMoney(eco.wallet)} | Banco: ${formatMoney(eco.bank)}`,
         `▸ Sobre: ${u.about || '-'}`,
       ];
+
+      // Se o modo HTML estiver ativo e permitido, envia o card visual
+      const settings = require('../../database/settings');
+      if (settings.menuHtmlEnabled()) {
+        try {
+          const rpgHtmlViews = require('../../utils/rpgHtmlViews');
+          const richHtml = require('../../utils/richHtml');
+          const life = require('../../database/life');
+          const achs = life.listAchievements(target);
+
+          const html = rpgHtmlViews.renderProfileHtml({
+            name: displayName(target),
+            level: u.level,
+            profession: rp.profession,
+            xp: u.xp,
+            nextXp: next,
+            wallet: eco.wallet,
+            bank: eco.bank,
+            reputation: u.reputation,
+            messages: u.messages,
+            achievementsCount: achs.length,
+          });
+
+          await richHtml.sendHtml(ctx.socket, ctx.remoteJid, html, { title: `PERFIL DE ${displayName(target)}` });
+          return;
+        } catch (_) {
+          // segue fallback texto
+        }
+      }
+
       await ctx.reply(lines.join('\n'));
     },
   },

@@ -287,6 +287,8 @@ function walletTx(userId, delta, action, note) {
     const before = economy.get(userId).wallet;
     const after = economy.addWallet(userId, delta);
     logEconomy(userId, action, '', delta, before, after, note);
+    // Também grava na tabela transactions e no economy_ledger para aparecer no !extrato
+    economy.recordTransaction(userId, action || 'life', delta, note || '');
     return after;
   });
   return tx();

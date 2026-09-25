@@ -29,4 +29,18 @@ function withLock(key, fn) {
   return run;
 }
 
-module.exports = { withLock };
+/**
+ * Executa `fn` com trava ordenada para múltiplos participantes (ex: transferências, trocas).
+ * Ordena as chaves lexicograficamente para prevenir impasses (deadlocks).
+ */
+function withMultiLock(keys, fn) {
+  if (!Array.isArray(keys) || keys.length === 0) return Promise.resolve().then(fn);
+  const sorted = [...new Set(keys.map(String))].sort();
+  function chain(index) {
+    if (index >= sorted.length) return Promise.resolve().then(fn);
+    return withLock(sorted[index], () => chain(index + 1));
+  }
+  return chain(0);
+}
+
+module.exports = { withLock, withMultiLock };

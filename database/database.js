@@ -658,6 +658,30 @@ const MIGRATIONS = [
   // O saldo continua sendo o de sempre: economy.wallet (LuaCoins). Nada de
   // carteira paralela — só o registro do que já foi cobrado/pago.
   GAME_SCHEMA_SQL,
+
+  // 37 — FAVORITOS DE COMANDOS POR USUÁRIO (Etapa 1)
+  `CREATE TABLE IF NOT EXISTS user_favorites (
+    user_id TEXT NOT NULL,
+    command_name TEXT NOT NULL,
+    created_at TEXT DEFAULT '',
+    PRIMARY KEY(user_id, command_name)
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_fav_user ON user_favorites(user_id);`,
+
+  // 38 — LIVRO-CAIXA DE OPERAÇÕES FINANCEIRAS & IDEMPOTÊNCIA (Etapa 1)
+  `CREATE TABLE IF NOT EXISTS economy_ledger (
+    op_key TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    target_id TEXT DEFAULT '',
+    type TEXT NOT NULL,
+    amount INTEGER NOT NULL,
+    balance_after INTEGER NOT NULL,
+    note TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'completed',
+    created_at TEXT DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS idx_economy_ledger_user ON economy_ledger(user_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_economy_ledger_target ON economy_ledger(target_id, created_at);`,
 ];
 
 /* ----------------------------- core ------------------------------ */

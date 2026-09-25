@@ -66,9 +66,9 @@ function cpuPercent() {
 module.exports = [
   {
     name: 'debug',
-    commands: ['debug', 'diagnostico'],
+    commands: ['debug'],
     category: 'general',
-    description: 'Painel de diagnóstico do bot.',
+    description: 'Painel de diagnóstico rápido do bot.',
     usage: '!debug',
     cooldown: 8000,
     execute: async (ctx) => {

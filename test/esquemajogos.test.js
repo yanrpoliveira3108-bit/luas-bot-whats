@@ -78,9 +78,9 @@ async function main() {
       M.every((s) => /CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX)|ALTER TABLE|PRAGMA|INSERT|UPDATE|DROP/i.test(s)),
       'toda migração tem SQL de verdade'
     );
-    const jogos = M[M.length - 1];
-    assert.ok(/game_bets/.test(jogos) && /treasure_games/.test(jogos) && /game_rounds/.test(jogos), 'a última migração cria as 3 tabelas dos jogos');
-    ok(`1: MIGRATIONS íntegro (${M.length} migrações, a última cria as tabelas dos jogos)`);
+    const jogos = M.find((s) => /game_bets/.test(s) && /treasure_games/.test(s) && /game_rounds/.test(s));
+    assert.ok(jogos, 'migração cria as 3 tabelas dos jogos');
+    ok(`1: MIGRATIONS íntegro (${M.length} migrações)`);
   } catch (e) {
     fail('1: MIGRATIONS', e);
   }
@@ -284,6 +284,7 @@ async function main() {
       for (let v=1; v<=35; v++) c.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, '')").run(v);
       console.log(JSON.stringify({ok:1}));
     `);
+    const M = require('../database/database').MIGRATIONS;
     const { saida } = noFilho('lua-legado2.db', `
       const db=require(path.join(${JSON.stringify(RAIZ)},'database/database'));db.open();
       const c=db.get();
@@ -299,8 +300,8 @@ async function main() {
     const r = ultima(saida);
     assert.strictEqual(r.tabelas, 3, 'as 3 tabelas dos jogos foram criadas na atualização');
     assert.strictEqual(r.v36, 'v36', 'a migração nova (jogos) ficou identificada por nome');
-    assert.strictEqual(r.linhas, 36, `sem inflar linhas (${r.linhas})`);
-    assert.strictEqual(r.nomes, 36, 'todas as migrações têm nome registrado');
+    assert.strictEqual(r.linhas, M.length, `sem inflar linhas (${r.linhas})`);
+    assert.strictEqual(r.nomes, M.length, 'todas as migrações têm nome registrado');
     assert.strictEqual(r.ajustes, 0, 'depois da migração nada falta (cura por medição vazia)');
 
     const { saida: saida2 } = noFilho('lua-legado2.db', `
@@ -308,7 +309,7 @@ async function main() {
       const c=db.get();
       console.log(JSON.stringify({ linhas: c.prepare('SELECT COUNT(*) n FROM schema_migrations').get().n }));
     `);
-    assert.strictEqual(ultima(saida2).linhas, 36, 'reabrir é idempotente');
+    assert.strictEqual(ultima(saida2).linhas, M.length, 'reabrir é idempotente');
     ok('8: banco legado (sem nome) — reexecução inofensiva cria o que faltava e não infla linhas');
   } catch (e) {
     fail('8: banco legado', e);

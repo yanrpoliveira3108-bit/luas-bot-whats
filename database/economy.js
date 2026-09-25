@@ -82,7 +82,10 @@ function withdraw(userId, amount) {
   tx();
 }
 
-/** Transfere da carteira de `from` para a carteira de `to`. */
+/**
+ * Transfere da carteira de `from` para a carteira de `to`.
+ * Atômico e consistente.
+ */
 function transfer(fromId, toId, amount) {
   const tx = getDb().transaction(() => {
     const from = get(fromId);
@@ -94,6 +97,152 @@ function transfer(fromId, toId, amount) {
   tx();
 }
 
+/**
+ * Operação atômica e idempotente no livro-caixa com proteção de duplicidade de chave.
+ * Se opKey já existir, retorna o registro salvo sem refazer a movimentação.
+ * Executa débito/crédito, transactions e economy_ledger juntos na mesma transação.
+ */
+function applyIdempotentOperation(opKey, userId, delta, type, note = '', targetId = '') {
+  if (!opKey) throw new Error('OP_KEY_REQUIRED');
+  ensure(userId);
+
+  const existing = prepare(
+    'get_ledger_op',
+    `SELECT * FROM economy_ledger WHERE op_key = ?`
+  ).get(opKey);
+
+  if (existing) {
+    return { ok: true, duplicated: true, record: existing };
+  }
+
+  const tx = getDb().transaction(() => {
+    // Dupla checagem dentro da transação
+    const inTx = prepare(
+      'get_ledger_op',
+      `SELECT * FROM economy_ledger WHERE op_key = ?`
+    ).get(opKey);
+    if (inTx) return { ok: true, duplicated: true, record: inTx };
+
+    const row = get(userId);
+    const next = row.wallet + delta;
+    if (next < 0) throw new Error('INSUFFICIENT_FUNDS');
+
+    prepare('set_wallet', `UPDATE economy SET wallet = ?, total_earned = total_earned + ? WHERE user_id = ?`).run(
+      next,
+      delta > 0 ? delta : 0,
+      userId
+    );
+
+    const txTime = now();
+    prepare(
+      'add_tx',
+      `INSERT INTO transactions (user_id, type, amount, note, created_at) VALUES (?, ?, ?, ?, ?)`
+    ).run(userId, type, delta, note || '', txTime);
+
+    prepare(
+      'add_ledger',
+      `INSERT INTO economy_ledger (op_key, user_id, target_id, type, amount, balance_after, note, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?)`
+    ).run(opKey, userId, targetId || '', type, delta, next, note || '', txTime);
+
+    const record = {
+      op_key: opKey,
+      user_id: userId,
+      target_id: targetId || '',
+      type,
+      amount: delta,
+      balance_after: next,
+      note: note || '',
+      status: 'completed',
+      created_at: txTime,
+    };
+
+    return { ok: true, duplicated: false, record };
+  });
+
+  return tx();
+}
+
+/**
+ * Transferência atômica e idempotente entre dois usuários com registros para ambas as partes.
+ */
+function applyIdempotentTransfer(opKey, fromId, toId, amount, note = '') {
+  if (!opKey) throw new Error('OP_KEY_REQUIRED');
+  if (fromId === toId) throw new Error('SELF_TRANSFER_PROHIBITED');
+  const n = Math.floor(amount);
+  if (n <= 0) throw new Error('INVALID_AMOUNT');
+
+  const existing = prepare(
+    'get_ledger_op',
+    `SELECT * FROM economy_ledger WHERE op_key = ?`
+  ).get(opKey);
+
+  if (existing) {
+    return { ok: true, duplicated: true, record: existing };
+  }
+
+  const tx = getDb().transaction(() => {
+    const inTx = prepare(
+      'get_ledger_op',
+      `SELECT * FROM economy_ledger WHERE op_key = ?`
+    ).get(opKey);
+    if (inTx) return { ok: true, duplicated: true, record: inTx };
+
+    ensure(fromId);
+    ensure(toId);
+
+    const fromRow = get(fromId);
+    if (fromRow.wallet < n) throw new Error('INSUFFICIENT_FUNDS');
+
+    const nextFrom = fromRow.wallet - n;
+    prepare('set_wallet', `UPDATE economy SET wallet = ? WHERE user_id = ?`).run(nextFrom, fromId);
+
+    const toRow = get(toId);
+    const nextTo = toRow.wallet + n;
+    prepare('set_wallet', `UPDATE economy SET wallet = ?, total_earned = total_earned + ? WHERE user_id = ?`).run(
+      nextTo,
+      n,
+      toId
+    );
+
+    const txTime = now();
+    const fromNote = note ? `${note} (para ${toId})` : `transferência para ${toId}`;
+    const toNote = note ? `${note} (de ${fromId})` : `transferência de ${fromId}`;
+
+    prepare(
+      'add_tx',
+      `INSERT INTO transactions (user_id, type, amount, note, created_at) VALUES (?, ?, ?, ?, ?)`
+    ).run(fromId, 'transfer_out', -n, fromNote, txTime);
+
+    prepare(
+      'add_tx',
+      `INSERT INTO transactions (user_id, type, amount, note, created_at) VALUES (?, ?, ?, ?, ?)`
+    ).run(toId, 'transfer_in', n, toNote, txTime);
+
+    prepare(
+      'add_ledger',
+      `INSERT INTO economy_ledger (op_key, user_id, target_id, type, amount, balance_after, note, status, created_at)
+       VALUES (?, ?, ?, 'transfer', ?, ?, ?, 'completed', ?)`
+    ).run(opKey, fromId, toId, n, nextFrom, note || '', txTime);
+
+    const record = {
+      op_key: opKey,
+      user_id: fromId,
+      target_id: toId,
+      type: 'transfer',
+      amount: n,
+      balance_after: nextFrom,
+      note: note || '',
+      status: 'completed',
+      created_at: txTime,
+    };
+
+    return { ok: true, duplicated: false, record };
+  });
+
+  return tx();
+}
+
 function recordTransaction(userId, type, amount, note) {
   return prepare(
     'add_tx',
@@ -101,11 +250,32 @@ function recordTransaction(userId, type, amount, note) {
   ).run(userId, type, amount, note || '', now());
 }
 
-function history(userId, limit = 10) {
+function history(userId, limit = 10, offset = 0, typeFilter = null) {
+  if (typeFilter) {
+    return prepare(
+      'tx_history_filter',
+      `SELECT * FROM transactions WHERE user_id = ? AND type = ? ORDER BY id DESC LIMIT ? OFFSET ?`
+    ).all(userId, typeFilter, limit, offset);
+  }
   return prepare(
-    'tx_history',
-    `SELECT * FROM transactions WHERE user_id = ? ORDER BY id DESC LIMIT ?`
-  ).all(userId, limit);
+    'tx_history_page',
+    `SELECT * FROM transactions WHERE user_id = ? ORDER BY id DESC LIMIT ? OFFSET ?`
+  ).all(userId, limit, offset);
+}
+
+function countHistory(userId, typeFilter = null) {
+  if (typeFilter) {
+    const r = prepare(
+      'tx_count_filter',
+      `SELECT COUNT(*) as c FROM transactions WHERE user_id = ? AND type = ?`
+    ).get(userId, typeFilter);
+    return r ? r.c : 0;
+  }
+  const r = prepare(
+    'tx_count_all',
+    `SELECT COUNT(*) as c FROM transactions WHERE user_id = ?`
+  ).get(userId);
+  return r ? r.c : 0;
 }
 
 /* ------------------------------ inventário ------------------------- */
@@ -160,8 +330,11 @@ module.exports = {
   deposit,
   withdraw,
   transfer,
+  applyIdempotentOperation,
+  applyIdempotentTransfer,
   recordTransaction,
   history,
+  countHistory,
   addItem,
   removeItem,
   getItem,
