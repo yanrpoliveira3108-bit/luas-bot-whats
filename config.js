@@ -210,6 +210,18 @@ const CONFIG = {
       maxQueuePerChat: envInt('SEND_MAX_QUEUE_PER_CHAT', 15),
       // PVs liberados sempre (além do dono e de quem já falou com o bot)
       allowJids: envList('SEND_PV_ALLOW'),
+      // PRAZO DE UM ENVIO (ms). Se `sendMessage` não concluir nesse tempo, o
+      // envio é considerado TRAVADO (não é erro: pode ter saído). O freio libera
+      // a fila, registra na auditoria/estado e reenvia UMA vez sem citação.
+      // Sem isso, um envio pendurado travava a fila inteira: o bot ficava
+      // "digitando…" e nenhuma mensagem aparecia no grupo (aparelho, 25/09/2026).
+      // 0 = sem prazo (comportamento antigo, NÃO recomendado).
+      sendTimeoutMs: envInt('SEND_TIMEOUT_MS', 45000),
+      // prazo do reenvio pós-travamento (menor: o chat já se mostrou problemático)
+      sendRetryTimeoutMs: envInt('SEND_RETRY_TIMEOUT_MS', 20000),
+      // reenvia UMA vez o envio que travou (sem citação, com metadados de grupo
+      // em cache)? O erro de MONTAGEM já tem reenvio próprio no ponto de saída.
+      retryOnHang: envBool('SEND_RETRY_ON_HANG', true),
       // onde fica o estado (contadores, chats conhecidos, warmup).
       // O caminho é configurável para os testes trabalharem isolados.
       stateDir: path.resolve(ROOT, envStr('SEND_STATE_DIR', './data')),

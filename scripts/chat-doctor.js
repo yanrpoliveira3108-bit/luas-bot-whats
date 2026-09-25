@@ -144,6 +144,10 @@ const doChat = eventos.filter((e) => String(e.jid) === JID);
 const aceitos = doChat.filter((e) => !e.blocked && !e.restriction);
 const barrados = doChat.filter((e) => e.blocked);
 const restricoes = doChat.filter((e) => e.restriction);
+// concluídos = envio que TERMINOU (ok/erro/travou). Sem esta coluna, "aceito"
+// parecia entregue — e um envio PENDURADO passava batido (foi o caso de 25/09).
+const concluidos = doChat.filter((e) => e.fim);
+const travaram = doChat.filter((e) => e.travou || e.resultado === 'travou');
 
 H('1) O QUE O FREIO FEZ COM ESTE CHAT (auditoria de envios)');
 if (!eventos.length) {
@@ -301,6 +305,39 @@ if (comErro.length) {
   L('✅ Nenhum erro registrado para este chat no período.');
 }
 
+/* ------------------- 3.2 envios que TRAVARAM (pendurados) --------------- */
+
+const travadosEstado = (estado && Number(estado.travados)) || 0;
+const ultimoTravado = estado && estado.lastTravado;
+if (travaram.length || travadosEstado) {
+  H('3.2 ENVIOS QUE NÃO CONCLUÍRAM (o "fica digitando…" e nada aparece)');
+  if (travaram.length) {
+    L(`Neste chat: ${travaram.length} envio(s) NÃO concluíram dentro do prazo.`);
+    const ult = travaram[travaram.length - 1];
+    L(`   último: ${hhmmss(quandoLinha(ult))} · tipo ${ult.kind || '?'} · prazo ${Math.round((ult.prazoMs || 0) / 1000)}s · reenvio: ${ult.tentativa2 || '-'}`);
+  }
+  if (travadosEstado) {
+    L(`No estado do freio: ${travadosEstado} travamento(s) no total.`);
+    if (ultimoTravado) {
+      L(`   último: ${ultimoTravado.at} · ${ultimoTravado.jid} (${ultimoTravado.kind}) · reenvio: ${ultimoTravado.tentativa2}`);
+    }
+  }
+  if (aceitos.length && concluidos.length < aceitos.length) {
+    L(`Aceitos SEM conclusão registrada: ${aceitos.length - concluidos.length} de ${aceitos.length}`);
+    L('   (linhas antigas da auditoria não têm o registro de conclusão — o que');
+    L('    importa é o contador de travamentos acima, que é desta versão.)');
+  }
+  L('');
+  L('Leitura: o comando RODOU, mas o envio ficou PENDURADO — a biblioteca espera a');
+  L('consulta de participantes do grupo e ela não tem prazo. Nada sai e o');
+  L('"digitando…" nunca é desfeito (é o "escrevendo infinitamente").');
+  L('▸ Correção desta versão: metadados de grupo em CACHE (o envio não faz a');
+  L('  consulta), PRAZO de envio (SEND_TIMEOUT_MS) com reenvio sem citação,');
+  L('  presença sempre encerrada e travamento contado no `!freio`.');
+  L('▸ `git pull`, reinicie e repita o comando. Se travar de novo, este relatório');
+  L('  mostra a hora, o tipo e se o reenvio passou.');
+}
+
 /* ------------------------------ 5) veredito ----------------------------- */
 
 H('4) VEREDITO');
@@ -325,6 +362,14 @@ if (barrados.length) {
     L('   "Falhas de envio" acima — "not-authorized"/"forbidden" indica que o');
     L('   número não pode postar neste grupo (ver checklist abaixo).');
   }
+} else if (travaram.length || travadosEstado) {
+  L('⏳ Os ENVIOS ESTÃO TRAVANDO (não é bloqueio do freio nem erro de conteúdo).');
+  L('   O comando roda, a resposta é montada e o envio NUNCA conclui: nada');
+  L('   aparece e o "digitando…" fica eterno — a fila inteira trava atrás.');
+  L('   ▸ Atualize (`git pull`) e reinicie: o envio em grupo passou a usar');
+  L('     metadados em CACHE (sem a consulta que travava), ganhou PRAZO com');
+  L('     reenvio sem citação e a presença passou a ser sempre encerrada.');
+  L('   ▸ Depois de reiniciar, `!freio` mostra "Envios travados (sem resposta)".');
 } else if (aceitos.length || achados.comandos.length) {
   L('✅ O bot RECEBEU o comando e o WhatsApp ACEITOU a mensagem (sem bloqueio do');
   L('   freio e sem erro). Ou seja: a mensagem saiu daqui — se ela não aparece');
@@ -356,6 +401,7 @@ L('Detalhes completos: `!freio` (status) · `!freio bloqueios <jid>` (barrados)'
 L('Contadores do freio no estado:');
 if (estado) {
   L(`   enviados: ${estado.totalSent || 0} · bloqueados: ${estado.totalBlocked || 0} · pausas: ${estado.pauses || 0}`);
+  L(`   envios travados: ${Number(estado.travados) || 0}`);
   if (estado.lastRestriction) L(`   última restrição: ${estado.lastRestriction.at} (${estado.lastRestriction.reason})`);
 }
 

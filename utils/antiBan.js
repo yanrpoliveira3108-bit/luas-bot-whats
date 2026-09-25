@@ -117,6 +117,21 @@ async function simulateTyping(sock, jid, textOrContent = '', presenceType = 'com
   } catch (_) {}
 
   await sleep(delay);
+
+  // SEMPRE encerra a presença ("paused"). Era isso que ficava ETERNO quando o
+  // envio travava: o "digitando…" era enviado e ninguém o desfazia — no
+  // aparelho o dono via o bot "escrevendo infinitamente" e nada chegando.
+  // A presença vai DIRETO (não é mensagem, não passa pela fila do freio) e
+  // nunca pode atrapalhar o envio.
+  encerrarPresenca(sock, jid, presenceType);
+}
+
+/** Desfaz a presença de digitação/gravação (melhor esforço, nunca lança). */
+function encerrarPresenca(sock, jid, presenceType) {
+  try {
+    if (!sock || typeof sock.sendPresenceUpdate !== 'function') return;
+    Promise.resolve(sock.sendPresenceUpdate('paused', jid)).catch(() => {});
+  } catch (_) {}
 }
 
 /* --------------------------- browser fingerprint ---------------------- */
@@ -165,6 +180,7 @@ function isEnabled() {
 module.exports = {
   enqueueOutbound,
   simulateTyping,
+  encerrarPresenca,
   calculateTypingDelay,
   getBrowserConfig,
   getStatus,

@@ -90,6 +90,12 @@ const state = {
   // Bloqueios POR CONVERSA: { jid: { motivo: n } }. Serve para responder, na
   // hora, "por que o bot não falou NESTE chat?" sem depender de arquivo de log.
   blockedByChat: {},
+  // ENVIOS QUE TRAVARAM: `sendMessage` que não concluiu dentro do prazo. Não é
+  // erro de conteúdo nem de entrega — é o envio que fica pendurado (o servidor
+  // não responde a consulta de participantes do grupo). Era invisível antes:
+  // o bot "ficava digitando…" e nada aparecia no chat.
+  travados: 0,
+  lastTravado: null, // { at, jid, kind, ms, tentativa2 }
 };
 
 const queues = new Map(); // jid -> [item]
@@ -223,6 +229,8 @@ function loadState() {
       if (Number.isFinite(data.totalBlocked)) state.totalBlocked = data.totalBlocked;
       if (Number.isFinite(data.pauses)) state.pauses = data.pauses;
       if (data.blockedByChat && typeof data.blockedByChat === 'object') state.blockedByChat = data.blockedByChat;
+      if (Number.isFinite(data.travados)) state.travados = data.travados;
+      if (data.lastTravado && typeof data.lastTravado === 'object') state.lastTravado = data.lastTravado;
       if (data.lastRestriction && typeof data.lastRestriction === 'object') {
         state.lastRestriction = data.lastRestriction;
       }
@@ -230,6 +238,7 @@ function loadState() {
   } catch (_) {
     /* primeiro boot ou arquivo corrompido */
   }
+  if (typeof state.travados !== 'number') state.travados = 0;
   if (!state.firstSeen) {
     // Primeira execução: começa o warmup AGORA (conservador para número novo;
     // para número já quente, o dono pode zerar com !freio warmup reset).
@@ -258,6 +267,8 @@ function saveState(force = false) {
             pauses: state.pauses,
             lastRestriction: state.lastRestriction,
             blockedByChat: state.blockedByChat,
+            travados: state.travados,
+            lastTravado: state.lastTravado,
             updatedAt: new Date().toISOString(),
           },
           null,
@@ -705,12 +716,32 @@ async function pump() {
       state.totalSent++;
       audit({ t: ts, jid: picked.jid, kind: picked.item.kind, h: picked.item.hash || undefined });
 
-      currentSend = { jid: picked.jid, kind: picked.item.kind, startedAt: Date.now(), warnAt: 0 };
+      const startedAt = Date.now();
+      currentSend = { jid: picked.jid, kind: picked.item.kind, startedAt, warnAt: 0 };
+      const prazoMs = Number(CFG.sendTimeoutMs) || 0;
       try {
-        const result = await sendingContext.run({ sending: true }, async () => picked.item.run());
-        picked.item.resolve(result);
+        const r = await enviarComPrazo(picked.item, prazoMs);
+        const ms = Date.now() - startedAt;
+        if (r && r.ok) {
+          audit({ t: Date.now(), jid: picked.jid, kind: picked.item.kind, fim: true, ms, resultado: 'ok' });
+          picked.item.resolve(r.res);
+        } else if (r && r.travou) {
+          // ⚠️ PENDURADO ≠ erro. Reenvia UMA vez (sem citação + metadados em
+          // cache) e NUNCA espera para sempre: a fila precisa continuar.
+          const retry = await tentarDepoisDeTravar(picked, prazoMs);
+          anotarTravamento(picked, prazoMs, retry);
+          audit({ t: Date.now(), jid: picked.jid, kind: picked.item.kind, fim: true, ms, resultado: 'travou' });
+          // Se o reenvio passou, quem chamou recebe o resultado DELE (o `key`
+          // continua servindo para revogar/citar). Se não passou, null — antes
+          // aqui a promessa simplesmente nunca resolvia.
+          picked.item.resolve(retry && retry.ok ? retry.res : null);
+        } else {
+          // Repassa o erro: quem chamou pode tratar (ex.: menu cai no fallback).
+          audit({ t: Date.now(), jid: picked.jid, kind: picked.item.kind, fim: true, ms, resultado: 'erro' });
+          diagnose(r && r.err, picked);
+          picked.item.reject(r && r.err);
+        }
       } catch (err) {
-        // Repassa o erro: quem chamou pode tratar (ex.: menu cai no fallback).
         diagnose(err, picked);
         picked.item.reject(err);
       } finally {
@@ -723,6 +754,98 @@ async function pump() {
   } finally {
     pumping = false;
   }
+}
+
+/* ------------------------- envio com PRAZO (anti-travamento) ------------ */
+
+const metadata = require('./groupMetadataCache');
+
+/**
+ * Executa UMA tentativa de envio com prazo.
+ * Devolve { ok, res } | { err } | { travou: true }.
+ *
+ * Por que existe: em 25/09/2026 o aparelho do dono mostrou o comando rodando,
+ * "digitando…" para sempre e NADA no grupo. O envio estava PENDURADO (a
+ * biblioteca espera a consulta de participantes do grupo, que não tem prazo).
+ * Pendurado não é erro: nenhum `catch` pegava. Sem prazo, uma única mensagem
+ * nessa situação parava a fila inteira — e todas as outras respostas junto.
+ */
+function enviarComPrazo(item, ms) {
+  const tentativa = sendingContext.run({ sending: true }, () => item.run());
+  tentativa.catch(() => {}); // um envio travado não pode virar "unhandled rejection"
+  if (!ms || ms <= 0) return tentativa.then((res) => ({ ok: true, res }), (err) => ({ err }));
+  let timer = null;
+  const prazo = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ travou: true }), ms);
+  });
+  return Promise.race([tentativa.then((res) => ({ ok: true, res }), (err) => ({ err })), prazo]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+/**
+ * O envio travou. Registra e — UMA vez — tenta de novo do jeito mais provável
+ * de passar: sem citação e com os metadados do grupo já em cache (é a consulta
+ * de metadados que pendura o envio em grupo).
+ *
+ * Não afirma entrega: o log diz o que aconteceu e a auditoria marca 'travou'.
+ * Se a 1ª tentativa tiver saído, o reenvio duplicaria a mensagem — por isso ele
+ * é a EXCEÇÃO (só depois de prazo estourado, quando o caminho normal falhou).
+ */
+async function tentarDepoisDeTravar(picked, ms) {
+  const item = picked.item;
+  const jid = String(picked.jid);
+  if (!CFG.retryOnHang) return { reenviou: false, motivo: 'SEND_RETRY_ON_HANG=0' };
+
+  // a função de envio fica em `item.run` (o item é o registro da fila)
+  const funcao = item.run;
+  if (funcao && typeof funcao.dropQuote === 'function') funcao.dropQuote();
+  if (jid.endsWith('@g.us')) {
+    // garante a lista de participantes ANTES: sem ela, o reenvio cairia na
+    // mesma consulta que travou (e o Baileys não tem prazo nela)
+    const meta = await metadata.garantir(jid);
+    if (!meta) {
+      return { reenviou: false, motivo: 'sem metadados do grupo (a consulta travou — não reenvio às cegas)' };
+    }
+  }
+  const msReenvio = Number(CFG.sendRetryTimeoutMs) || 20000;
+  const r = await enviarComPrazo(item, msReenvio);
+  if (r && r.ok) return { reenviou: true, ok: true, res: r.res };
+  if (r && r.travou) return { reenviou: true, ok: false, motivo: `travou de novo (${msReenvio}ms)` };
+  return { reenviou: true, ok: false, motivo: (r && r.err && r.err.message) || 'erro' };
+}
+
+/** Registra o travamento (estado + auditoria + log). */
+function anotarTravamento(picked, ms, retry) {
+  state.travados++;
+  state.lastTravado = {
+    at: new Date().toISOString(),
+    jid: String(picked.jid),
+    kind: picked.item.kind,
+    ms,
+    tentativa2: retry && retry.reenviou ? (retry.ok ? 'ok' : `falhou: ${retry.motivo}`) : `não: ${retry && retry.motivo}`,
+  };
+  saveState(true);
+  logger.error(
+    {
+      chat: String(picked.jid),
+      tipo: picked.item.kind,
+      prazoMs: ms,
+      tentativa2: state.lastTravado.tentativa2,
+    },
+    '[FREIO] envio SEM RESPOSTA dentro do prazo — a mensagem não foi confirmada (o comando rodou, o envio ficou pendurado)'
+  );
+  activity.terminalLine(
+    `[FREIO] envio travado em ${String(picked.jid)} (${picked.item.kind}) — prazo ${Math.round(ms / 1000)}s · reenvio: ${state.lastTravado.tentativa2}`
+  );
+  audit({
+    t: Date.now(),
+    jid: String(picked.jid),
+    kind: picked.item.kind,
+    travou: true,
+    prazoMs: ms,
+    tentativa2: state.lastTravado.tentativa2,
+  });
 }
 
 /* ---------------------- detecção de restrição (auto-pausa) -------------- */
@@ -870,6 +993,9 @@ function attach(sock) {
     const origSendMessage = sock.sendMessage.bind(sock);
     sock.sendMessage = (jid, content, opts = {}) => {
       const kind = classify(content);
+      // opções da tentativa ATUAL — pode ser reduzida (sem citação) pelo
+      // reenvio de erro de montagem aqui embaixo ou pelo freio, se travar
+      let opcoes = opts || {};
       // PONTO ÚNICO DE SAÍDA: se a MONTAGEM da mensagem citada estourar (o que
       // acontecia no grupo de comunidade/LID do dono: `Cannot read properties of
       // undefined (reading 'toString')` — 56 respostas perdidas em 25/09), a
@@ -878,12 +1004,13 @@ function attach(sock) {
       // preservados; só o "responder citando" é abandonado.
       const run = async () => {
         try {
-          return await origSendMessage(jid, content, opts);
+          return await origSendMessage(jid, content, opcoes);
         } catch (err) {
-          if (!opts || !opts.quoted || !erroDeMontagem(err)) throw err;
-          const semCitacao = Object.assign({}, opts);
+          if (!opcoes || !opcoes.quoted || !erroDeMontagem(err)) throw err;
+          const semCitacao = Object.assign({}, opcoes);
           delete semCitacao.quoted;
-          const participante = String((opts.quoted && opts.quoted.key && opts.quoted.key.participant) || '');
+          opcoes = semCitacao;
+          const participante = String((opts && opts.quoted && opts.quoted.key && opts.quoted.key.participant) || '');
           logger.warn(
             {
               chat: String(jid),
@@ -910,6 +1037,16 @@ function attach(sock) {
         }
       };
       run.__content = content;
+      // usado pelo freio quando o envio TRAVA: repete sem a citação (é o
+      // "responder citando" que pendura/estoura em grupo de comunidade/LID)
+      run.dropQuote = () => {
+        if (opcoes && opcoes.quoted) {
+          const copia = Object.assign({}, opcoes);
+          delete copia.quoted;
+          opcoes = copia;
+        }
+        return opcoes;
+      };
       return enqueue(kind, jid, run);
     };
   }
@@ -1042,6 +1179,16 @@ function stats() {
     bloqueios: {
       porConversa: conversasBloqueadas(5),
       total: state.totalBlocked,
+    },
+    // envios que ficaram PENDURADOS (não concluíram no prazo). É o "o comando
+    // roda e a mensagem não aparece": antes isso não aparecia em lugar nenhum.
+    travados: {
+      total: state.travados,
+      ultimo: state.lastTravado,
+      emAndamento: currentSend
+        ? { jid: String(currentSend.jid), kind: currentSend.kind, ms: now - currentSend.startedAt }
+        : null,
+      prazoMs: Number(CFG.sendTimeoutMs) || 0,
     },
     counters: {
       sent: state.totalSent,

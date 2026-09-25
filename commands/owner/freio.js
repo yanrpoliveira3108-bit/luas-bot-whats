@@ -120,6 +120,12 @@ function statusText() {
     '*Contadores*',
     `▸ Enviadas: ${s.counters.sent} · Bloqueadas pelo freio: ${s.counters.blocked}`,
     `▸ Na fila agora: ${s.counters.queuedNow}`,
+    // "o comando roda e a mensagem não aparece" costuma ser ENVIO PENDURADO
+    // (a biblioteca espera a consulta de participantes do grupo, sem prazo).
+    // Antes isso não aparecia em lugar nenhum — agora está no status.
+    `▸ Envios travados (sem resposta): ${s.travados.total}${s.travados.ultimo ? ` · último ${s.travados.ultimo.jid} (${s.travados.ultimo.kind})` : ''}${
+      s.travados.emAndamento ? ` · AGORA: ${s.travados.emAndamento.kind} há ${Math.round(s.travados.emAndamento.ms / 1000)}s` : ''
+    }`,
     `▸ Conversas conhecidas (PV): ${s.chatsConhecidos}`,
     s.lastRestriction ? `▸ Última restrição detectada: ${s.lastRestriction.at}` : '▸ Nenhuma restrição detectada 🎉',
     ...bloqueiosText(),

@@ -144,6 +144,49 @@ com `TypeError` — a resposta nunca saía. Duas proteções entraram:
 Travas: `test/sendfallback.test.js` (4 cenários — reenvio em texto, reenvio no
 menu/lista, sem reenvio em erro de entrega, e o log com stack + `quotedLid`).
 
+### 4.1.3 "Fica escrevendo e não manda nada" — ENVIO PENDURADO (25/09/2026)
+
+Segundo relato do dono, no MESMO grupo (`120363046296961148@g.us`), já com o
+freio corrigido:
+
+> "o bot fica escrevendo infinitamente no chat, isso que acontece, mas quando
+> não tinha o delay ele também não respondia, mas agora ele fica escrevendo e
+> não manda nada, mesmo que no terminal apareça o comando, e ele faça o que o
+> comando pede, não aparece no chat do grupo"
+
+A pista decisiva é o **"escrevendo"**: a presença (`composing`) CHEGA ao
+WhatsApp (o "digitando…" aparece), mas nenhuma mensagem sai. Ou seja: conexão
+boa, comando executando, **envio pendurado** — pendurado não é erro, nenhum
+`catch` pega, e como o freio esperava esse envio, a fila inteira ficava parada.
+
+A causa está no caminho do envio da BIBLIOTECA (`vendor/boruto-vk7-baileys`):
+para montar a mensagem de grupo ela precisa da lista de participantes e faz
+
+```
+let groupData = ... await cachedGroupMetadata(jid)      // messages-send.js:837
+else groupData = await groupMetadata(jid)              // ← consulta SEM prazo
+const groupMetadata = async (jid) => groupQuery(jid,'get',[...])  // groups.js:24
+```
+
+Se o servidor não responde essa consulta (acontece em comunidade/LID), a
+promessa **nunca resolve**. Correções desta versão, em quatro camadas:
+
+| camada | onde | o que faz |
+|---|---|---|
+| cache de metadados | `utils/groupMetadataCache.js` (novo) + `makeWASocket({cachedGroupMetadata})` | o envio de grupo usa metadados guardados (TTL 5 min) e **não faz a consulta**; vencido renova em segundo plano; frio busca **com prazo**; cache aquecido na conexão (`groupFetchAllParticipating`) |
+| prazo de envio | `utils/sendGuard.js` (`SEND_TIMEOUT_MS`, 45 s) | envio que não conclui não pendura mais: registra, libera a fila e **reenvia UMA vez sem citação** (com os metadados já em cache). Sem metadados do grupo, **não reenvia às cegas** |
+| presença | `utils/antiBan.js` (`encerrarPresenca`) | o "digitando…" é SEMPRE desfeito (`paused`) — era isso que ficava eterno |
+| diagnóstico | `scripts/chat-doctor.js` §3.2 + `!freio` | conta e mostra "envios travados (sem resposta)"; a auditoria ganhou `fim`/`travou` por envio (antes só registrava a ACEITAÇÃO, então um envio pendurado parecia entregue) |
+
+Travas: `test/sendhang.test.js` (6 cenários — travamento com prazo + reenvio sem
+citação + fila andando, grupo sem metadados que não é reenviado, presença
+encerrada, cache quente/vencido/travado).
+
+**Como distinguir os dois defeitos (o doctor responde os dois):**
+* envio BARRADO → §1 "Envios BARRADOS > 0" (freio; `!freio bloqueios`);
+* erro de MONTAGEM (TypeError) → §3.1 (reenvio sem citação);
+* envio PENDURADO → §3.2 / `!freio` "Envios travados (sem resposta)".
+
 ### 4.2 Teste controlado (é o que prova a causa)
 
 ```

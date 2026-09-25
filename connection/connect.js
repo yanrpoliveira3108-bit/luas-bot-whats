@@ -253,6 +253,14 @@ async function connect({ phone } = {}) {
     const browserConfig = antiBan.getBrowserConfig(Browsers);
     const markOnline = CONFIG.security ? CONFIG.security.markOnline : false;
 
+    // CACHE DE METADADOS DE GRUPO: sem isto, TODO envio em grupo consulta a
+    // lista de participantes AO VIVO e SEM PRAZO (Socket/messages-send.js:837 →
+    // groups.js:24). Quando o servidor não responde essa consulta — acontecia no
+    // grupo de comunidade/LID do dono (25/09) — o envio fica pendurado para
+    // sempre: o comando roda, o bot fica "digitando…" e nada aparece no chat.
+    // Com `cachedGroupMetadata` a biblioteca usa o cache e não faz a consulta.
+    const groupMetadataCache = require('../utils/groupMetadataCache');
+
     sock = makeWASocket({
       version,
       auth: {
@@ -265,6 +273,9 @@ async function connect({ phone } = {}) {
       generateHighQualityLinkPreview: false,
       syncFullHistory: false,
       markOnlineOnConnect: markOnline,
+      // usado DENTRO do envio de grupo: responde do cache (fresco), renova em
+      // segundo plano (vencido) ou busca com prazo (frio). NUNCA pendura.
+      cachedGroupMetadata: groupMetadataCache.cachedGroupMetadata,
     });
     logger.info(
       { browser: browserConfig[0] + ' ' + browserConfig[1], markOnline },
@@ -278,6 +289,10 @@ async function connect({ phone } = {}) {
     // aparece sinal de restrição. A simulação de "digitando..." (utils/antiBan)
     // continua por cima, para o ritmo parecer humano.
     sendGuard.attach(sock);
+    // metadados de grupo: cache + prazo nas consultas (as dos NOSSOS comandos
+    // também, que até agora podiam pendurar em grupo de comunidade/LID) e
+    // aquecimento em segundo plano com a lista de grupos do número.
+    groupMetadataCache.attach(sock);
     // EXPERIMENTAL (selective payment/text): anexa a API de transporte
     // seletivo ao socket SEM substituí-lo (ver utils/selective.js).
     try {
