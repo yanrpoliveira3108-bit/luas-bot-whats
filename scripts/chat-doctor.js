@@ -77,9 +77,24 @@ function frameDoStack(stack) {
 }
 
 /** Assinatura do erro: módulo + mensagem + primeiro frame (agrupa repetições). */
+/** Frames do stack guardado no log (o 1º aponta a linha exata da falha). */
+function framesDoLog(l, quantos = 3) {
+  const stack = String((l && (l.stack || l.errStack)) || '');
+  if (!stack) return [];
+  const out = [];
+  for (const linha of stack.split('\n')) {
+    const t = linha.trim();
+    if (!t.startsWith('at ')) continue;
+    if (t.includes('node:internal') || t.includes('internal/process')) continue;
+    out.push(t);
+    if (out.length >= quantos) break;
+  }
+  return out;
+}
+
 function assinatura(l) {
   const msg = String(l.err || l.msg || '').replace(/\s+/g, ' ').slice(0, 80);
-  return `${l.module || '?'} | ${msg} | ${frameDoStack(l.stack)}`;
+  return `${l.module || '?'} | ${msg} | ${frameDoStack(l.stack || l.frame)}`;
 }
 
 /** Data (ms) de uma linha de log (campo `time` do pino) ou do freio (`t`). */
@@ -239,6 +254,7 @@ const achados = {
   falhaEnvio: [],
   freio: [],
   comunidade: [],
+  lidNaoResolvido: [],
   outros: [],
 };
 for (const f of arquivos) {
@@ -247,7 +263,8 @@ for (const f of arquivos) {
     if (String(linha.chat || '') !== JID) continue;
     if (linha.t && quando(linha.t) < DESDE) continue;
     const msg = String(linha.msg || '');
-    if (/sendMessage FALHOU|falha ao enviar/i.test(msg)) achados.falhaEnvio.push(linha);
+    if (/não consegui resolver LID/i.test(msg)) achados.lidNaoResolvido.push(linha);
+    else if (/sendMessage FALHOU|falha ao enviar/i.test(msg)) achados.falhaEnvio.push(linha);
     else if (/FREIO/i.test(msg)) achados.freio.push(linha);
     else if (/COMMAND|Comando recebido/i.test(msg)) achados.comandos.push(linha);
     else if (/COMMUNITY|comunidade|LID/i.test(msg)) achados.comunidade.push(linha);
@@ -261,6 +278,16 @@ if (!arquivos.length) {
   L(`Arquivos lidos: ${arquivos.join(', ')}`);
   L(`Comandos recebidos neste chat : ${achados.comandos.length}`);
   for (const c of achados.comandos.slice(-5)) L(`   ${hhmmss(quandoLinha(c))}  ${String(c.msg).slice(0, 70)}`);
+  if (achados.lidNaoResolvido.length) {
+    L(`LID do remetente sem telefone  : ${achados.lidNaoResolvido.length}`);
+    for (const c of achados.lidNaoResolvido.slice(-3)) L(`   ${hhmmss(quandoLinha(c))}  ${String(c.msg).slice(0, 70)}`);
+    L('   ▸ O remetente veio como LID e o telefone não foi encontrado. Sem o telefone');
+    L('     o bot não reconhece o DONO: comandos de dono respondem "Apenas o dono do');
+    L('     bot pode usar este comando" mesmo vindo do seu número.');
+    L('   ▸ Corrigido nesta versão: quando a lista de participantes não traz o');
+    L('     telefone, o bot consulta o mapa LID↔PN da própria biblioteca.');
+    L('     `git pull`, reinicie e mande o comando de novo.');
+  }
   L(`Falhas de envio               : ${achados.falhaEnvio.length}`);
   for (const f of achados.falhaEnvio.slice(-5)) {
     L(`   ${hhmmss(quandoLinha(f))}  [${f.module || '?'}] ${String(f.err || f.msg).slice(0, 80)}`);
@@ -293,12 +320,33 @@ if (comErro.length) {
     const [mod, msg, frame] = a.split(' | ');
     L(`${info.n}×  ${hhmmss(info.ultimo)}  [${mod}] ${msg}`);
     if (frame) L(`      ↳ ${frame}`);
+    // stack completo (versões novas do log): os frames seguintes dizem QUEM
+    // chamou o trecho que estourou — foi assim que a causa raiz apareceu
+    const pilha = framesDoLog(info.exemplo, 4);
+    for (const f of pilha) if (!frame || !frame.includes(f.replace(/^at /, ''))) L(`      ·${f}`);
   }
   if (ordenado.some(([a]) => /Cannot read propert|is not a function/.test(a))) {
     L('');
     L('Leitura: erro de MONTAGEM da mensagem (TypeError). O bot executa o comando e');
     L('a resposta não sai. A partir desta versão o envio é repetido SEM a citação');
     L('quando isso acontece — se ainda falhar, o primeiro frame acima diz o arquivo.');
+  }
+
+  // CAUSA RAIZ JÁ IDENTIFICADA (25/09/2026): o primeiro frame é o cache da
+  // biblioteca recebendo chave inválida. Explicar aqui evita nova caçada.
+  const doCache = comErro.find((l) => /NodeCache\.formatKey/.test(String(l.stack || l.frame || '')));
+  if (doCache) {
+    L('');
+    L('🎯 CAUSA CONHECIDA (confirmada pelo frame acima): um participante do grupo');
+    L('   em modo LID vem SEM id (`id: undefined`), o envio tenta decodificar o jid');
+    L('   desse participante, e o cache de dispositivos da biblioteca recebe');
+    L('   `undefined` → `key.toString()` → TypeError. TODO envio neste grupo falha');
+    L('   (mesmo sem citação — por isso o reenvio sem citação também falha).');
+    L('   ▸ Corrigido nesta versão em 3 camadas: (a) patch na biblioteca para');
+    L('     ignorar destinatário sem jid decodificável; (b) cache blindado');
+    L('     (utils/safeNodeCache.js) — chave inválida vira "miss", nunca derruba;');
+    L('     (c) `userDevicesCache`/signal store passam a usar esse cache.');
+    L('   ▸ `git pull` e REINICIE (é mudança de código carregado na conexão).');
   }
 } else {
   H('3.1 ASSINATURAS DE ERRO NESTE CHAT');
@@ -350,6 +398,15 @@ if (barrados.length) {
   L('     estava ligada por engano no padrão (corrigido em utils/sendGuard.js).');
   L('   ▸ Depois de reiniciar: `!freio bloqueios` deve ficar zerado.');
 } else if (achados.falhaEnvio.length) {
+  const causaCache = achados.falhaEnvio.some((l) => /NodeCache\.formatKey/.test(String(l.stack || l.frame || '')));
+  if (causaCache) {
+    L('🎯 CAUSA CONFIRMADA: cache de dispositivos da biblioteca recebendo chave');
+    L('   inválida (participante de grupo LID sem id). TODO envio neste grupo falhava.');
+    L('   ▸ Corrigido no código (patch na biblioteca + cache blindado). Atualize');
+    L('     (`git pull`) e REINICIE o bot — é código carregado na conexão.');
+    L('   ▸ Depois de reiniciar, mande o comando de novo: se voltar a falhar, o');
+    L('     primeiro frame deste relatório será outro (aí é outro caminho).');
+  } else {
   const tipo = achados.falhaEnvio.some((l) => /Cannot read propert|is not a function/i.test(String(l.err || l.msg)));
   if (tipo) {
     L('🧩 O envio FALHOU por ERRO DE MONTAGEM da mensagem (TypeError). O comando');
@@ -361,6 +418,7 @@ if (barrados.length) {
     L('⚠️  O envio FALHOU (erro do WhatsApp/client). O motivo está nas linhas de');
     L('   "Falhas de envio" acima — "not-authorized"/"forbidden" indica que o');
     L('   número não pode postar neste grupo (ver checklist abaixo).');
+  }
   }
 } else if (travaram.length || travadosEstado) {
   L('⏳ Os ENVIOS ESTÃO TRAVANDO (não é bloqueio do freio nem erro de conteúdo).');

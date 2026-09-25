@@ -103,6 +103,35 @@ function invalidateGroupMeta(jid) {
   groupMeta.invalidate(jid);
 }
 
+/**
+ * Resolve um LID para o telefone (JID PN) usando o mapa da biblioteca
+ * (`signalRepository.lidMapping`). Devolve null quando não há mapa.
+ * Prazo curto: identidade não pode travar o processamento do comando.
+ */
+async function pnPeloMapaDeLid(sock, lid) {
+  try {
+    const mapa = sock && sock.signalRepository && sock.signalRepository.lidMapping;
+    if (!mapa || typeof mapa.getPNForLID !== 'function') return null;
+    let timer = null;
+    const prazo = new Promise((r) => {
+      timer = setTimeout(() => r(null), 3000);
+    });
+    try {
+      const achado = await Promise.race([mapa.getPNForLID(String(lid)), prazo]);
+      if (!achado) return null;
+      const s = String(achado);
+      if (s.endsWith('@lid')) return null;
+      const m = s.match(/^(\d+)(?::\d+)?@/);
+      if (m) return m[1] + '@s.whatsapp.net';
+      return s.includes('@') ? s : null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  } catch (_) {
+    return null;
+  }
+}
+
 /** Primeiro frame do stack (arquivo:linha) — é o que aponta a causa real. */
 function frameDoStack(err) {
   const linhas = String((err && err.stack) || '').split('\n');
@@ -132,8 +161,17 @@ async function buildContext(sock, msg) {
   );
 
   let sender = resolveSender(msg) || remoteJid;
-  if (sender.endsWith('@lid') && participants.length) {
-    const pn = permissions.toPn(sender, participants);
+  if (sender.endsWith('@lid')) {
+    let pn = participants.length ? permissions.toPn(sender, participants) : sender;
+    if (!pn || pn.endsWith('@lid')) {
+      // 2ª tentativa: o mapa LID↔PN da PRÓPRIA biblioteca (o mesmo usado para
+      // cifrar). Em grupo de comunidade/LID a lista de participantes pode vir
+      // sem telefone (mesmo defeito que derrubava o envio — SEGURANCA-ENVIO.md
+      // §4.1.4); sem o PN, o dono deixa de ser reconhecido (`!freio` respondia
+      // "Apenas o dono do bot") e a identidade da pessoa (carteira/registro)
+      // mudaria só por estar num grupo LID.
+      pn = await pnPeloMapaDeLid(sock, sender);
+    }
     if (pn && !pn.endsWith('@lid')) sender = pn;
     else logger.warn({ sender, chat: remoteJid }, 'não consegui resolver LID → PN do remetente');
   }

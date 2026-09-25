@@ -187,6 +187,62 @@ encerrada, cache quente/vencido/travado).
 * erro de MONTAGEM (TypeError) → §3.1 (reenvio sem citação);
 * envio PENDURADO → §3.2 / `!freio` "Envios travados (sem resposta)".
 
+### 4.1.4 CAUSA RAIZ (confirmada no aparelho) — participante sem id derruba o envio
+
+O doctor do aparelho (25/09/2026, grupo `120363046296961148@g.us`) entregou o
+primeiro frame do stack, e com ele a causa exata das 65 falhas de envio:
+
+```
+at NodeCache.formatKey (…/node_modules/@cacheable/node-cache/dist/index.cjs:509:16)
+```
+
+A cadeia, linha por linha:
+
+| # | onde | o que acontece |
+|---|---|---|
+| 1 | `vendor/…/Socket/groups.js:346` | grupo em **modo LID**: o participante é montado como `id: attrs.phone_number`. Sem esse atributo no nó → **`id` = `undefined`** |
+| 2 | `vendor/…/Socket/messages-send.js:243` | o envio faz `jidDecode(jid)` e `decoded?.user`. `jidDecode(undefined)` → **`undefined`** (`WABinary/jid-utils.js:21-25`, não tem `@`) → `user` = `undefined` |
+| 3 | `vendor/…/Socket/messages-send.js:274` | **`userDevicesCache.get(undefined)`** → `NodeCache.formatKey` → `key.toString()` → **TypeError: Cannot read properties of undefined (reading 'toString')** |
+
+Consequência: **todo** envio naquele grupo falhava — inclusive o reenvio sem
+citação (o erro não tem relação com a citação), e nada aparecia no chat. Não era
+o freio (0 barrados), não era conteúdo, não era conexão (o comando rodava).
+
+**Correção em 3 camadas:**
+
+1. **Patch na biblioteca** (`vendor/…/Socket/messages-send.js`, marcado
+   `[LUA-BOT-PATCH]`): destinatário sem jid decodificável é **ignorado** (com
+   aviso no log) em vez de derrubar a mensagem inteira — os demais recebem.
+   ⚠️ Ao atualizar o vendor, este patch precisa ser reaplicado (a marca
+   `[LUA-BOT-PATCH]` facilita localizar; há teste que falha se ele sumir).
+2. **Cache blindado** (`utils/safeNodeCache.js`, novo): a classe usada no
+   `userDevicesCache` e no store de chaves Signal não chama `key.toString()` às
+   cegas — chave ausente vira **miss** (nunca TypeError). Protege também
+   qualquer outro caminho que venha a passar chave inválida.
+3. **Teste de regressão** (`test/vendorfix.test.js`): prova o elo quebrado
+   (`jidDecode(undefined) → undefined`), reproduz o estouro no cache original,
+   prova que o blindado não estoura e que o envio segue atendendo o resto.
+
+**Consequência relacionada (mesmo defeito, outra vítima): quem é o remetente.**
+Em grupo LID a lista de participantes também pode vir sem telefone, e aí o bot
+não consegue converter o remetente `@lid` para o número: `!freio` respondia
+"Apenas o dono do bot pode usar este comando" vinda do próprio dono, e a
+identidade (carteira/registro) mudava só por estar num grupo LID. Correção:
+quando os participantes não trazem o telefone, o bot consulta o **mapa LID↔PN da
+própria biblioteca** (`signalRepository.lidMapping.getPNForLID`, com prazo de
+3 s) em `handlers/commandHandler.js`. O doctor mostra a contagem quando isso
+acontece no chat ("LID do remetente sem telefone"). Trava: teste 7 de
+`test/vendorfix.test.js`.
+
+**Como o doctor responde cada caso:**
+
+| sintoma | onde ele mostra |
+|---|---|
+| freio barrou (mensagem descartada) | §1 "Envios BARRADOS" · `!freio bloqueios` |
+| erro de MONTAGEM (citação) | §3.1 + "reenvio sem citação" |
+| envio PENDURADO (nada sai, "digitando" eterno) | §3.2 + `!freio` "Envios travados" |
+| **causa raiz do TypeError (este caso)** | §3.1 traz a pilha; a leitura aponta `NodeCache.formatKey` e a correção |
+
 ### 4.2 Teste controlado (é o que prova a causa)
 
 ```

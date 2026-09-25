@@ -260,12 +260,16 @@ async function connect({ phone } = {}) {
     // sempre: o comando roda, o bot fica "digitando…" e nada aparece no chat.
     // Com `cachedGroupMetadata` a biblioteca usa o cache e não faz a consulta.
     const groupMetadataCache = require('../utils/groupMetadataCache');
+    const safeNodeCache = require('../utils/safeNodeCache');
 
     sock = makeWASocket({
       version,
       auth: {
         creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, baileysLogger()),
+        // 3º argumento = o cache da biblioteca: usamos a versão blindada
+        // (utils/safeNodeCache.js) — uma chave inválida vira "miss" em vez de
+        // TypeError que derruba o envio
+        keys: makeCacheableSignalKeyStore(state.keys, baileysLogger(), safeNodeCache.criar({}, 'signalStore')),
       },
       printQRInTerminal: false, // QR desabilitado por design
       browser: browserConfig,
@@ -276,6 +280,11 @@ async function connect({ phone } = {}) {
       // usado DENTRO do envio de grupo: responde do cache (fresco), renova em
       // segundo plano (vencido) ou busca com prazo (frio). NUNCA pendura.
       cachedGroupMetadata: groupMetadataCache.cachedGroupMetadata,
+      // cache de dispositivos por usuário: é ele que estourava
+      // "Cannot read properties of undefined (reading 'toString')" quando um
+      // participante do grupo (modo LID) vinha sem id (NodeCache.formatKey).
+      // Esta versão não lança — uma chave inválida vira um "miss".
+      userDevicesCache: safeNodeCache.criar(),
     });
     logger.info(
       { browser: browserConfig[0] + ' ' + browserConfig[1], markOnline },
