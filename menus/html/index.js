@@ -70,8 +70,27 @@ function montarInfo(ctx) {
   } catch (_) {
     /* tema indisponível: segue com o padrão */
   }
+  // Identificação (solicitante/prefixo/dono/conta conectada) e aparência
+  // (!temahtml) são lidas A CADA menu: troca de prefixo, dono, sessão ou tema
+  // vale no próximo card. Cada uma falha sozinha, sem impedir o menu.
+  let ident = null;
+  try {
+    ident = require('../../utils/menuIdentity').coletar(ctx);
+  } catch (_) {
+    ident = null;
+  }
+  let visual = null;
+  try {
+    visual = require('../../utils/htmlTheme').get();
+  } catch (_) {
+    visual = null;
+  }
+  const prefix = (ident && ident.prefixo) || settings.effectivePrefix() || CONFIG.bot.prefix;
+  if (ident) ident.prefixo = prefix;
   return {
-    prefix: settings.effectivePrefix() || CONFIG.bot.prefix,
+    ident,
+    visual,
+    prefix,
     botName: CONFIG.bot.name,
     version: CONFIG.bot.version,
     botEmoji: emoji,
@@ -164,7 +183,7 @@ function montarDocumento(ctx, opts = {}) {
  */
 async function enviar(ctx, opts = {}) {
   try {
-    const { html, grupo } = montarDocumento(ctx, opts);
+    const { html, grupo, info } = montarDocumento(ctx, opts);
     if (!html || html.length < 64) return false;
 
     // richHtml aplica o modo seguro (card é payload de "bot IA"): se estiver
@@ -174,8 +193,9 @@ async function enviar(ctx, opts = {}) {
     // ATENÇÃO: pelos relatos de quem mediu o WebView, ele NÃO libera rede nem
     // navegação (host dentro e fora da lista: os dois falhavam). Não conte com
     // isso para link nenhum.
+    const semEmoji = !!(info && info.visual && info.visual.emojis === false);
     await richHtml.sendHtml(ctx.socket, ctx.remoteJid, html, {
-      title: `🌙 ${grupo.titulo}`,
+      title: semEmoji ? grupo.titulo : `🌙 ${grupo.titulo}`,
       trustedSources: ['nixel.dev'],
     });
     // ATENÇÃO: entregar ao socket NÃO prova que o aparelho renderizou o card

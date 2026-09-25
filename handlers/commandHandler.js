@@ -31,6 +31,8 @@ const numberFallback = require('../utils/numberFallback');
 const interactive = require('../utils/interactive');
 const perf = require('../utils/perf');
 const antiBan = require('../utils/antiBan');
+const contextReact = require('../utils/contextReact');
+const prefixReply = require('../utils/prefixReply');
 const {
   extractText,
   getQuoted,
@@ -338,7 +340,9 @@ async function buildContext(sock, msg) {
     antiBan.enqueueOutbound(() =>
       mediaUtil.sendDocument(sock, remoteJid, b, Object.assign({ quoted: msg }, opts))
     );
-  ctx.react = (emoji) => sock.sendMessage(remoteJid, { react: { text: emoji, key: msg.key } }).catch(() => {});
+  // serializada por mensagem (utils/contextReact): a reação temática e as que
+  // os comandos já faziam nunca disputam a mesma mensagem; nunca lança
+  ctx.react = (emoji) => contextReact.enviar(sock, msg, emoji);
   ctx.deleteMessage = (key) => sock.sendMessage(remoteJid, { delete: key || msg.key }).catch(() => {});
   ctx.presence = (state) => sock.sendPresenceUpdate(state, remoteJid).catch(() => {});
   ctx.downloadMedia = async () => {
@@ -648,19 +652,26 @@ async function handleMessage(sock, msg, type) {
         { tag: 'COMMAND', chat: ctx.remoteJid, sender: ctx.sender, fromMe: !!(msg.key && msg.key.fromMe) },
         `[LUA][COMMAND] Comando recebido: ${parsed.raw.split('\n')[0].slice(0, 80)}`
       );
+      // reação temática (não bloqueia e não significa sucesso do comando)
+      contextReact.reagirComando(ctx, cmd);
       await executeCommand(ctx, cmd, parsed.args);
       return;
     }
 
     const bare = (ctx.text || '').trim().toLowerCase();
-    if (bare === 'prefixo' || bare === 'prefix') {
-      if (!ctx.isGroup && !ctx.isOwner && CONFIG.security?.silentPv) return;
-      await ctx.reply(`🔤 Prefixo atual: *${prefix}*\n\n💡 Use *${prefix}menu* para ver os comandos.`);
+    // resposta citando uma mensagem DA CONTA CONECTADA (metadados reais da citação)
+    const respondeBot = contextReact.respondeAoBot(sock, msg);
+    const pvSilencioso = !ctx.isGroup && !ctx.isOwner && CONFIG.security?.silentPv;
+    if (bare === 'prefixo' || bare === 'prefix' || (respondeBot && prefixReply.ehPedidoDePrefixo(ctx.text))) {
+      if (pvSilencioso) return;
+      contextReact.reagirTopico(ctx, 'tecnico');
+      await ctx.reply(prefixReply.textoPrefixo(ctx));
       return;
     }
 
     if (bare === 'menu' || bare === 'menuprincipal') {
-      if (!ctx.isGroup && !ctx.isOwner && CONFIG.security?.silentPv) return;
+      if (pvSilencioso) return;
+      contextReact.reagirTopico(ctx, 'menu');
       await require('../utils/buttons').sendMainMenu(ctx);
       return;
     }
@@ -681,6 +692,7 @@ async function handleMessage(sock, msg, type) {
 
     const item = numberFallback.match(ctx.remoteJid, ctx.text);
     if (item && typeof item.run === 'function') {
+      contextReact.reagirTopico(ctx, 'menu');
       try {
         await item.run(ctx);
       } catch (err) {
@@ -688,6 +700,10 @@ async function handleMessage(sock, msg, type) {
       }
       return;
     }
+
+    // Resposta ao bot sem comando: SÓ a reação pertinente (nenhum texto
+    // automático, nenhum comando executado).
+    if (respondeBot && !pvSilencioso) contextReact.reagirResposta(ctx);
   } catch (err) {
     logger.error({ err: err.message, stack: err.stack }, 'erro no processamento de mensagem');
   }

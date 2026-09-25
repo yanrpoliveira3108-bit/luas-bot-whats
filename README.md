@@ -21,6 +21,7 @@ Bot WhatsApp **modular, estável, seguro e profissional**, construído com **Nod
 - [Troubleshooting](#troubleshooting)
 - [Jogos com aposta (caça ao tesouro e tigrinho)](#jogos-com-aposta-caça-ao-tesouro-e-tigrinho)
 - [Restrição de conta / segurança de envio](#restrição-de-conta--segurança-de-envio)
+- [Horário do grupo, reações e aparência](#horário-do-grupo-reações-e-aparência)
 - [Recuperação](#recuperação)
 - [Desenvolvimento](#desenvolvimento)
 - [Testes](#testes)
@@ -259,6 +260,7 @@ Todas as variáveis ficam em `.env` (nunca versionado). Veja `.env.example` comp
 | `LUA_THEME` | Tema visual (`LUA_NIGHT`, `LUA_VIOLET`, `LUA_GALAXY`, etc.) |
 | `LUA_UI_MODE` | Modo de menu (`text`, `buttons`, `auto`) |
 | `LUA_READMORE` | "Ler mais" em mensagens longas |
+| `BOT_TIMEZONE` | Fuso do `!horariogrupo` (padrão `America/Sao_Paulo`) |
 
 ### Segurança de envio (anti-restrição) — leia antes de tirar do padrão
 
@@ -547,6 +549,23 @@ lista/botões e pagamento.
 
 Regras completas, causas e como verificar: **[APAGAR-E-DONO.md](APAGAR-E-DONO.md)**.
 
+## Horário do grupo, reações e aparência
+
+- **`!horariogrupo 08:00 23:00`** abre e fecha o grupo sozinho (`abrir HH:MM`,
+  `fechar HH:MM`, `on`, `off`, `status`). É por grupo, persiste entre reinícios
+  e usa o fuso `BOT_TIMEZONE`. O bot precisa estar online e ser admin do grupo.
+- **Reações contextuais**: um emoji por mensagem em comandos reconhecidos e em
+  respostas às mensagens do bot (💻 prefixo, 🧭 menu, ⏰ horário…).
+- **`!prefix`** (ou responder ao bot com "prefixo") mostra o prefixo efetivo e o
+  atalho do menu.
+- **`!tema titulo <estilo>`**: estilo opcional dos títulos (clássico,
+  tecnológico, moderno).
+- **Menus HTML**: painel de identificação (quem pediu, prefixo, dono, bot) e
+  **`!temahtml`** para cores, temas prontos, fonte e emojis (global, dono).
+
+Detalhes, regras e onde fica cada configuração:
+**[HORARIO-REACOES-APARENCIA.md](HORARIO-REACOES-APARENCIA.md)**.
+
 ## Recuperação
 
 ### Backup automático
@@ -650,6 +669,9 @@ node test/migration.test.js   # migrações
 node test/life.test.js        # Lua Life (23 regressões)
 node test/e2e.test.js         # pipeline ponta a ponta
 node test/sendguard.test.js   # freio de envio + modo seguro (anti-restrição)
+node test/horariogrupo.test.js # !horariogrupo (fuso, meia-noite, reconciliação, timers)
+node test/reacoes.test.js     # reações contextuais + resposta de prefixo
+node test/temahtml.test.js    # !temahtml + painel de identificação dos menus HTML
 node scripts/restricao.js     # auditoria de restrição (lê os logs do bot)
 node scripts/diagnose.js      # diagnóstico ambiente
 node scripts/sticker-selftest.js # teste pipeline sticker

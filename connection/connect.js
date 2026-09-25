@@ -515,6 +515,13 @@ function handleConnectionUpdate(update, sockRef) {
       'identidade do bot (id + lid)'
     );
     sessionRecovery.backupCreds().catch(() => {});
+    // Horário automático dos grupos (!horariogrupo): re-arma as programações
+    // salvas e reconcilia o estado UMA vez (boot e reconexões, sem duplicar).
+    try {
+      require('../utils/groupSchedule').onConnected();
+    } catch (err) {
+      logger.warn({ err: err && err.message }, 'horário dos grupos: falha ao recuperar programações');
+    }
     emitStatus({ type: 'open', jid: sockRef.user && sockRef.user.id });
     return;
   }

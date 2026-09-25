@@ -379,6 +379,15 @@ lista completa pelo menu tradicional.
 
 ---
 
+### 3.1 Painel de identificação e aparência (`!temahtml`)
+
+Todo card de menu mostra no cabeçalho um painel 2×2: **Pedido por**,
+**Prefixo**, **Dono** e **Bot**. Ele substituiu a linha "Prefixo • N comandos"
+e deixou o cabeçalho 4 px menor. LID nunca aparece como telefone. Cores, tema
+pronto, fonte e emojis decorativos são configurados com `!temahtml` (escopo
+global, só o dono altera). Sem configuração, o CSS gerado é **idêntico** ao
+anterior. Detalhes: [HORARIO-REACOES-APARENCIA.md](HORARIO-REACOES-APARENCIA.md).
+
 ## 4. Como o card é enviado
 
 Mesmo caminho já comprovado no bot pelo `!ping2` e `!tigrinho`

@@ -84,12 +84,15 @@ function setaVertical(id, dir, rotulo) {
 function documento(info, grupo, opts = {}) {
   const categorias = grupo.categorias || [];
   const inicial = String(opts.foco || grupo.inicial || '');
-  const abas = categorias.map((c) => comp.abaDeCategoria(c)).join('');
+  // emojis decorativos (!temahtml emojis on/off) — controlados na ORIGEM
+  const emojis = !(info.visual && info.visual.emojis === false);
+  const abas = categorias.map((c) => comp.abaDeCategoria(c, { emojis })).join('');
   const secoes = categorias
     .map((c) =>
       comp.secaoDeCategoria(c, c.comandos, {
         prefix: info.prefix,
         emojiDe: emojiDeComando,
+        emojis,
         compacto: opts.compacto,
         avisoCorte: c.avisoCorte,
       })
@@ -98,7 +101,7 @@ function documento(info, grupo, opts = {}) {
 
   const rotuloInicial = (() => {
     const c = categorias.find((x) => x.id === inicial);
-    return c ? `${c.emoji} ${c.title}` : grupo.titulo;
+    return c ? (emojis ? `${c.emoji} ${c.title}` : c.title) : grupo.titulo;
   })();
 
   const cabecalho = comp.cabecalho({
@@ -109,6 +112,8 @@ function documento(info, grupo, opts = {}) {
     total: grupo.total,
     categoriaLabel: rotuloInicial,
     escopoTexto: info.escopoTexto,
+    ident: info.ident,
+    emojis,
   });
 
   // Faixa de categorias com as setas nas EXTREMIDADES: [←][ rolagem ][→].
@@ -139,7 +144,7 @@ function documento(info, grupo, opts = {}) {
     buscaHtml +
     '<main id="lua-list" tabindex="-1" aria-label="Comandos da categoria">' +
     (secoes || '<p class="empty">Nenhum comando carregado.</p>') +
-    '<p class="empty" id="lua-empty" hidden>🔎 Nada encontrado. Tente outro termo.</p>' +
+    `<p class="empty" id="lua-empty" hidden>${emojis ? '🔎 ' : ''}Nada encontrado. Tente outro termo.</p>` +
     // o aviso de corte (se houver) vai para o RODAPÉ: no topo ele empurrava o
     // primeiro comando para fora da área visível em WebView baixo
     comp.rodape({ prefix: info.prefix, avisoCorte: (categorias.find((c) => c.avisoCorte) || {}).avisoCorte }) +
@@ -174,8 +179,8 @@ function documento(info, grupo, opts = {}) {
     '<meta name="viewport" content="width=device-width,initial-scale=1">' +
     `<title>${comp.escapeHtml(info.botName)} • ${comp.escapeHtml(grupo.titulo)}</title>` +
     travarAltura(info.altura) +
-    `<style>${buildCss()}</style></head>` +
-    `<body data-prefix="${comp.escapeAttr(info.prefix)}"><div class="wrap" id="lua-menu">` +
+    `<style>${buildCss({ visual: info.visual })}</style></head>` +
+    `<body data-prefix="${comp.escapeAttr(info.prefix)}"${emojis ? '' : ' data-emojis="0"'}><div class="wrap" id="lua-menu">` +
     `<div class="screens" id="lua-screens">${telaLista}${telaPainel}</div>` +
     barraVertical +
     '</div>' +

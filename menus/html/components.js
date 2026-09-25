@@ -93,7 +93,9 @@ function botaoUsar(cmd, opts = {}) {
  */
 function cartaoDeComando(cmd, opts = {}) {
   const prefix = opts.prefix || '!';
-  const emoji = opts.emoji || '▸';
+  // emoji === null → emojis decorativos desligados (!temahtml emojis off): o
+  // ícone some na ORIGEM e a coluna dele não ocupa espaço
+  const emoji = opts.emoji === null ? null : opts.emoji || '▸';
   const trigger = (cmd.commands && cmd.commands[0]) || cmd.name;
   const linha = `${prefix}${trigger}`;
   const exemplos = String(cmd.usage || '').trim() || linha;
@@ -108,7 +110,7 @@ function cartaoDeComando(cmd, opts = {}) {
 
   return (
     `<article class="cmd" data-cat="${escapeAttr(opts.categoria || '')}">` +
-    `<div class="ico">${escapeHtml(emoji)}</div>` +
+    (emoji ? `<div class="ico">${escapeHtml(emoji)}</div>` : '') +
     '<div class="body">' +
     // "Usar" fica NA MESMA LINHA do nome (empurrado para a direita): assim a
     // descrição ocupa a largura inteira e o cartão fica bem mais baixo — o que
@@ -124,11 +126,14 @@ function cartaoDeComando(cmd, opts = {}) {
 }
 
 /** Botão de aba de categoria. */
-function abaDeCategoria(cat) {
+function abaDeCategoria(cat, opts = {}) {
   const id = escapeAttr(cat.id);
+  const comEmoji = opts.emojis !== false;
+  const rotulo = comEmoji ? cat.label : cat.title;
   return (
-    `<button class="tab" type="button" data-cat="${id}" data-label="${escapeAttr(cat.label)}">` +
-    `<span>${escapeHtml(cat.emoji)}</span><span>${escapeHtml(cat.title)}</span>` +
+    `<button class="tab" type="button" data-cat="${id}" data-label="${escapeAttr(rotulo)}">` +
+    (comEmoji ? `<span>${escapeHtml(cat.emoji)}</span>` : '') +
+    `<span>${escapeHtml(cat.title)}</span>` +
     `<span class="count">${escapeHtml(String(cat.count))}</span>` +
     '</button>'
   );
@@ -146,14 +151,16 @@ function secaoDeCategoria(cat, comandos, opts = {}) {
     cartaoDeComando(c, {
       prefix: opts.prefix,
       categoria: cat.id,
-      emoji: opts.emojiDe ? opts.emojiDe(c) : '▸',
+      emoji: opts.emojis === false ? null : opts.emojiDe ? opts.emojiDe(c) : '▸',
       compacto: opts.compacto,
     })
   );
   const vazio = '<p class="empty">Nenhum comando carregado nesta categoria.</p>';
   return (
     `<section class="sec" data-cat="${escapeAttr(cat.id)}">` +
-    `<h2 class="sec-title"><span>${escapeHtml(cat.emoji)}</span><span>${escapeHtml(cat.title)}</span>` +
+    '<h2 class="sec-title">' +
+    (opts.emojis === false ? '' : `<span>${escapeHtml(cat.emoji)}</span>`) +
+    `<span>${escapeHtml(cat.title)}</span>` +
     `<span class="pill">${escapeHtml(String(comandos.length))}</span>` +
     (cat.description ? `<span class="sec-desc">${escapeHtml(cat.description)}</span>` : '') +
     '</h2>' +
@@ -162,11 +169,47 @@ function secaoDeCategoria(cat, comandos, opts = {}) {
   );
 }
 
+/**
+ * Painel COMPACTO de identificação (componente único, usado por todos os
+ * menus HTML). Dados crus vêm de utils/menuIdentity.js; aqui tudo é escapado.
+ * Solicitante ≠ dono do bot ≠ conta conectada — cada um no seu campo, com
+ * rótulo explícito. Valores longos: uma linha com reticências (o valor
+ * inteiro fica no `title`). Dado não resolvido → texto honesto, nunca um
+ * número inventado nem um identificador interno.
+ */
+function painelIdentidade(ident, extra = {}) {
+  const id = ident || {};
+  const celula = (rotulo, valorHtml, titulo) =>
+    `<span class="idp-c" title="${escapeAttr(titulo)}">${rotulo} ${valorHtml}</span>`;
+  const sol = id.solicitante && id.solicitante.texto;
+  const dono = id.dono && id.dono.texto;
+  const botNum = id.bot && id.bot.numero;
+  const botNome = id.bot && id.bot.nome;
+  const prefixo = id.prefixo || extra.prefix || '';
+  const total = extra.total !== undefined ? ` • ${escapeHtml(String(extra.total))} cmds` : '';
+  const botHtml = botNum
+    ? `<b>${escapeHtml(botNum)}</b>${botNome ? ' · ' + escapeHtml(botNome) : ''}`
+    : botNome
+      ? `<b>${escapeHtml(botNome)}</b> · <i>número indisponível</i>`
+      : '<i>indisponível</i>';
+  return (
+    '<div class="idp" role="group" aria-label="Identificação deste menu">' +
+    // grade 2x2: [pedido por | prefixo] / [dono | bot]. No Bot o NÚMERO vem
+    // antes do nome: se precisar de reticências, corta o nome, não o número
+    celula('Pedido por', sol ? `<b>${escapeHtml(sol)}</b>` : '<i>não identificado</i>', `Solicitado por: ${sol || 'não identificado'}`) +
+    celula('Prefixo', `<b>${escapeHtml(prefixo)}</b>${total}`, `Prefixo deste chat: ${prefixo}`) +
+    celula('Dono', dono ? `<b>${escapeHtml(dono)}</b>` : '<i>não configurado</i>', `Dono do bot: ${dono || 'não configurado'}`) +
+    celula('Bot', botHtml, `Conta conectada: ${[botNum, botNome].filter(Boolean).join(' · ') || 'indisponível'}`) +
+    '</div>'
+  );
+}
+
 /** Cabeçalho com identificação do bot, prefixo e categoria ativa. */
 function cabecalho(info) {
+  const comEmoji = info.emojis !== false;
   return (
-    '<header class="head">' +
-    `<div class="logo">${escapeHtml(info.emoji || '🌙')}</div>` +
+    `<header class="head${comEmoji ? '' : ' sem-emoji'}">` +
+    (comEmoji ? `<div class="logo">${escapeHtml(info.emoji || '🌙')}</div>` : '') +
     '<div class="head-txt">' +
     // duas linhas (nome + categoria na mesma; prefixo/comandos embaixo): cada
     // linha a mais aqui é um pedaço de comando a menos na tela.
@@ -174,9 +217,11 @@ function cabecalho(info) {
     `<span class="bot-name">${escapeHtml(info.botName)} <span class="bot-meta">v${escapeHtml(info.version)}</span></span>` +
     `<span class="cat-name" id="lua-cat-label">${escapeHtml(info.categoriaLabel || 'Menu principal')}</span>` +
     '</div>' +
-    `<div class="bot-meta">Prefixo <b>${escapeHtml(info.prefix)}</b> • ${escapeHtml(String(info.total))} comandos • ` +
-    `${escapeHtml(info.escopoTexto || 'preferências do bot')}</div>` +
     '</div>' +
+    // o painel de identificação SUBSTITUI a antiga linha de meta (prefixo +
+    // total) e ocupa a largura INTEIRA do cabeçalho (abaixo do logo), para os
+    // números caberem sem corte em telas de celular
+    painelIdentidade(info.ident || { prefixo: info.prefix }, { prefix: info.prefix, total: info.total }) +
     '</header>'
   );
 }
@@ -218,5 +263,6 @@ module.exports = {
   abaDeCategoria,
   secaoDeCategoria,
   cabecalho,
+  painelIdentidade,
   rodape,
 };

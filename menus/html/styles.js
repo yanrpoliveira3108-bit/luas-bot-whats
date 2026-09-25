@@ -50,15 +50,23 @@ function themeVars() {
  * A página não rola. As setas (.snav na faixa, .vnav na barra vertical) são
  * irmãs dessas áreas, com espaço reservado — nunca posicionadas sobre elas.
  */
-function buildCss() {
+function buildCss(opts = {}) {
+  // Aparência personalizada (!temahtml): variáveis que SOBRESCREVEM as do
+  // !tema. Vazio = visual padrão do projeto (nada muda para quem não configurou).
+  let extra = '';
+  try {
+    extra = require('../../utils/htmlTheme').cssOverrides(opts.visual);
+  } catch (_) {
+    extra = '';
+  }
   return `
-:root{${themeVars()};--lua-radius:14px;--lua-gap:10px}
+:root{${themeVars()};--lua-radius:14px;--lua-gap:10px${extra ? ';' + extra : ''}}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 /* [hidden] tem que vencer o display:flex dos componentes (senão a tela fica
    "sobreposta": o JS esconde e o CSS mostra de novo). */
 [hidden]{display:none!important}
 html,body{margin:0;padding:0;background:var(--lua-bg,#05030A);color:var(--lua-text,#fff)}
-body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:${s(15)};line-height:1.45}
+body{font-family:var(--lua-font,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif);font-size:${s(15)};line-height:1.45}
 #__wrap{padding:0 ${DIM.folgaLateral}px ${DIM.folgaInferior}px;align-items:center}
 /* CAUSA (corrigida): com margin:0 auto num flex em COLUNA, o item deixa de ser
    esticado e passa a ser dimensionado pelo conteúdo (fit-content). Como o
@@ -80,9 +88,9 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
 }
 
 /* ---------- cabeçalho ---------- */
-.head{flex:0 0 auto;min-width:0;display:flex;align-items:center;gap:9px;padding:8px 0 6px;
-  border-bottom:1px solid rgba(255,255,255,.10)}
-.logo{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-size:${s(20)};
+.head{flex:0 0 auto;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:4px 9px;padding:7px 0 6px;
+  border-bottom:1px solid var(--lua-line,rgba(255,255,255,.10))}
+.logo{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;font-size:${s(16)};
   background:linear-gradient(135deg,var(--lua-primary,#8B5CF6),var(--lua-primary-dark,#4C1D95));
   box-shadow:0 0 14px var(--lua-glow,rgba(139,92,246,.5))}
 .head-txt{flex:1;min-width:0}
@@ -91,6 +99,14 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
 .bot-meta{font-size:${s(12)};color:var(--lua-text-secondary,#B8A9D9)}
 .cat-name{font-size:${s(13)};font-weight:600;color:var(--lua-neon,#C084FC);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:52%}
+/* painel de identificação (solicitante · prefixo · dono · bot): 2x2 compacto,
+   cada célula em UMA linha com reticências — nome longo nunca empurra o layout */
+.idp{flex:1 0 100%;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1px 6px;
+  font-size:${s(9.6)};line-height:1.3;letter-spacing:-.1px;color:var(--lua-text-secondary,#B8A9D9)}
+.idp-c{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.idp-c b{color:var(--lua-text,#fff);font-weight:600}
+.idp-c i{font-style:italic;opacity:.85}
+.head.sem-emoji{padding-left:2px}
 
 /* ---------- abas de categoria (faixa rolável entre as setas) ---------- */
 .tabsrow{flex:0 0 auto;display:flex;align-items:center;gap:4px}
@@ -98,16 +114,16 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
   scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;touch-action:pan-x}
 /* setas: fora das áreas que rolam (nunca cobrem conteúdo) */
 .snav,.vnav{display:inline-flex;align-items:center;justify-content:center;border-radius:13px;
-  border:1px solid rgba(255,255,255,.16);background:var(--lua-card,#120A1F);color:var(--lua-text,#fff);
+  border:1px solid var(--lua-border,rgba(255,255,255,.16));background:var(--lua-card,#120A1F);color:var(--lua-text,#fff);
   font-weight:700;line-height:1;cursor:pointer}
 .snav{flex:0 0 auto;width:${DIM.snav}px;min-height:${DIM.snav}px;font-size:${s(16)}}
 .snav:active,.vnav:active{transform:translateY(1px)}
 .snav[disabled],.vnav[disabled]{opacity:.32;cursor:default;transform:none}
 .tab{flex:0 0 auto;min-height:${DIM.tabAltura}px;display:flex;align-items:center;gap:5px;padding:8px 12px;border-radius:999px;
-  border:1px solid rgba(255,255,255,.14);background:var(--lua-card,#120A1F);color:var(--lua-text,#fff);
+  border:1px solid var(--lua-border,rgba(255,255,255,.14));background:var(--lua-card,#120A1F);color:var(--lua-text,#fff);
   font-size:${s(12.5)};font-weight:600;cursor:pointer;white-space:nowrap}
 .tab.active{background:linear-gradient(135deg,var(--lua-primary,#8B5CF6),var(--lua-primary-dark,#4C1D95));
-  border-color:transparent;box-shadow:0 0 12px var(--lua-glow,rgba(139,92,246,.45))}
+  color:var(--lua-on-primary,#fff);border-color:var(--lua-secondary,transparent);box-shadow:0 0 12px var(--lua-glow,rgba(139,92,246,.45))}
 /* O contador por aba sai da faixa: com ele, só UMA categoria cabia na largura
    da tela. O número continua logo abaixo, no título da seção ("GERAL 30
    COMANDOS"), sem ocupar a faixa. */
@@ -116,7 +132,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
 /* ---------- busca (fixa) ---------- */
 .searchbar{flex:0 0 auto;min-width:0;padding:0 0 6px}
 .searchbar input{width:100%;min-width:0;min-height:${DIM.busca}px;padding:9px 15px;border-radius:var(--lua-radius);
-  border:1px solid rgba(255,255,255,.14);background:var(--lua-bg-secondary,#0B0614);color:var(--lua-text,#fff);
+  border:1px solid var(--lua-border,rgba(255,255,255,.14));background:var(--lua-bg-secondary,#0B0614);color:var(--lua-text,#fff);
   font-size:${s(15)};outline:none}
 .searchbar input:focus{border-color:var(--lua-primary,#8B5CF6)}
 
@@ -135,17 +151,17 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
    comando ~120px para baixo (num WebView baixo, nenhum comando inteiro aparecia) */
 .sec-desc{font-size:${s(12)};font-weight:400;text-transform:none;letter-spacing:0;
   color:var(--lua-text-secondary,#B8A9D9);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.foot-corte{display:block;margin-top:4px;color:#FDE68A}
+.foot-corte{display:block;margin-top:4px;color:var(--lua-warn-text,#FDE68A)}
 .sec-desc{font-size:${s(12.5)};color:var(--lua-text-secondary,#B8A9D9);margin:0 0 10px}
-.pill{font-size:${s(11)};padding:2px 8px;border-radius:999px;background:rgba(255,255,255,.08);font-weight:600}
+.pill{font-size:${s(11)};padding:2px 8px;border-radius:999px;background:var(--lua-chip,rgba(255,255,255,.08));font-weight:600}
 
 /* ---------- comando ---------- */
 .cmd{display:flex;gap:9px;align-items:flex-start;padding:${DIM.cartaoPadding}px;margin-bottom:8px;border-radius:var(--lua-radius);
-  background:var(--lua-card,#120A1F);border:1px solid rgba(255,255,255,.08)}
+  background:var(--lua-card,#120A1F);border:1px solid var(--lua-border-soft,rgba(255,255,255,.08))}
 .cmd .ico{font-size:${s(17)};line-height:1.3;flex:0 0 ${DIM.icone}px;text-align:center}
 .cmd .body{flex:1;min-width:0}
 .cmd .top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.cmd code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:${s(14)};font-weight:700;
+.cmd code{font-family:var(--lua-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:${s(14)};font-weight:700;
   color:var(--lua-neon,#C084FC);word-break:break-all}
 /* A descrição é limitada a ${DIM.descLinhas} linhas e o texto completo aparece no painel do "Usar":
    é isso que mantém o cartão baixo e vários comandos visíveis por tela. */
@@ -156,55 +172,55 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
 .cmd .ex code{font-size:${s(12)};font-weight:500;color:var(--lua-text-secondary,#B8A9D9)}
 .cmd .top .go{margin-left:auto}
 .go{flex:0 0 auto;min-height:${DIM.botaoUsar}px;display:inline-flex;align-items:center;padding:0 15px;border:0;
-  border-radius:999px;font-size:${s(13)};font-weight:700;color:#fff;cursor:pointer;
+  border-radius:999px;font-size:${s(13)};font-weight:700;color:var(--lua-on-primary,#fff);cursor:pointer;
   background:linear-gradient(135deg,var(--lua-primary,#8B5CF6),var(--lua-primary-dark,#4C1D95))}
 .go:active{transform:translateY(1px)}
 .go:focus-visible,.tab:focus-visible,.pn-copy:focus-visible,.pn-back:focus-visible,#lua-top:focus-visible,
 #lua-q:focus-visible,.vnav:focus-visible,.snav:focus-visible,.vtop:focus-visible{
-  outline:2px solid var(--lua-neon,#C084FC);outline-offset:2px}
+  outline:2px solid var(--lua-secondary,var(--lua-neon,#C084FC));outline-offset:2px}
 .tag{font-size:${s(10.5)};font-weight:700;padding:2px 7px;border-radius:999px;text-transform:uppercase;letter-spacing:.4px}
-.tag.dono{background:rgba(250,204,21,.16);color:#FACC15}
-.tag.grupo{background:rgba(96,165,250,.16);color:#93C5FD}
-.tag.admin{background:rgba(248,113,113,.16);color:#FCA5A5}
-.tag.pv{background:rgba(52,211,153,.16);color:#6EE7B7}
+.tag.dono{background:rgba(250,204,21,.16);color:var(--lua-tag-dono,#FACC15)}
+.tag.grupo{background:rgba(96,165,250,.16);color:var(--lua-tag-grupo,#93C5FD)}
+.tag.admin{background:rgba(248,113,113,.16);color:var(--lua-tag-admin,#FCA5A5)}
+.tag.pv{background:rgba(52,211,153,.16);color:var(--lua-tag-pv,#6EE7B7)}
 
 /* ---------- painel do "Usar" ---------- */
 .pn-top{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:10px 0 6px;
-  border-bottom:1px solid rgba(255,255,255,.10)}
+  border-bottom:1px solid var(--lua-line,rgba(255,255,255,.10))}
 #lua-panel-body{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;padding-right:2px;
   -webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y;scrollbar-width:none}
 .tabs::-webkit-scrollbar,#lua-list::-webkit-scrollbar,#lua-panel-body::-webkit-scrollbar{width:0;display:none}
 .pn-title{font-size:${s(15)};font-weight:700;flex:1;min-width:0}
 .pn-cmd{margin:12px 0 0}
-.pn-cmd code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:${s(16)};font-weight:700;
+.pn-cmd code{font-family:var(--lua-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:${s(16)};font-weight:700;
   color:var(--lua-neon,#C084FC);word-break:break-all}
 .pn-desc{margin:6px 0 0;font-size:${s(13)};color:var(--lua-text-secondary,#B8A9D9)}
-.pn-req{margin:10px 0 0;padding-left:18px;font-size:${s(12.5)};color:#FDE68A}
+.pn-req{margin:10px 0 0;padding-left:18px;font-size:${s(12.5)};color:var(--lua-warn-text,#FDE68A)}
 .pn-req li{margin:3px 0}
 .pn-fields{margin:14px 0 0}
 .pn-field{display:block;margin:0 0 12px}
 .pn-field>span{display:block;font-size:${s(12.5)};font-weight:600;color:var(--lua-text-secondary,#B8A9D9);margin-bottom:5px}
 .pn-field input,.pn-field select{width:100%;min-height:${DIM.toque}px;padding:11px 13px;border-radius:12px;font-size:${s(16)};
-  border:1px solid rgba(255,255,255,.14);background:var(--lua-bg-secondary,#0B0614);color:var(--lua-text,#fff);outline:none}
+  border:1px solid var(--lua-border,rgba(255,255,255,.14));background:var(--lua-bg-secondary,#0B0614);color:var(--lua-text,#fff);outline:none}
 .pn-field input:focus,.pn-field select:focus{border-color:var(--lua-primary,#8B5CF6)}
-.pn-field.bad input,.pn-field.bad select{border-color:#FCA5A5}
-.pn-err{display:block;font-size:${s(12)};color:#FCA5A5;min-height:15px;margin-top:4px}
+.pn-field.bad input,.pn-field.bad select{border-color:var(--lua-bad-text,#FCA5A5)}
+.pn-err{display:block;font-size:${s(12)};color:var(--lua-bad-text,#FCA5A5);min-height:15px;margin-top:4px}
 .pn-prev{margin:14px 0 4px;font-size:${s(12.5)};font-weight:600;color:var(--lua-text-secondary,#B8A9D9)}
 .pn-out{margin:0;padding:12px;border-radius:12px;background:var(--lua-bg-secondary,#0B0614);
-  border:1px dashed rgba(255,255,255,.18);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  border:1px dashed var(--lua-border-strong,rgba(255,255,255,.18));font-family:var(--lua-font-mono,ui-monospace,SFMono-Regular,Menlo,monospace);
   font-size:${s(15)};color:var(--lua-text,#fff);white-space:pre-wrap;word-break:break-all;
   -webkit-user-select:text;user-select:text}
 .pn-actions{display:flex;gap:10px;margin:14px 0 0;flex-wrap:wrap}
-.pn-copy{flex:1 1 auto;min-height:${DIM.toque}px;border:0;border-radius:999px;font-size:${s(14)};font-weight:700;color:#fff;
+.pn-copy{flex:1 1 auto;min-height:${DIM.toque}px;border:0;border-radius:999px;font-size:${s(14)};font-weight:700;color:var(--lua-on-primary,#fff);
   cursor:pointer;background:linear-gradient(135deg,var(--lua-primary,#8B5CF6),var(--lua-primary-dark,#4C1D95))}
 .pn-copy[disabled]{opacity:.6}
-.pn-back{flex:0 0 auto;min-height:${DIM.toque}px;padding:0 20px;border-radius:999px;border:1px solid rgba(255,255,255,.16);
+.pn-back{flex:0 0 auto;min-height:${DIM.toque}px;padding:0 20px;border-radius:999px;border:1px solid var(--lua-border,rgba(255,255,255,.16));
   background:var(--lua-bg-secondary,#0B0614);color:var(--lua-text,#fff);font-size:${s(14)};font-weight:600;cursor:pointer}
-.pn-status{margin:10px 0 0;font-size:${s(13)};min-height:18px;color:#6EE7B7}
+.pn-status{margin:10px 0 0;font-size:${s(13)};min-height:18px;color:var(--lua-ok-text,#6EE7B7)}
 .pn-tip{margin:10px 0 0;font-size:${s(12)};color:var(--lua-text-secondary,#B8A9D9)}
 
 /* ---------- rodapé ---------- */
-.foot{margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.10);font-size:${s(11.5)};
+.foot{margin-top:10px;padding-top:8px;border-top:1px solid var(--lua-line,rgba(255,255,255,.10));font-size:${s(11.5)};
   line-height:1.35;color:var(--lua-text-secondary,#B8A9D9)}
 .foot code{color:var(--lua-neon,#C084FC);font-weight:700}
 /* diagnóstico de área: aparece SÓ quando o host deu menos altura que a pedida */
@@ -213,7 +229,7 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
 /* atalho "topo": mora na barra (fora da área que rola), por isso nunca some no
    meio da lista — antes ele ficava no fim do conteúdo e só aparecia no final */
 .vtop{width:${DIM.rail}px;min-height:${DIM.snav}px;display:inline-flex;align-items:center;justify-content:center;
-  border-radius:13px;border:1px dashed rgba(255,255,255,.22);background:transparent;
+  border-radius:13px;border:1px dashed var(--lua-border-strong,rgba(255,255,255,.22));background:transparent;
   color:var(--lua-text-secondary,#B8A9D9);font-size:${s(17)};line-height:1;cursor:pointer}
 .vtop:active{transform:translateY(1px)}
 /* NOTA: aqui existia um @media (max-width:360px) que encolhia a fonte do
@@ -225,8 +241,9 @@ body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:
 /* Card baixo: nada de @media de altura de viewport por aqui (não é confiável
    neste WebView). O client.js mede em runtime e liga body.curto. */
 body.curto .head{padding:6px 0 4px}
-body.curto .logo{width:32px;height:32px;font-size:${s(15)}}
+body.curto .logo{width:26px;height:26px;font-size:${s(14)}}
 body.curto .bot-meta{display:none}
+body.curto .idp{font-size:${s(9.2)};line-height:1.25;margin-top:1px}
 body.curto .sec-desc{display:none}
 body.curto .tabs{padding:4px 0}
 body.curto .searchbar{padding:0 0 4px}

@@ -189,6 +189,7 @@ nav.registerScreen('lua_admin_menu', () => ({
   buttons: [
     { id: 'abrir', text: '🔓 Abrir grupo', run: run('abrirgrupo') },
     { id: 'fechar', text: '🔒 Fechar grupo', run: run('fechargrupo') },
+    { id: 'horario', text: '⏰ Horário do grupo', run: run('horariogrupo', ['status']) },
     { id: 'admins', text: '👑 Admins', run: run('admins') },
     { id: 'membros', text: '👥 Membros', run: run('membros') },
     { id: 'inativos', text: '😴 Inativos', run: run('inativos') },
