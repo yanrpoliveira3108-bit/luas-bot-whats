@@ -5,9 +5,12 @@
  * pode ganhar uma imagem ou GIF a partir do catálogo variado em `assets/actions/media/`
  * ou de `assets/actions/<nome>.jpg|png|webp|gif`.
  *
- * Envia GIFs animados como imagem com mimetype 'image/gif' para que o WhatsApp
- * carregue e exiba a animação diretamente no chat em qualquer aparelho, sem depender
- * de conversões de vídeo ou codecs ausentes no aparelho do usuário.
+ * Mecanismo de envio no WhatsApp:
+ * 1. Para GIFs animados: envia primariamente com `ctx.sendVideo(path, caption, { gifPlayback: true, mimetype: 'video/mp4' })`.
+ *    No WhatsApp, mensagens com flag `gifPlayback: true` são reproduzidas automaticamente
+ *    como GIFs animados em loop contínuo.
+ * 2. Caso a biblioteca rejeite ou falhe, faz fallback para `ctx.sendImage(path, caption, { mimetype: 'image/gif' })`.
+ * 3. Se ainda assim houver indisponibilidade ou falha, faz fallback seguro para a legenda em texto puro via `ctx.reply`.
  */
 
 'use strict';
@@ -64,22 +67,7 @@ async function send(ctx, key, caption, mentions) {
 
   try {
     if (media.type === 'gif') {
-      // 1ª tentativa recomendada para WhatsApp: envio como imagem com mimetype image/gif
-      // Isso faz o WhatsApp carregar instantaneamente o GIF na tela de conversa
-      if (typeof ctx.sendImage === 'function') {
-        try {
-          await ctx.sendImage(
-            media.path,
-            caption,
-            Object.assign({}, opts, { mimetype: 'image/gif' })
-          );
-          return true;
-        } catch (_) {
-          // fallback se sendImage com mimetype específico falhar
-        }
-      }
-
-      // 2ª tentativa: envio como vídeo com gifPlayback
+      // 1ª tentativa: Enviar como vídeo com gifPlayback (padrão oficial do WhatsApp para GIFs animados)
       if (typeof ctx.sendVideo === 'function') {
         try {
           await ctx.sendVideo(
@@ -89,11 +77,25 @@ async function send(ctx, key, caption, mentions) {
           );
           return true;
         } catch (_) {
-          // segue para fallback
+          // Se falhar o envio como vídeo com gifPlayback, tenta como imagem gif
         }
       }
 
-      // 3ª tentativa: envio normal como imagem padrão
+      // 2ª tentativa: Enviar como imagem com mimetype image/gif
+      if (typeof ctx.sendImage === 'function') {
+        try {
+          await ctx.sendImage(
+            media.path,
+            caption,
+            Object.assign({}, opts, { mimetype: 'image/gif' })
+          );
+          return true;
+        } catch (_) {
+          // Se falhar, tenta sem mimetype forçado
+        }
+      }
+
+      // 3ª tentativa: Envio padrão como imagem
       if (typeof ctx.sendImage === 'function') {
         await ctx.sendImage(media.path, caption, opts);
         return true;
