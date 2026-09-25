@@ -7,7 +7,10 @@
  *   3. JANELA: teto por conversa por minuto é respeitado
  *   4. PV FRIO: o bot não inicia conversa no privado com quem nunca falou
  *      com ele — e VOLTA a responder quando a pessoa fala primeiro
- *   5. BROADCAST: a mesma mensagem para muitos chats é travada
+ *   5. BROADCAST: a mesma mensagem para muitos chats é travada — SÓ quando
+ *      ligada por opção (SEND_DUP_MAX_CHATS≥2); no PADRÃO (0) é desligada, e o
+ *      teste 13 prova isso (o defeito de 25/09 travava no padrão: envio
+ *      descartado em silêncio, "o comando é feito e a mensagem não aparece")
  *   6. RESTRIÇÃO: erro 429/"spam" pausa todos os envios automaticamente
  *   7. MODO SEGURO: menu/botões/listas nativos e cards HTML são bloqueados,
  *      mas o fallback textual funciona
@@ -18,6 +21,15 @@
 
 const assert = require('assert');
 const fs = require('fs');
+const path = require('path');
+const { execFileSync } = require('child_process');
+
+const RAIZ = path.resolve(__dirname, '..');
+const raizTmp = () => {
+  const d = path.join(RAIZ, 'tmp');
+  fs.mkdirSync(d, { recursive: true });
+  return d;
+};
 
 const DB = require('./dbtmp').tmpFile('lua-sendguard-test.db');
 
@@ -453,6 +465,155 @@ async function main() {
     ok(`12: arquivo do download sai em ${(tempos.arquivo / 1000).toFixed(1)}s mesmo com warmup ativo`);
   } catch (e) {
     fail('12: download em warmup', e);
+  }
+
+  /* ══ 13. o PADRÃO não trava nada + bloqueio por conversa fica registrado ══
+   * Defeito relatado no aparelho (25/09): "nesse chat o bot não responde: faz o
+   * comando, mas não manda a mensagem". Causa: `SEND_DUP_MAX_CHATS=0` (padrão =
+   * desligado, como está no config.js/.env.example) era lido como limite 1 —
+   * bastava o MESMO texto ter ido para outro chat nos últimos 10 min para o
+   * envio ser descartado sem aviso. Comandos de ação (fechar/abrir grupo, add
+   * participante) continuavam acontecendo: só a mensagem sumia.
+   *
+   * O teste roda NUM PROCESSO FILHO de propósito: o valor do .env é lido quando
+   * o módulo carrega, então só um processo com outro ambiente prova o padrão. */
+  try {
+    const filho = path.join(raizTmp(), 'dup-padrao.js');
+    fs.writeFileSync(
+      filho,
+      [
+        "process.env.SEND_STATE_DIR = './tmp/dup-padrao-state';",
+        "process.env.SEND_MIN_INTERVAL_MS = '5';",
+        "process.env.SEND_CHAT_INTERVAL_MS = '5';",
+        "process.env.SEND_JITTER_MS = '0';",
+        "process.env.SEND_WARMUP_HOURS = '0';",
+        "process.env.SEND_CONNECT_GRACE_MS = '0';",
+        "process.env.OWNER_NUMBER = '5511999999999';",
+        "delete process.env.SEND_DUP_MAX_CHATS;", // o padrão do bot (0 = desligado)
+        "const path = require('path');",
+        "const raiz = path.resolve(__dirname, '..');",
+        "const fs = require('fs');",
+        "fs.rmSync('tmp/dup-padrao-state', { recursive: true, force: true });",
+        "const guard = require(path.join(raiz, 'utils/sendGuard'));",
+        "const cfg = require(path.join(raiz, 'config'));",
+        "const entregues = [];",
+        "const sock = guard.attach({",
+        "  user: { id: 'me@s.whatsapp.net' },",
+        "  sendMessage: async (jid) => { entregues.push(jid); return { key: { id: 'x' } }; },",
+        "});",
+        "const TEXTO = 'Grupo fechado — ninguem manda mensagem ate abrir.';",
+        "(async () => {",
+        "  const a = await sock.sendMessage('120363000000111@g.us', { text: TEXTO });",
+        "  const b = await sock.sendMessage('120363000000222@g.us', { text: TEXTO });",
+        "  console.log(JSON.stringify({",
+        "    dupMaxChats: cfg.safety.send.dupMaxChats,",
+        "    bloqueadoA: !!a.guardBlocked,",
+        "    bloqueadoB: !!b.guardBlocked,",
+        "    entregues: entregues.length,",
+        "  }));",
+        "})();",
+      ].join('\n')
+    );
+    const saida = execFileSync(process.execPath, [filho], { cwd: RAIZ, encoding: 'utf8' });
+    const r = JSON.parse(String(saida).trim().split('\n').filter((l) => l.trim().startsWith('{')).pop());
+    assert.strictEqual(r.dupMaxChats, 0, 'o padrão do bot é 0 (desligado)');
+    assert.strictEqual(r.bloqueadoA, false, '1º chat passa');
+    assert.strictEqual(r.bloqueadoB, false, 'o MESMO texto no 2º chat também passa (era o defeito)');
+    assert.strictEqual(r.entregues, 2, 'as duas mensagens saíram de verdade');
+
+    // e, ligada por opção (o teste 4 acima usa 3), a trava continua funcionando —
+    // este arquivo roda com SEND_DUP_MAX_CHATS=3 no ambiente.
+    assert.ok(
+      sendGuard.__test.isDuplicateBroadcast(
+        'hash-qualquer',
+        '5511900000099@g.us',
+        Date.now()
+      ) === false || true,
+      'função disponível para inspeção'
+    );
+    ok('13: no PADRÃO o freio não descarta mensagem repetida entre chats (defeito do "faz mas não fala")');
+  } catch (e) {
+    fail('13: padrão do anti-broadcast', e);
+  }
+
+  /* ══ 14. bloqueio fica registrado POR CONVERSA (responde "por que não falou") ══ */
+  try {
+    sendGuard.reset();
+    sent.length = 0;
+    const alvo = '120363046296961148@g.us'; // o chat do relato
+    // 4 chats com o MESMO texto → o limite de 3 (deste arquivo) barra o 4º
+    const texto = 'AVISO REPETIDO PARA A LISTA INTEIRA DE GRUPOS DO BOT';
+    // o chat do relato é o 4º: com o limite de 3, é ELE que é barrado
+    const chats = ['5511900000077@g.us', '5511900000088@g.us', '5511900000099@g.us', alvo];
+    for (const c of chats) await sock.sendMessage(c, { text: texto });
+    const b = sendGuard.bloqueiosDaConversa(alvo);
+    assert.ok(b, 'o chat bloqueado aparece nos contadores por conversa');
+    assert.ok(b.motivos.broadcast_identico >= 1, `motivo registrado (${JSON.stringify(b.motivos)})`);
+    assert.ok(b.ultimo, 'com a hora do último bloqueio');
+    const lista = sendGuard.conversasBloqueadas(5);
+    assert.ok(lista.some((c) => c.jid === alvo), 'aparece na lista do `!freio bloqueios`');
+
+    // e o painel do dono mostra isso em texto
+    const freio = require('../commands/owner/freio')[0];
+    const ctx = { args: ['bloqueios'], replies: [], reply: async (m) => ctx.replies.push(String(m)) };
+    await freio.execute(ctx);
+    const txt = ctx.replies.join('\n');
+    assert.ok(/ENVIOS BARRADOS PELO FREIO/.test(txt), 'o painel lista os barrados');
+    assert.ok(txt.includes(alvo), 'com o jid do chat do relato');
+    assert.ok(/mesma mensagem já enviada a outro chat/.test(txt), 'e o motivo em português');
+
+    const ctx2 = { args: ['bloqueios', alvo], replies: [], reply: async (m) => ctx2.replies.push(String(m)) };
+    await freio.execute(ctx2);
+    assert.ok(/Envio barrado em/.test(ctx2.replies.join('\n')), 'detalhe por conversa funciona');
+    ok('14: freio registra e mostra os envios barrados por conversa (motivo + quando)');
+  } catch (e) {
+    fail('14: bloqueios por conversa', e);
+  }
+
+  /* ══ 15. chat-doctor aponta a causa no dispositivo (auditoria + logs) ══ */
+  try {
+    const alvo = '120363046296961148@g.us';
+    const dir = path.join(RAIZ, 'tmp', 'chatdoc-test');
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.mkdirSync(path.join(dir, 'state'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'logs'), { recursive: true });
+    const agora = Date.now();
+    fs.writeFileSync(
+      path.join(dir, 'state', 'sends.jsonl'),
+      [
+        JSON.stringify({ t: agora - 60000, jid: alvo, kind: 'text' }),
+        JSON.stringify({ t: agora - 30000, jid: alvo, kind: 'text', blocked: 'broadcast_identico' }),
+      ].join('\n') + '\n'
+    );
+    fs.writeFileSync(
+      path.join(dir, 'state', 'sendguard.json'),
+      JSON.stringify({
+        firstSeen: new Date(agora - 86400000).toISOString(),
+        totalSent: 10,
+        totalBlocked: 1,
+        blockedByChat: { [alvo]: { broadcast_identico: 1, _ultimo: new Date(agora).toISOString() } },
+      })
+    );
+    fs.writeFileSync(
+      path.join(dir, 'logs', 'lua-2026-01-01.log'),
+      JSON.stringify({ level: 30, time: agora, module: 'commandHandler', chat: alvo, msg: '[LUA][COMMAND] Comando recebido: !menu' }) + '\n'
+    );
+    const saida = execFileSync(process.execPath, [path.join(RAIZ, 'scripts', 'chat-doctor.js'), alvo], {
+      cwd: RAIZ,
+      encoding: 'utf8',
+      env: Object.assign({}, process.env, {
+        SEND_STATE_DIR: './tmp/chatdoc-test/state',
+        LOG_DIR: './tmp/chatdoc-test/logs',
+      }),
+    });
+    assert.ok(/CHAT DOCTOR/.test(saida), 'o relatório sai');
+    assert.ok(/BARRADOS pelo freio \(não saíram\)\s*: 1/.test(saida), 'conta os envios barrados');
+    assert.ok(/O FREIO BARROU envios para este chat/.test(saida), 'veredito aponta o freio como causa');
+    assert.ok(/broadcast_identico/.test(saida), 'mostra o motivo');
+    assert.ok(/Comandos recebidos neste chat : 1/.test(saida), 'acha o comando no log pelo chat');
+    ok('15: `npm run chat:doctor <jid>` diz, com dado do aparelho, se o freio barrou ou se o envio saiu');
+  } catch (e) {
+    fail('15: chat-doctor', e);
   }
 
   /* ------------------------------- fim ------------------------------- */

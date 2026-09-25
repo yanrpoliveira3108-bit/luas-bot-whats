@@ -5,6 +5,7 @@
  *   !freio pausar [min]     → para TODOS os envios agora (emergência)
  *   !freio retomar          → retoma os envios
  *   !freio seguro on|off    → liga/desliga o modo seguro (payloads de risco)
+ *   !freio bloqueios [jid] → o que o freio barrou, por conversa e por motivo
  *   !freio warmup reset     → REINICIA o aquecimento (limites duros de novo)
  *   !freio warmup off       → ENCERRA o aquecimento (número já é antigo)
  *
@@ -26,6 +27,64 @@ function bar(current, max, size = 10) {
   return '█'.repeat(filled) + '░'.repeat(Math.max(0, size - filled));
 }
 
+/**
+ * "Por que o bot não falou NESTE chat?" — o freio anota cada envio barrado por
+ * conversa (motivo + quando). É o que transforma "o comando foi feito e a
+ * mensagem não apareceu" em causa escrita. Ver `!freio bloqueios <jid>`.
+ */
+const NOME_MOTIVO = {
+  broadcast_identico: 'mesma mensagem já enviada a outro chat',
+  fila_cheia: 'fila da conversa cheia',
+  pv_frio: 'conversa fria no privado (quem nunca falou com o bot)',
+  interativo_safe_mode: 'modo seguro bloqueia botões/listas',
+};
+
+function motivoTexto(m) {
+  if (String(m).startsWith('relay:')) return `modo seguro bloqueou o payload ${String(m).slice(6)}`;
+  return NOME_MOTIVO[m] || m;
+}
+
+function bloqueiosText() {
+  const s = sendGuard.stats();
+  const lista = (s.bloqueios && s.bloqueios.porConversa) || [];
+  if (!lista.length) return [];
+  const linhas = ['', '*Envios barrados pelo freio (por conversa)*'];
+  for (const c of lista.slice(0, 5)) {
+    const motivos = Object.entries(c.motivos)
+      .map(([m, n]) => `${motivoTexto(m)} ×${n}`)
+      .join(' · ');
+    linhas.push(`▸ ${c.jid} — ${c.total}× (${motivos})`);
+  }
+  linhas.push('_Detalhe de uma conversa: `!freio bloqueios <jid>`_');
+  return linhas;
+}
+
+function bloqueiosDetalhe(jid) {
+  const j = String(jid || '').trim();
+  if (!j) {
+    const s = sendGuard.stats();
+    const lista = (s.bloqueios && s.bloqueios.porConversa) || [];
+    if (!lista.length) return '✅ Nenhum envio barrado pelo freio até agora.';
+    return [
+      '🚧 *ENVIOS BARRADOS PELO FREIO*',
+      ...lista.map(
+        (c) => `▸ ${c.jid} — ${c.total}×: ` + Object.entries(c.motivos).map(([m, n]) => `${motivoTexto(m)} ×${n}`).join(' · ')
+      ),
+      '',
+      '_Motivo mais comum: a MESMA mensagem já tinha ido para outro chat (trava anti-broadcast)._',
+    ].join('\n');
+  }
+  const r = sendGuard.bloqueiosDaConversa(j);
+  if (!r) return `✅ Nenhum envio barrado para *${j}*.\n_Para ver as conversas com bloqueio: \`!freio bloqueios\`_`;
+  return [
+    `🚧 *Envio barrado em ${j}*`,
+    `▸ Total: ${r.total}× · último: ${r.ultimo || '—'}`,
+    ...Object.entries(r.motivos).map(([m, n]) => `▸ ${motivoTexto(m)} ×${n}`),
+    '',
+    '_Barrado pelo freio = a mensagem NÃO saiu. Se o bot executou a ação e a mensagem não apareceu, é isto que aconteceu._',
+  ].join('\n');
+}
+
 function statusText() {
   const s = sendGuard.stats();
   const limits = s.limits;
@@ -45,7 +104,9 @@ function statusText() {
     `▸ ${limits.chatMaxPerMinute} msg/min por conversa`,
     `▸ Intervalo: ${limits.minIntervalMs}ms global · ${limits.chatIntervalMs}ms por conversa`,
     `▸ Mídia espera ${limits.mediaMultiplier}× mais`,
-    `▸ Mesma mensagem: máx. ${limits.dupMaxChats} conversas/${limits.dupWindowMin} min`,
+    limits.dupMaxChats > 0
+      ? `▸ Mesma mensagem: máx. ${limits.dupMaxChats} conversas/${limits.dupWindowMin} min`
+      : `▸ Mesma mensagem em vários chats: 🚫 desligado (SEND_DUP_MAX_CHATS=0)`,
     `▸ PV frio (bot iniciar conversa): ${limits.blockColdPv ? '🚫 bloqueado' : '⚠️ liberado'}`,
     `▸ Sinal de restrição → pausa automática de ${limits.pauseMinutes} min`,
     '',
@@ -61,6 +122,7 @@ function statusText() {
     `▸ Na fila agora: ${s.counters.queuedNow}`,
     `▸ Conversas conhecidas (PV): ${s.chatsConhecidos}`,
     s.lastRestriction ? `▸ Última restrição detectada: ${s.lastRestriction.at}` : '▸ Nenhuma restrição detectada 🎉',
+    ...bloqueiosText(),
     '━━━━━━━━━━━━━━━━━━━━',
     '▸ `!freio pausar 60` — silêncio total',
     '▸ `!freio retomar`',
@@ -81,7 +143,7 @@ module.exports = [
     category: 'owner',
     ownerOnly: true,
     description: 'Painel do freio de envio: pausa, limites, warmup e modo seguro.',
-    usage: '!freio [pausar|retomar|seguro on/off|warmup reset]',
+    usage: '!freio [bloqueios [jid]|pausar|retomar|seguro on/off|warmup reset]',
     cooldown: 2000,
     execute: async (ctx) => {
       const sub = String(ctx.args[0] || 'status').toLowerCase();
@@ -146,13 +208,18 @@ module.exports = [
         return;
       }
 
+      if (sub === 'bloqueios' || sub === 'bloqueadas' || sub === 'barrados') {
+        await ctx.reply(bloqueiosDetalhe(ctx.args[1]));
+        return;
+      }
+
       if (sub === 'status' || sub === 'info' || sub === 'painel') {
         await ctx.reply(statusText());
         return;
       }
 
       await ctx.reply(
-        '⚠️ Subcomando inválido.\n▸ `!freio` — estado\n▸ `!freio pausar [min]`\n▸ `!freio retomar`\n▸ `!freio seguro on|off`\n▸ `!freio warmup reset`'
+        '⚠️ Subcomando inválido.\n▸ `!freio` — estado\n▸ `!freio bloqueios [jid]` — o que o freio barrou e por quê\n▸ `!freio pausar [min]`\n▸ `!freio retomar`\n▸ `!freio seguro on|off`\n▸ `!freio warmup reset`'
       );
     },
   },

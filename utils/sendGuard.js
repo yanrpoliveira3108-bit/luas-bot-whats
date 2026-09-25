@@ -87,6 +87,9 @@ const state = {
   totalQueued: 0,
   pauses: 0,
   lastRestriction: null, // { at, reason }
+  // Bloqueios POR CONVERSA: { jid: { motivo: n } }. Serve para responder, na
+  // hora, "por que o bot não falou NESTE chat?" sem depender de arquivo de log.
+  blockedByChat: {},
 };
 
 const queues = new Map(); // jid -> [item]
@@ -146,6 +149,38 @@ function auditBlock(jid, reason, kind) {
   audit({ t: Date.now(), jid: String(jid), kind: kind || null, blocked: reason });
 }
 
+/** Anota um envio barrado pelo freio (contador por conversa + auditoria). */
+function notaBloqueio(jid, reason, kind) {
+  const j = String(jid || '');
+  state.totalBlocked++;
+  if (j) {
+    const m = state.blockedByChat[j] || (state.blockedByChat[j] = {});
+    m[reason] = (m[reason] || 0) + 1;
+    m._ultimo = new Date().toISOString();
+  }
+  saveState();
+  auditBlock(j, reason, kind);
+}
+
+/** O que o freio bloqueou nesta conversa (motivo → quantas vezes). */
+function bloqueiosDaConversa(jid) {
+  const m = state.blockedByChat[String(jid || '')];
+  if (!m) return null;
+  const { _ultimo, ...motivos } = m;
+  return { motivos, ultimo: _ultimo || null, total: Object.values(motivos).reduce((a, b) => a + b, 0) };
+}
+
+/** Conversas com mais bloqueios (para o painel !freio). */
+function conversasBloqueadas(limite = 5) {
+  return Object.entries(state.blockedByChat)
+    .map(([jid, m]) => {
+      const { _ultimo, ...motivos } = m;
+      return { jid, motivos, ultimo: _ultimo || null, total: Object.values(motivos).reduce((a, b) => a + b, 0) };
+    })
+    .sort((a, b) => b.total - a.total)
+    .slice(0, Math.max(1, limite));
+}
+
 function mkdirp(dir) {
   try {
     fs.mkdirSync(dir, { recursive: true });
@@ -164,6 +199,7 @@ function loadState() {
       if (Number.isFinite(data.totalSent)) state.totalSent = data.totalSent;
       if (Number.isFinite(data.totalBlocked)) state.totalBlocked = data.totalBlocked;
       if (Number.isFinite(data.pauses)) state.pauses = data.pauses;
+      if (data.blockedByChat && typeof data.blockedByChat === 'object') state.blockedByChat = data.blockedByChat;
       if (data.lastRestriction && typeof data.lastRestriction === 'object') {
         state.lastRestriction = data.lastRestriction;
       }
@@ -198,6 +234,7 @@ function saveState(force = false) {
             totalBlocked: state.totalBlocked,
             pauses: state.pauses,
             lastRestriction: state.lastRestriction,
+            blockedByChat: state.blockedByChat,
             updatedAt: new Date().toISOString(),
           },
           null,
@@ -382,13 +419,31 @@ function hashOf(kind, content) {
   return crypto.createHash('sha1').update(`${kind}|${text}`).digest('hex');
 }
 
-/** Bloqueio de mensagem idêntica repetida em muitos chats (broadcast). */
+/**
+ * Bloqueio de mensagem idêntica repetida em muitos chats (broadcast).
+ *
+ * DEFEITO CORRIGIDO (25/09) — relatado como "nesse chat o bot não responde:
+ * faz o comando, mas não manda a mensagem". `SEND_DUP_MAX_CHATS=0` quer dizer
+ * DESLIGADO (é o padrão do bot e está escrito no config.js e no .env.example),
+ * mas o código fazia `Math.max(1, 0)` → limite **1**: bastava o MESMO texto ter
+ * sido enviado a QUALQUER outro chat nos últimos `dupWindowMin` minutos para o
+ * envio ser descartado em silêncio. Reproduzido com o padrão: o texto
+ * "🔒 Grupo fechado — ninguém manda mensagem até abrir." foi ENTREGUE no 1º chat
+ * e BLOQUEADO (`broadcast_identico`) no 2º — o comando era executado e a
+ * resposta não saía. Comandos de ação (add participante, fechar/abrir grupo)
+ * continuavam funcionando: só a MENSAGEM sumia.
+ *
+ * Regra agora: 0 (ou ausente) = desligado. Ligado apenas com valor ≥ 2 (ex.: 3 =
+ * a mesma mensagem pode ir para até 3 conversas; a 4ª é travada).
+ */
 function isDuplicateBroadcast(hash, jid, now) {
   if (!hash) return false;
+  const limite = Number(CFG.dupMaxChats) || 0;
+  if (limite <= 0) return false; // desligado (padrão)
   const list = dupWindow.get(hash) || [];
   const chats = new Set(list.map((e) => e.jid));
   if (chats.has(String(jid))) return false; // repetir no MESMO chat não é broadcast
-  return chats.size >= Math.max(1, CFG.dupMaxChats);
+  return chats.size >= limite;
 }
 
 function noteDuplicate(hash, jid, now) {
@@ -444,9 +499,7 @@ function enqueue(kind, jid, run) {
 
   // 1) conversa fria no PV (iniciar conversa com quem nunca falou com o bot)
   if (CFG.blockColdPv && !isGroupJid(j) && !j.endsWith('@broadcast') && !isOwnerJid(j) && !isAllowedPv(j) && !isKnownChat(j)) {
-    state.totalBlocked++;
-    saveState();
-    auditBlock(j, 'pv_frio', kind);
+    notaBloqueio(j, 'pv_frio', kind);
     logger.warn({ chat: j, tipo: kind }, '[FREIO] envio bloqueado: conversa fria no privado');
     activity.terminalLine(`[FREIO] bloqueado PV frio → ${j}`);
     return Promise.resolve(blockedResult(j, 'pv_frio'));
@@ -454,9 +507,7 @@ function enqueue(kind, jid, run) {
 
   // 2) payload interativo quando o modo seguro proíbe (2ª camada de defesa)
   if (kind === 'interactive' && safety.blocksInteractive()) {
-    state.totalBlocked++;
-    saveState();
-    auditBlock(j, 'interativo_safe_mode', kind);
+    notaBloqueio(j, 'interativo_safe_mode', kind);
     logger.info({ chat: j }, '[FREIO] payload interativo bloqueado (modo seguro)');
     return Promise.resolve(blockedResult(j, 'interativo_safe_mode'));
   }
@@ -464,9 +515,7 @@ function enqueue(kind, jid, run) {
   // 3) mensagem idêntica repetida em muitos chats (assinatura de broadcast)
   const hash = hashOf(kind, run && run.__content);
   if (hash && isDuplicateBroadcast(hash, j, now)) {
-    state.totalBlocked++;
-    saveState();
-    auditBlock(j, 'broadcast_identico', kind);
+    notaBloqueio(j, 'broadcast_identico', kind);
     logger.warn({ chat: j }, '[FREIO] envio bloqueado: mesma mensagem em vários chats');
     activity.terminalLine(`[FREIO] bloqueado broadcast idêntico → ${j}`);
     return Promise.resolve(blockedResult(j, 'broadcast_identico'));
@@ -475,9 +524,7 @@ function enqueue(kind, jid, run) {
   // 4) fila normal
   const list = queues.get(j) || [];
   if (list.length >= Math.max(1, CFG.maxQueuePerChat)) {
-    state.totalBlocked++;
-    saveState();
-    auditBlock(j, 'fila_cheia', kind);
+    notaBloqueio(j, 'fila_cheia', kind);
     logger.warn({ chat: j, fila: list.length }, '[FREIO] fila cheia — envio descartado');
     activity.terminalLine(`[FREIO] fila cheia, descartado → ${j}`);
     return Promise.resolve(blockedResult(j, 'fila_cheia'));
@@ -812,8 +859,7 @@ function attach(sock) {
             safety.blocksInteractive()) ||
           ((risky === 'requestPaymentMessage' || risky === 'sendPaymentMessage') && safety.blocksPaymentTest()));
       if (blockedBySafety) {
-        state.totalBlocked++;
-        saveState();
+        notaBloqueio(String(jid), `relay:${risky}`, 'media');
         logger.info({ chat: String(jid), payload: risky }, '[FREIO] relayMessage bloqueado (modo seguro)');
         return Promise.resolve(blockedResult(String(jid), `relay:${risky}`));
       }
@@ -927,6 +973,10 @@ function stats() {
       blockColdPv: !!CFG.blockColdPv,
       pauseMinutes: CFG.pauseMinutes,
     },
+    bloqueios: {
+      porConversa: conversasBloqueadas(5),
+      total: state.totalBlocked,
+    },
     counters: {
       sent: state.totalSent,
       blocked: state.totalBlocked,
@@ -958,6 +1008,7 @@ function reset() {
   chatLast.clear();
   chatWindow.clear();
   dupWindow.clear();
+  state.blockedByChat = {};
   globalWindow = [];
   lastSendAt = 0;
   paused = false;
@@ -983,6 +1034,8 @@ module.exports = {
   reset,
   classify,
   hashOf,
+  bloqueiosDaConversa,
+  conversasBloqueadas,
   warmupActive,
   __test: {
     state,

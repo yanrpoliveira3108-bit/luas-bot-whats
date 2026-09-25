@@ -546,7 +546,9 @@ async function handleMessage(sock, msg, type) {
         }
       }
       logger.info(
-        { tag: 'COMMAND', sender: ctx.sender, fromMe: !!(msg.key && msg.key.fromMe) },
+        // `chat` no log é o que permite responder "por que não falou NESTE chat?":
+        // sem ele, o relatório do dispositivo não sabia separar as conversas
+        { tag: 'COMMAND', chat: ctx.remoteJid, sender: ctx.sender, fromMe: !!(msg.key && msg.key.fromMe) },
         `[LUA][COMMAND] Comando recebido: ${parsed.raw.split('\n')[0].slice(0, 80)}`
       );
       await executeCommand(ctx, cmd, parsed.args);

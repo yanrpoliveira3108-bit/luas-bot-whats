@@ -89,6 +89,28 @@ A partir desta versão o bot grava `data/sends.jsonl`: uma linha por envio
 (horário, conversa, tipo — **nunca o conteúdo**). Isso dá o ritmo exato de tudo
 que saiu, e é o que responde "o bot estava fazendo o quê?".
 
+### 4.1.1 Um chat específico não recebe as respostas
+
+Quando o sintoma é **"o bot faz o comando, mas a mensagem não aparece" e só num
+chat**, use o doctor de conversa (somente leitura; pode rodar com o bot ligado):
+
+```bash
+npm run chat:doctor -- 120363046296961148@g.us     # ou: node scripts/chat-doctor.js <jid>
+```
+
+Ele lê a auditoria do freio, o estado (`data/sendguard.json`) e os logs, filtra
+pelo chat e diz qual das três coisas aconteceu:
+
+1. **O freio barrou** (aparece `blocked: <motivo>`) → a mensagem foi descartada
+   antes de sair; a correção está acima (trava idêntica ligada por engano);
+2. **O envio deu erro** → o log mostra `[SEND] sendMessage FALHOU` e o motivo;
+3. **O WhatsApp aceitou** (envio sem bloqueio e sem erro) → a mensagem saiu do
+   bot: a barreira está no aplicativo/grupo (bot sem direito de postar,
+   membro restrito, ou outro bot apagando mensagens).
+
+A partir desta versão o log de comando também traz o `chat` — sem isso não dava
+para separar as conversas no relatório.
+
 ### 4.2 Teste controlado (é o que prova a causa)
 
 ```
@@ -142,10 +164,22 @@ comprovada**, coerente com o padrão devolvido.
 * `SAFE_MODE=0` → HTML, cards, menu por lista/botões e `!sp` **liberados** (era o seu pedido);
 * `SEND_DUP_MAX_CHATS=0` → `!broadcast` não é bloqueado (só respeita o ritmo).
 
+> **Defeito corrigido (25/09) — "o bot faz o comando mas a mensagem não aparece
+> no chat".** O `0` era lido como limite **1** (`Math.max(1, 0)`), então a trava
+> anti-broadcast ficava **ligada no padrão**: bastava o MESMO texto ter sido
+> enviado a QUALQUER outro chat nos últimos 10 minutos para o envio ser
+> descartado em silêncio. O comando era executado (fechar/abrir grupo, add
+> participante) e a resposta não saía — exatamente o sintoma relatado. Agora
+> `0` (ou ausente) = desligado e a trava só vale com valor ≥ 2. Reprodução e
+> travas: `test/sendguard.test.js` cenários 13 e 14.
+
 **Comandos:**
 
 ```
-!freio                     → painel (limites, fila, warmup, restrições detectadas)
+!freio                     → painel (limites, fila, warmup, restrições detectadas,
+                             envios barrados por conversa e por motivo)
+!freio bloqueios           → o que o freio barrou, em cada conversa
+!freio bloqueios <jid>     → detalhe de um chat ("por que não falou NESTE chat?")
 !freio pausar 120          → silêncio total (use ao ver aviso de restrição)
 !freio retomar
 !freio warmup off          → encerra o aquecimento (número já antigo)

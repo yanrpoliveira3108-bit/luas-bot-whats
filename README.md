@@ -272,7 +272,7 @@ Todas as variáveis ficam em `.env` (nunca versionado). Veja `.env.example` comp
 | `SEND_MIN_INTERVAL_MS` / `SEND_CHAT_INTERVAL_MS` / `SEND_JITTER_MS` | Freio: intervalo global, por conversa e variação aleatória | `1200` / `2000` / `900` |
 | `SEND_MAX_PER_MINUTE` / `SEND_CHAT_MAX_PER_MINUTE` | Teto de mensagens por minuto (total / por conversa) | `15` / `6` |
 | `SEND_WARMUP_HOURS` / `SEND_WARMUP_FACTOR` | WARMUP de número novo: limites ÷fator | `48` / `3` |
-| `SEND_DUP_MAX_CHATS` / `SEND_DUP_WINDOW_MIN` | Anti-broadcast (0 = desligado) | `0` / `10` |
+| `SEND_DUP_MAX_CHATS` / `SEND_DUP_WINDOW_MIN` | Anti-broadcast (0 = desligado; 1 travaria quase tudo) | `0` / `10` |
 | `SEND_BLOCK_COLD_PV` | Não iniciar conversa no PV com quem nunca falou com o bot | `1` |
 | `SEND_PAUSE_MINUTES` | Pausa automática de tudo ao detectar sinal de restrição | `15` |
 | `SEND_CONNECT_GRACE_MS` | Espera após conectar antes do 1º envio | `8000` |

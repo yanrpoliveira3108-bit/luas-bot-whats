@@ -326,7 +326,8 @@ const CONFIG = {
     menuImage: path.resolve(ROOT, envStr('MENU_IMAGE', './assets/menu.jpg')),
     assetsDir: path.resolve(ROOT, 'assets'),
     tmpDir: path.resolve(ROOT, 'tmp'),
-    logsDir: path.resolve(ROOT, 'logs'),
+    // LOG_DIR permite apontar os logs para outro lugar (testes/diagnóstico)
+    logsDir: path.resolve(ROOT, envStr('LOG_DIR', './logs')),
     backupDir: path.resolve(ROOT, 'backup'),
   },
 
