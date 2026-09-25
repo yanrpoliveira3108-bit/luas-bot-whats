@@ -2,6 +2,7 @@
 
 const youtube = require('../../downloaders/youtube');
 const { sendAudioResult } = require('../_shared/downloads');
+const { parseArtistAndTitle, formatMediaCard } = require('../../utils/mediaPresentation');
 const errorHandler = require('../../handlers/errorHandler');
 
 module.exports = [
@@ -14,12 +15,26 @@ module.exports = [
     cooldown: 10000,
     execute: async (ctx) => {
       const url = (ctx.args[0] || '').trim();
-      if (!url) return ctx.reply('⚠️ Envie o link: !ytmp3 <url>');
+      if (!url) return ctx.reply(`⚠️ Envie o link: ${ctx.prefix}ytmp3 <url>`);
       if (!youtube.validateUrl(url)) return ctx.reply('🔗 Link do YouTube inválido.');
-      await ctx.reply('⏳ Baixando áudio...');
+      await ctx.reply('⏳ Preparando áudio...');
       try {
         const audio = await youtube.downloadAudio(url);
-        await ctx.reply(`🎵 *${audio.title}*\n▸ Canal: ${audio.author || '-'}`);
+        const parsed = parseArtistAndTitle(audio.title, audio.author);
+
+        const card = formatMediaCard({
+          kind: 'audio',
+          title: parsed.title || audio.title,
+          artist: parsed.artist || null,
+          channel: parsed.isChannel ? audio.author : null,
+          duration: audio.duration ? `${Math.floor(audio.duration / 60)}:${String(audio.duration % 60).padStart(2, '0')}` : null,
+          views: audio.views || null,
+          description: audio.description || null,
+          url: url,
+          prefix: ctx.prefix,
+        });
+
+        await ctx.reply(card);
         await sendAudioResult(ctx, audio);
       } catch (err) {
         await errorHandler.handle(ctx, err, { name: 'ytmp3' });
