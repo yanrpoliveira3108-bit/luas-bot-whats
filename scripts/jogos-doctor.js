@@ -190,8 +190,9 @@ async function main() {
 
   titulo('Resumo');
   linha('Se algum jogo falhou acima, o stack mostra o motivo real.');
-  linha('Se o card do menu está pequeno, confira MENU_HTML_HEIGHT no .env');
-  linha('(valor de fábrica: 640) e o §2.2 do MENUS-HTML.md.');
+  linha('Se um card está pequeno, toque no TÍTULO da seção DENTRO do card:');
+  linha('  ▸ "área do card aqui: NNNpx" é a altura REAL que o aplicativo está dando.');
+  linha('  ▸ MENU_HTML_HEIGHT no .env muda a altura declarada (de fábrica: 640 px) — MENUS-HTML.md §2.2/§2.4.');
 
   const destino = path.join(CONFIG.paths.tmpDir || 'tmp', 'jogos-doctor.txt');
   try {
