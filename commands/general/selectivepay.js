@@ -51,6 +51,16 @@ function box(summary) {
 }
 
 async function run(ctx, kind) {
+  // Modo seguro: pedido de pagamento (requestPaymentMessage) em conta pessoal
+  // é um dos payloads que o WhatsApp associa a uso indevido/automação.
+  if (require('../../utils/safety').blocksPaymentTest()) {
+    await ctx.reply(
+      '🛑 *Modo seguro ativo* — o teste de pagamento seletivo está desativado.\n' +
+        '_Esse payload (pedido de pagamento) em conta pessoal é um dos que geram restrição._\n' +
+        '▸ Para reativar assumindo o risco: `ALLOW_PAYMENT_TEST=1` no .env'
+    );
+    return;
+  }
   const { mode, recipients } = parseMode(ctx.args);
   if (!mode) {
     await ctx.reply(

@@ -19,6 +19,8 @@ Bot WhatsApp **modular, estável, seguro e profissional**, construído com **Nod
 - [Execução](#execução)
 - [Atualização](#atualização)
 - [Troubleshooting](#troubleshooting)
+- [Jogos com aposta (caça ao tesouro e tigrinho)](#jogos-com-aposta-caça-ao-tesouro-e-tigrinho)
+- [Restrição de conta / segurança de envio](#restrição-de-conta--segurança-de-envio)
 - [Recuperação](#recuperação)
 - [Desenvolvimento](#desenvolvimento)
 - [Testes](#testes)
@@ -253,10 +255,33 @@ Todas as variáveis ficam em `.env` (nunca versionado). Veja `.env.example` comp
 
 | Variável | Descrição |
 |----------|-----------|
-| `BUTTONS_ENABLED` | Botões interativos no menu (`true`/`false`) |
+| `BUTTONS_ENABLED` | Botões interativos no menu (`true`/`false`). Só é afetado se você ligar `SAFE_MODE=1` |
 | `LUA_THEME` | Tema visual (`LUA_NIGHT`, `LUA_VIOLET`, `LUA_GALAXY`, etc.) |
 | `LUA_UI_MODE` | Modo de menu (`text`, `buttons`, `auto`) |
 | `LUA_READMORE` | "Ler mais" em mensagens longas |
+
+### Segurança de envio (anti-restrição) — leia antes de tirar do padrão
+
+| Variável | Descrição | Padrão |
+|----------|-----------|--------|
+| `SAFE_MODE` | Opcional: bloqueia lista/botões nativos, cards HTML e pagamento | `0` (desligado) |
+| `HUMAN_DELAYS` / `MIN_TYPING_DELAY_MS` / `MAX_TYPING_DELAY_MS` | Simula "digitando..." antes de responder (camada humana) | `true` / `600` / `2200` |
+| `SILENT_PV` | Não responde conversa casual de desconhecido no PV | `true` |
+| `BROWSER_NAME` / `MARK_ONLINE_ON_CONNECT` | Fingerprint do cliente e presença online | `windows` / `false` |
+| `ALLOW_INTERACTIVE` / `ALLOW_RICH_CARDS` / `ALLOW_PAYMENT_TEST` | Liberam só aquele payload (vazio = segue o `SAFE_MODE`) | vazio |
+| `SEND_MIN_INTERVAL_MS` / `SEND_CHAT_INTERVAL_MS` / `SEND_JITTER_MS` | Freio: intervalo global, por conversa e variação aleatória | `1200` / `2000` / `900` |
+| `SEND_MAX_PER_MINUTE` / `SEND_CHAT_MAX_PER_MINUTE` | Teto de mensagens por minuto (total / por conversa) | `15` / `6` |
+| `SEND_WARMUP_HOURS` / `SEND_WARMUP_FACTOR` | WARMUP de número novo: limites ÷fator | `48` / `3` |
+| `SEND_DUP_MAX_CHATS` / `SEND_DUP_WINDOW_MIN` | Anti-broadcast (0 = desligado; 1 travaria quase tudo) | `0` / `10` |
+| `SEND_BLOCK_COLD_PV` | Não iniciar conversa no PV com quem nunca falou com o bot | `1` |
+| `SEND_PAUSE_MINUTES` | Pausa automática de tudo ao detectar sinal de restrição | `15` |
+| `SEND_CONNECT_GRACE_MS` | Espera após conectar antes do 1º envio | `8000` |
+
+> ℹ️ **Sobre restrição de conta:** não existe causa única nem prova de que cards
+> HTML/menu interativo causem banimento (vários bots usam isso sem cair). O
+> padrão do bot é o comportamento normal (HTML liberado) + **freio de ritmo**
+> ligado. Para investigar um caso real: `node scripts/restricao.js`.
+> Detalhes em **[SEGURANCA-ENVIO.md](SEGURANCA-ENVIO.md)**.
 
 ### Limites
 
@@ -437,20 +462,90 @@ cp -a backup/pre-update-20250101-120000/. .
 | `Conexão perdida (restartRequired)` | **Sucesso** — WhatsApp aceitou código e pede reconexão, bot reconecta sozinho |
 | Pairing code não aparece / `Connection Closed` 428 | Aguarde websocket abrir (correção na versão atual). Se persistir, rate-limit 429 — aguarde 15-30min |
 | Fica "Aguardando autenticação" para sempre | Versão atual sempre mostra causa. Veja `logs/baileys-*.log` |
-| Download YouTube falha | `pkg install yt-dlp ffmpeg` + `node scripts/diagnose.js`. Bot tenta client `android` automaticamente se YouTube pedir login |
+| **Nenhum download funciona** | Rode `node scripts/downloads-doctor.js` — ele diz o que falhou, item por item. Guia: `DOWNLOAD-TROUBLESHOOTING.md` |
+| Download YouTube falha | `pkg install python ffmpeg && pip install -U yt-dlp` (**não** existe `pkg install yt-dlp`) + `node scripts/downloads-doctor.js youtube`. Se aparecer "Sign in to confirm you're not a bot", exporte os cookies e use `YT_COOKIES=./cookies.txt` |
+| Áudio/vídeo não chega no WhatsApp (só texto) | Diretório temporário inválido no Android — rode pelo `index.js` (ele corrige) ou `export TMPDIR="$PWD/tmp"`. `node scripts/downloads-doctor.js` mostra |
+| Vídeo do YouTube sai sem som / não abre | `pkg install ffmpeg` (mescla vídeo+áudio) |
 | Sticker animado falha | `pkg install ffmpeg` — imagem funciona sem ffmpeg (WASM) |
 | Quer trocar prefixo | `!prefix <novo>` (dono) |
 | Logs JSON no terminal, sem menu bonito | Atualize código — versão antiga usava `process.stdin.isTTY` que falha no Termux. Nova usa `tty.isatty()` |
 
-**Diagnóstico completo:**
+**Diagnósticos:**
 
 ```bash
-node scripts/diagnose.js
+node scripts/diagnose.js          # ambiente (Node, banco, motores, rede, IA)
+node scripts/downloads-doctor.js  # downloads: ambiente + rede + cada site + saída
+node scripts/downloads-doctor.js youtube   # só uma plataforma
 ```
 
-Verifica Node, better-sqlite3, ffmpeg, yt-dlp, conversores, fetch, rede, downloaders, IA.
+O `downloads-doctor` é o que resolve "nenhum download funciona": ele testa cada
+site de verdade e diz, linha por linha, o que fazer. Detalhes em
+[`DOWNLOAD-TROUBLESHOOTING.md`](DOWNLOAD-TROUBLESHOOTING.md).
 
 ---
+
+## Jogos com aposta (caça ao tesouro e tigrinho)
+
+Os dois jogos que movimentam LuaCoins usam **a mesma carteira**
+(`database/economy.js`) e a **mesma camada de aposta**:
+
+- `{prefix}cacatesouro` → 🗺️ caça ao tesouro de 3×3 até 13×13, com painel de
+  carteira/aposta, expedição única, pistas de vizinhança, armadilhas e TTL de
+  30 min. Também aceita `jogar <n> casual` (sem aposta) e `rapido` (o 3×3
+  antigo);
+- `{prefix}tigrinho` → 🐯 preservado, agora com o mesmo painel e com a animação
+  mostrando o **resultado validado pelo bot** (o card nunca sorteia pêmio).
+
+Detalhes completos (origem do saldo, parâmetros, regras de pagamento, o que o
+card pode fazer, testes): **[JOGOS-APOSTA.md](JOGOS-APOSTA.md)**.
+
+Se algum jogo responder “algo deu errado”, rode `npm run jogos:doctor`: ele
+mostra a causa real (com stack) e o estado do banco, sem enviar nada no
+WhatsApp.
+
+---
+## Restrição de conta / segurança de envio
+
+Se aparecer o aviso **"conta restrita"** (ou o número parar de enviar), comece
+pela auditoria — ela mostra o que a conta fez antes de cair:
+
+```bash
+node scripts/restricao.js          # lê os logs: pareamentos, quedas, 429, ritmo, repetição
+node scripts/restricao.js --dias 30
+```
+
+O relatório completo (fatos, hipóteses descartadas, checklist da conta e teste
+controlado) está em **[SEGURANCA-ENVIO.md](SEGURANCA-ENVIO.md)**. Resumo do
+protocolo:
+
+1. `!freio pausar 120` — **pare de enviar**. Não reenvie a mensagem que falhou:
+   cada tentativa durante o aviso soma penalidade (restrição → restrição → ban).
+2. Espere o prazo do aviso + algumas horas com o número em silêncio total.
+3. `!freio retomar` e use pouco nas primeiras horas.
+4. Número novo precisa de aquecimento (0–24 h de uso humano antes de ligar o bot).
+
+O que fica **ligado** por padrão: freio de ritmo (fila, intervalo, teto por
+minuto, pausa automática ao detectar restrição) e bloqueio de conversa fria no
+PV. O que fica **liberado** (comportamento normal): cards HTML, menu por
+lista/botões e pagamento.
+
+```bash
+!freio              # painel: limites, fila, warmup e restrições detectadas
+!antiban            # status das proteções anti-ban + dicas
+!freio seguro on    # opcional: bloqueia cards HTML e menu nativo
+!freio warmup off   # número já é antigo/aquecido → limites normais
+```
+
+## Apagar mensagem e comandos de dono
+
+- **`!apagar`** (respondendo a uma mensagem): **dono** apaga qualquer mensagem,
+  **admin** apaga qualquer mensagem do grupo e **membro** apaga somente a própria.
+  Com `!apagar @usuario 10` o admin apaga as últimas mensagens do histórico.
+- **`!d`** apaga **somente a mensagem marcada** (a que você respondeu).
+- **`!identidade`** mostra como o bot identificou você (dono? admin? veio como
+  LID?) — é o primeiro comando a rodar quando "comando de dono não funciona".
+
+Regras completas, causas e como verificar: **[APAGAR-E-DONO.md](APAGAR-E-DONO.md)**.
 
 ## Recuperação
 
@@ -472,7 +567,7 @@ cp -a backup/pre-update-20250101-120000/. .
 - `!backup` — gera `.db` em `backup/`
 - `!restore` — restaura mais recente (dono)
 
-### Recuperação total (instalação limpa sem perder dados)
+## Recuperação total (instalação limpa sem perder dados)
 
 ```bash
 # faça backup manual dos dados importantes
@@ -554,12 +649,15 @@ node test/prefix.test.js      # prefixo BOT_PREFIX vs PREFIX
 node test/migration.test.js   # migrações
 node test/life.test.js        # Lua Life (23 regressões)
 node test/e2e.test.js         # pipeline ponta a ponta
+node test/sendguard.test.js   # freio de envio + modo seguro (anti-restrição)
+node scripts/restricao.js     # auditoria de restrição (lê os logs do bot)
 node scripts/diagnose.js      # diagnóstico ambiente
 node scripts/sticker-selftest.js # teste pipeline sticker
 ```
 
 **Cobertura mínima validada:**
 
+- Auditoria de restrição de conta (`scripts/restricao.js` — lê logs e auditoria de envios)
 - Inicialização e carregamento de configuração
 - Banco e migrações
 - Comandos e plugins (sem duplicatas, sem comandos sem execute)
@@ -568,7 +666,9 @@ node scripts/sticker-selftest.js # teste pipeline sticker
 - Economia (race conditions, rollback)
 - Lua Life (criação, trabalho, banco, compra/venda, mineração, casa, missões, diário, loteria)
 - Downloaders (YouTube, TikTok, etc.)
-- Menus e navegação por botões
+- Menus e navegação por botões (lista nativa no padrão; textual com `SAFE_MODE=1`)
+- Freio de envio: ordem da fila, intervalos, teto por conversa, PV frio,
+  anti-broadcast, pausa automática por restrição e warmup
 - Tratamento de erros (bot nunca morre por exceção isolada)
 
 ---
@@ -588,10 +688,15 @@ Auditoria realizada:
 - ✅ Baileys logs em arquivo separado, sem credenciais no terminal
 - ✅ `!eval` desabilitado por padrão (`ENABLE_EVAL=false`)
 - ✅ Permissões verificadas via `utils/permissions.js` (owner, admin, botAdmin)
+- ✅ Freio de envio (`utils/sendGuard.js`): fila com intervalo/teto por minuto,
+  pausa automática ao detectar restrição, warmup de número novo, bloqueio de
+  conversa fria no PV e auditoria de envios (`data/sends.jsonl`, sem conteúdo)
+- ✅ Modo seguro opcional (`utils/safety.js`, `SAFE_MODE=0` por padrão): permite
+  bloquear lista/botões nativos, cards HTML e pagamento se o dono quiser testar
 
 **Nunca versione:**
 
-- `.env`, `session/`, `database/*.db`, `logs/`, `backup/`, `node_modules/`, `*.log`, `*.db`, credenciais
+- `.env`, `session/`, `database/*.db`, `logs/`, `backup/`, `data/`, `node_modules/`, `*.log`, `*.db`, credenciais
 
 ---
 

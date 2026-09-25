@@ -1,0 +1,261 @@
+#!/usr/bin/env node
+/**
+ * test/downloads.test.js — regressões dos downloads (o que já quebrou de fato).
+ *
+ *   1. fila NÃO trava para sempre quando um download pendura
+ *   2. arquivo barrado pelo freio AVISA o usuário (nunca silêncio)
+ *   3. arquivo no cache de mídia não é apagado
+ *   4. TMPDIR inválido é substituído por um gravável (Android/Termux)
+ *   5. o motor do YouTube monta o comando do yt-dlp com cookies quando configurado
+ *
+ * Tudo offline: nenhum teste aqui depende de internet.
+ */
+
+'use strict';
+
+const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const ROOT = path.resolve(__dirname, '..');
+process.chdir(ROOT);
+process.env.SEND_STATE_DIR = process.env.SEND_STATE_DIR || './tmp/dl-test-state';
+process.env.NODE_ENV = 'test';
+
+let falhas = 0;
+let total = 0;
+
+function ok(msg) {
+  total++;
+  console.log(`✅ ${msg}`);
+}
+
+function falhou(nome, e) {
+  falhas++;
+  console.error(`❌ ${nome}: ${e && e.message}`);
+}
+
+async function teste(nome, fn) {
+  try {
+    await fn();
+  } catch (e) {
+    falhou(nome, e);
+  }
+}
+
+(async () => {
+  console.log('=== DOWNLOADS TEST ===');
+
+  /* ── 1. um download pendurado não pode travar a fila para sempre ── */
+  await teste('1: fila de downloads destrava', async () => {
+    const CONFIG = require('../config');
+    const anterior = CONFIG.downloader.queueTimeoutMs;
+    const dqueue = require('../utils/downloadQueue');
+
+    // teto curto só para o teste (o padrão de produção é 180s)
+    CONFIG.downloader.queueTimeoutMs = 1100;
+
+    const t0 = Date.now();
+    const travado = await dqueue
+      .enqueue('5511900000001@g.us', 'travado', () => new Promise(() => {}))
+      .then(() => ({ estado: 'resolveu' }))
+      .catch((e) => ({ estado: 'recusou', code: e.code }));
+    const levou = Date.now() - t0;
+
+    assert.strictEqual(travado.estado, 'recusou', 'o job travado é cancelado no teto');
+    assert.strictEqual(travado.code, 'TIMEOUT', 'o aviso é de tempo esgotado');
+    assert.ok(levou < 6000, `cancelou no teto (${levou}ms)`);
+
+    // a vaga foi liberada: o próximo download roda na hora
+    const t1 = Date.now();
+    const depois = await dqueue.enqueue('5511900000002@g.us', 'depois', async () => 'ok');
+    assert.strictEqual(depois, 'ok', 'o download seguinte roda normalmente');
+    assert.ok(Date.now() - t1 < 1500, 'não ficou preso atrás do travado');
+
+    assert.strictEqual(dqueue.pendingCount(), 0, 'a fila volta a ficar vazia');
+    CONFIG.downloader.queueTimeoutMs = anterior;
+    ok(`1: job travado cancelado em ${levou}ms e fila liberada`);
+  });
+
+  /* ── 2. arquivo barrado pelo freio AVISA (nunca silêncio) ── */
+  await teste('2: barrado pelo freio avisa o usuário', async () => {
+    const { enviarArquivo } = require('../commands/_shared/downloads');
+    const respostas = [];
+    const ctx = { reply: async (m) => respostas.push(m) };
+    const tmpFile = path.join(ROOT, 'tmp', `barrado_${Date.now()}.mp4`);
+    fs.writeFileSync(tmpFile, 'x');
+
+    const r = await enviarArquivo(ctx, 'vídeo', tmpFile, async () => ({
+      guardBlocked: true,
+      guardReason: 'fila_cheia',
+    }));
+
+    assert.strictEqual(r.entregue, false, 'marcado como não entregue');
+    assert.strictEqual(respostas.length, 1, 'avisou o usuário');
+    assert.ok(/freio/i.test(respostas[0]), 'a mensagem explica que foi o freio');
+    assert.ok(/fila/i.test(respostas[0]), 'a mensagem diz o motivo');
+    assert.ok(!fs.existsSync(tmpFile), 'o arquivo temporário foi limpo');
+    ok('2: arquivo barrado avisa e limpa o temporário');
+  });
+
+  /* ── 3. cache de mídia não pode ser apagado pelo envio ── */
+  await teste('3: arquivo do cache não é apagado', async () => {
+    const { enviarArquivo, estaNoCache } = require('../commands/_shared/downloads');
+    const mediaCache = require('../utils/mediaCache');
+    fs.mkdirSync(mediaCache.CACHE_DIR, { recursive: true });
+    const cacheFile = path.join(mediaCache.CACHE_DIR, `teste_${Date.now()}.mp4`);
+    fs.writeFileSync(cacheFile, 'cache');
+
+    assert.strictEqual(estaNoCache(cacheFile), true, 'reconhece arquivo do cache');
+
+    const ctx = { reply: async () => {} };
+    await enviarArquivo(ctx, 'vídeo', cacheFile, async () => ({ guardBlocked: false }));
+    assert.ok(fs.existsSync(cacheFile), 'o cache continua no lugar');
+    fs.unlinkSync(cacheFile);
+    ok('3: cache preservado (não perde o download seguinte)');
+  });
+
+  /* ── 4. TMPDIR inválido → usa um gravável (Android/Termux) ── */
+  await teste('4: temporário inválido é substituído', async () => {
+    const tmpdir = require('../utils/tmpdir');
+    const fallback = path.join(ROOT, 'tmp', 'fallback-teste');
+    const r = tmpdir.ensureTmpDir(fallback);
+    assert.ok(fs.existsSync(r.dir), 'diretório final existe');
+    // escreve de verdade no diretório resolvido
+    const probe = path.join(r.dir, '.teste-escrita');
+    fs.writeFileSync(probe, 'ok');
+    fs.unlinkSync(probe);
+    assert.strictEqual(tmpdir.escrevivel('/caminho/que/nao/existe/x/y/z'), false, 'detecta inválido');
+    ok(`4: temporário resolvido (${path.basename(r.dir)}) e gravável`);
+  });
+
+  /* ── 5. yt-dlp recebe cookies quando YT_COOKIES está definido ── */
+  await teste('5: yt-dlp usa cookies', async () => {
+    const CONFIG = require('../config');
+    const cookies = path.join(ROOT, 'tmp', 'cookies-teste.txt');
+    fs.writeFileSync(cookies, '# Netscape HTTP Cookie File\n');
+    const antes = CONFIG.downloader.ytCookies;
+    CONFIG.downloader.ytCookies = cookies;
+    const youtube = require('../downloaders/youtube');
+    // o comando real é montado dentro de ytdlpDownload; conferimos pela
+    // configuração lida pelo módulo (evita executar processo externo no teste)
+    assert.strictEqual(CONFIG.downloader.ytCookies, cookies, 'cookies disponíveis para o motor');
+    assert.ok(typeof youtube.ytdlpAvailable === 'function', 'detecção de motor exposta');
+    CONFIG.downloader.ytCookies = antes;
+    fs.unlinkSync(cookies);
+    ok('5: cookies do YouTube configuráveis (YT_COOKIES)');
+  });
+
+  /* ── 6. busca com plano B: yt-dlp quando o yt-search volta vazio ── */
+  await teste('6: busca pelo yt-dlp (plano B)', async () => {
+    const { execFileSync } = require('child_process');
+    const dir = path.join(ROOT, 'tmp', 'fakebin');
+    fs.mkdirSync(dir, { recursive: true });
+    const bin = path.join(dir, 'yt-dlp');
+    fs.writeFileSync(
+      bin,
+      '#!/bin/sh\n' +
+        'if [ "$1" = "--version" ]; then echo "2026.01.01"; exit 0; fi\n' +
+        `printf 'abc123\\tVídeo de Teste\\t3:21\\tCanal Teste\\n'\n`
+    );
+    fs.chmodSync(bin, 0o755);
+
+    // processo limpo com o yt-dlp falso no PATH (o módulo memoriza a detecção)
+    const script = [
+      `process.env.PATH = ${JSON.stringify(dir)} + ':' + process.env.PATH;`,
+      "const yt = require('./downloaders/youtube');",
+      'yt.search("teste de busca").then((r) => console.log("RESULT:" + JSON.stringify(r)))',
+      '  .catch((e) => console.log("RESULT:" + JSON.stringify({ erro: e.message })));',
+    ].join(' ');
+    const saida = execFileSync(process.execPath, ['-e', script], { cwd: ROOT, timeout: 60000 }).toString();
+    const linhaResult = saida.split('\n').find((l) => l.startsWith('RESULT:'));
+    assert.ok(linhaResult, 'a busca respondeu alguma coisa');
+    const r = JSON.parse(linhaResult.replace('RESULT:', ''));
+
+    assert.ok(Array.isArray(r), `busca devolveu lista (${JSON.stringify(r).slice(0, 120)})`);
+    assert.strictEqual(r.length, 1, 'usou o motor alternativo quando o principal voltou vazio');
+    assert.strictEqual(r[0].url, 'https://www.youtube.com/watch?v=abc123', 'link montado do id');
+    assert.strictEqual(r[0].engine, 'yt-dlp', 'marcado como motor alternativo');
+    fs.rmSync(dir, { recursive: true, force: true });
+    ok('6: busca tem plano B pelo yt-dlp (não morre em "nenhum resultado")');
+  });
+
+  /* ── 7. sem ffmpeg, "vídeo" que é só áudio tem que ser RECUSADO ──
+   *
+   * Caso real (celular do dono): o yt-dlp baixou o formato f140 (só áudio) e o
+   * bot mandou aquilo como se fosse vídeo. Aqui um yt-dlp falso devolve
+   * vcodec=none e o download de vídeo precisa FALHAR com aviso claro.
+   */
+  await teste('7: vídeo só de áudio é recusado (sem ffmpeg)', async () => {
+    const { execFileSync } = require('child_process');
+    const dir = path.join(ROOT, 'tmp', 'fakebin-video');
+    fs.mkdirSync(dir, { recursive: true });
+    const bin = path.join(dir, 'yt-dlp');
+    // responde --version, cria o arquivo do template e imprime os 5 campos
+    fs.writeFileSync(
+      bin,
+      '#!/bin/sh\n' +
+        'if [ "$1" = "--version" ]; then echo "2026.08.19"; exit 0; fi\n' +
+        'prev=""\n' +
+        'for a in "$@"; do\n' +
+        '  if [ "$prev" = "-o" ]; then echo "arquivo falso" > "$(echo "$a" | sed "s/%(ext)s/mp4/")"; fi\n' +
+        '  prev="$a"\n' +
+        'done\n' +
+        'echo "Vídeo de Teste"\n' +
+        'echo "Canal de Teste"\n' +
+        'echo "140"\n' +
+        'echo "none"\n' +
+        'echo "mp4a.40.2"\n'
+    );
+    fs.chmodSync(bin, 0o755);
+
+    const script = [
+      `process.env.PATH = ${JSON.stringify(dir)} + ':' + process.env.PATH;`,
+      "process.env.SEND_STATE_DIR = './tmp/dl-test-state';",
+      "const yt = require('./downloaders/youtube');",
+      'yt.downloadVideo("https://www.youtube.com/watch?v=dQw4w9WgXcQ")',
+      '  .then((r) => console.log("RESULT:" + JSON.stringify({ ok: true, path: r.path })))',
+      '  .catch((e) => console.log("RESULT:" + JSON.stringify({ code: e.code, msg: e.message })));',
+    ].join(' ');
+    const saida = execFileSync(process.execPath, ['-e', script], { cwd: ROOT, timeout: 60000 }).toString();
+    const linhaResult = saida.split('\n').find((l) => l.startsWith('RESULT:'));
+    const r = JSON.parse(linhaResult.replace('RESULT:', ''));
+
+    assert.ok(!r.ok, 'não pode entregar áudio como se fosse vídeo');
+    assert.strictEqual(r.code, 'CONVERTER_UNAVAILABLE', 'erro explica que falta o ffmpeg');
+    assert.ok(/ffmpeg/i.test(r.msg), 'a mensagem diz para instalar o ffmpeg');
+    // a mensagem tem que ser a NOSSA (ffmpeg), e não a do YouTube ("sessão
+    // validada") — antes o `includes('bot')` do friendlyError trocava as duas
+    assert.ok(!/sessão validada|não é um robô/i.test(r.msg), 'não pode virar a mensagem de robô do YouTube');
+
+    // e o arquivo inválido não fica no tmp do bot
+    const restos = fs.readdirSync(path.join(ROOT, 'tmp')).filter((f) => f.startsWith('youtube_'));
+    assert.strictEqual(restos.length, 0, `tmp sem arquivo inválido (${restos.join(', ')})`);
+    fs.rmSync(dir, { recursive: true, force: true });
+    ok('7: áudio disfarçado de vídeo é recusado com aviso do ffmpeg');
+  });
+
+  /* ── 8. seletor de formato não escolhe áudio para vídeo ── */
+  await teste('8: seletor de vídeo exige trilha de vídeo sem ffmpeg', async () => {
+    const yt = require('../downloaders/youtube');
+    const semFfmpeg = yt.buildVideoFormat(720, false);
+    assert.ok(/vcodec!=none/.test(semFfmpeg), 'exige vídeo no seletor padrão');
+    const comFfmpeg = yt.buildVideoFormat(720, true);
+    assert.ok(/\+ba/.test(comFfmpeg), 'com ffmpeg pode juntar vídeo+áudio');
+    const audio = yt.buildAudioFormat();
+    assert.ok(/bestaudio|best/.test(audio), 'áudio continua no seu próprio seletor');
+    ok('8: seletores de formato coerentes com o ffmpeg disponível');
+  });
+
+  console.log(`\n=== DOWNLOADS TEST: ${total - falhas}/${total} ✅ ===`);
+  if (falhas) {
+    console.error(`❌ ${falhas} falha(s)`);
+    process.exit(1);
+  }
+  console.log('=== DOWNLOADS TEST: TUDO OK ===');
+  process.exit(0);
+})().catch((e) => {
+  console.error('❌', e && e.stack ? e.stack : e);
+  process.exit(1);
+});

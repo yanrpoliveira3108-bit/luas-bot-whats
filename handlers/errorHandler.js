@@ -23,6 +23,9 @@ const FRIENDLY = {
   BOT_NOT_ADMIN: CONFIG.messages.botNotAdmin,
   NO_FORMAT: '📥 Formato indisponível para este link (o vídeo pode ser restrito ou muito grande).',
   YOUTUBE_BLOCKED: '📥 O YouTube recusou o download (bloqueio de rede/região ou vídeo restrito).\n▸ Tente outro vídeo, ou use TikTok/Instagram/Pinterest.',
+  NETWORK: '🌐 Não consegui alcançar o site.\n▸ Confira a internet do celular, desligue VPN/adblock e tente de novo.',
+  BLOCKED: '🚫 O site recusou o acesso a este aparelho/rede (HTTP 4xx ou captcha).\n▸ Troque de rede (Wi-Fi ↔ dados), desligue VPN e tente mais tarde.',
+  LOGIN: '🔒 Este conteúdo é privado e exige login — não dá para baixar.',
   CONVERTER_UNAVAILABLE: '🎨 Não consegui converter a mídia.\n▸ No Termux/Android, instale o ffmpeg: `pkg install ffmpeg`\n▸ Depois reinicie o bot.',
 };
 
@@ -64,11 +67,15 @@ async function handle(ctx, err, command) {
   if (!ctx || typeof ctx.reply !== 'function') return;
 
   try {
+    // Mensagem que já traz o "o que fazer" (linhas com ▸, escritas pelos
+    // downloaders) vale mais que o texto genérico do mapa: mostra o conserto.
+    const msg = err && typeof err.message === 'string' ? err.message : '';
+    const acionavel = msg.includes('▸') || msg.includes('pkg install') || msg.includes('pip install');
     const friendly = FRIENDLY[code];
-    if (friendly) {
+    if (acionavel) {
+      await ctx.reply(msg);
+    } else if (friendly) {
       await ctx.reply(friendly);
-    } else if (code === 'GENERIC') {
-      await ctx.reply(CONFIG.messages.error);
     } else {
       await ctx.reply(CONFIG.messages.error);
     }

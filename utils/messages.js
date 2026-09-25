@@ -88,16 +88,31 @@ function getQuoted(m) {
   return (ctx && ctx.quotedMessage) || null;
 }
 
-/** Chave da mensagem citada (para marcar/citar/deletar). */
-function getQuotedKey(m) {
+/**
+ * Chave da mensagem citada (para marcar/citar/deletar/apagar).
+ *
+ * `fromMe` importa para APAGAR: revogar a mensagem que o PRÓPRIO BOT enviou exige
+ * `fromMe: true` — antes esse campo era sempre `false` e por isso apagar a
+ * mensagem do bot falhava. Passe os JIDs do bot (`botJids`) para que a chave
+ * identifique corretamente de quem é a mensagem citada.
+ */
+function getQuotedKey(m, botJids = []) {
   const ctx = findContextInfo(m && m.message);
   if (!ctx || !ctx.stanzaId) return null;
+  const participant = ctx.participant || m.key.participant || undefined;
+  const donos = (Array.isArray(botJids) ? botJids : [botJids]).filter(Boolean).map(String);
+  const doBot = donos.length > 0 && donos.includes(String(participant || ''));
   return {
     remoteJid: m.key.remoteJid,
-    fromMe: false,
+    fromMe: doBot,
     id: ctx.stanzaId,
-    participant: ctx.participant || m.key.participant || undefined,
+    participant,
   };
+}
+
+/** A mensagem citada foi enviada pelo bot? (usa a chave montada acima) */
+function quotedEdoBot(chave) {
+  return !!(chave && chave.fromMe);
 }
 
 /** Texto da mensagem citada. */
@@ -136,14 +151,44 @@ function detectMediaType(m) {
  * por PN, preferimos o PN sempre que disponível.
  */
 function resolveSender(m) {
+  const cands = resolveSenderCandidates(m);
+  return cands[0] || '';
+}
+
+/**
+ * TODAS as formas plausíveis de identificar quem mandou a mensagem, da mais
+ * confiável para a menos: PN conhecido (`participantAlt`/`remoteJidAlt`), o
+ * campo bruto do WhatsApp (`participant`) e o próprio chat.
+ *
+ * Por que existe: grupos em modo LID mandam `participant` como LID e o PN pode
+ * faltar; comandos de dono/admin passavam a ser recusados mesmo vindo do dono.
+ * Com a lista, o contexto aceita QUALQUER forma que resolva para o dono — e o
+ * `,dono` mostra exatamente o que o bot viu.
+ */
+function resolveSenderCandidates(m) {
   const key = m && m.key;
-  if (!key) return '';
-  const remoteJid = key.remoteJid || '';
-  if (!isGroupJid(remoteJid)) return remoteJid;
-  const p = String(key.participant || '');
-  const alt = String(key.participantAlt || '');
-  if (p.endsWith('@lid') && alt && !alt.endsWith('@lid')) return alt;
-  return p || remoteJid;
+  if (!key) return [];
+  const remoteJid = String(key.remoteJid || '');
+  const out = [];
+  const push = (v) => {
+    const x = String(v || '');
+    if (x && !out.includes(x)) out.push(x);
+  };
+  if (isGroupJid(remoteJid)) {
+    push(key.participantAlt);
+    push(key.participant);
+    // o JID do GRUPO nunca é identidade de quem mandou: só entra se o WhatsApp
+    // não informou participante nenhum (mensagem antiga/estranha)
+    if (!out.length) push(remoteJid);
+  } else {
+    push(key.remoteJidAlt);
+    push(remoteJid);
+  }
+  // PN primeiro: em grupo LID o `participant` vem como LID e o telefone, quando
+  // existe, vem no campo *Alt. Ordenar aqui garante que `sender` seja o PN.
+  const pn = out.filter((j) => !j.endsWith('@lid'));
+  const lid = out.filter((j) => j.endsWith('@lid'));
+  return pn.concat(lid);
 }
 
 
@@ -217,10 +262,12 @@ module.exports = {
   extractText,
   getQuoted,
   getQuotedKey,
+  quotedEdoBot,
   getQuotedText,
   getMentionedJids,
   detectMediaType,
   resolveSender,
+  resolveSenderCandidates,
   unwrapViewOnce,
   isViewOnce,
   getInteractivePayload,

@@ -242,6 +242,19 @@ const makeMessagesSocket = (config) => {
             const decoded = WABinary_1.jidDecode(jid)
             const user = decoded?.user
             const device = decoded?.device
+            // [LUA-BOT-PATCH] destinatário SEM jid decodificável (id `undefined`
+            // no participante do grupo em modo LID — Socket/groups.js:346, quando
+            // o nó não traz `phone_number`). Sem esta linha o código seguia para
+            // `userDevicesCache.get(undefined)` → NodeCache.formatKey →
+            // "Cannot read properties of undefined (reading 'toString')" e TODO
+            // envio naquele grupo falhava (comando rodava, mensagem não saía —
+            // 65 falhas no grupo 120363046296961148@g.us em 25/09/2026).
+            // Ignorar o destinatário inválido é melhor do que perder a mensagem
+            // inteira: os demais participantes continuam recebendo.
+            if (!user) {
+                logger.warn({ jid: String(jid) }, 'destinatário sem jid decodificável — ignorado (patch lua-bot)')
+                continue
+            }
             const isExplicitDevice = typeof device === 'number' && devidirectl
             
             // Handle explicit device JIDs directly

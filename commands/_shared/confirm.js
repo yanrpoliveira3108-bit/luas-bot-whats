@@ -12,23 +12,27 @@ const session = require('../../utils/session');
  * Pede confirmação (sim/não) antes de executar `fn`.
  */
 async function confirmAction(ctx, label, fn) {
-  session.set(ctx.remoteJid, ctx.sender, {
+  const dados = {
     type: 'confirm',
     label,
     action: fn,
     onMessage: async (c) => {
       const t = c.text.trim().toLowerCase().replace(/^[!.]/, '');
       if (t === 'sim' || t === 's' || t === 'yes' || t === 'confirmar') {
-        session.clear(c.remoteJid, c.sender);
+        session.clearTodas(c.remoteJid, dados);
         await fn(c);
       } else if (t === 'nao' || t === 'n' || t === 'não' || t === 'no' || t === 'cancelar') {
-        session.clear(c.remoteJid, c.sender);
+        session.clearTodas(c.remoteJid, dados);
         await c.reply('✅ Ação cancelada.');
       } else {
         await c.reply('⚠️ Responda *sim* ou *não*.');
       }
     },
-  });
+  };
+  // gravada por TODAS as formas do remetente (PN, LID, com/sem dispositivo):
+  // em grupo LID a resposta pode chegar identificada de outra forma e a
+  // confirmação "sumia" — o dono via o pedido e o bot parecia ignorar o "sim"
+  session.setAny(ctx.remoteJid, ctx.identidades || [ctx.sender], dados);
   await ctx.reply(`⚠️ Confirmar: *${label}*?\nResponda *sim* ou *não* (válido por 30s).`);
 }
 

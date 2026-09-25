@@ -10,6 +10,7 @@
 
 const CONFIG = require('../config');
 const { downloadToFile } = require('../utils/download');
+const { erroDeRede, erroHttp, erroSemMidia } = require('../utils/errors');
 
 const UA =
   'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36';
@@ -36,19 +37,38 @@ async function fetchData(url) {
   const api = `${CONFIG.external.fxtwitter}/${parsed.user}/status/${parsed.id}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30000);
+  let bruto = '';
   try {
-    const res = await fetch(api, { headers: { 'user-agent': UA }, signal: controller.signal });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const json = await res.json();
+    let res;
+    try {
+      res = await fetch(api, {
+        headers: { 'user-agent': UA, accept: 'application/json', 'accept-language': 'pt-BR,pt;q=0.9,en;q=0.8' },
+        signal: controller.signal,
+      });
+    } catch (errFetch) {
+      throw erroDeRede(errFetch, 'X/Twitter');
+    }
+    bruto = await res.text();
+    if (!res.ok) throw erroHttp(res.status, 'X/Twitter', bruto);
+
+    let json;
+    try {
+      json = JSON.parse(bruto);
+    } catch (_) {
+      throw erroSemMidia('X/Twitter', bruto);
+    }
     if (!json || json.code !== 200 || !json.tweet) {
-      const e = new Error('Tweet não encontrado ou indisponível.');
+      const e = new Error(
+        `🔎 X/Twitter: tweet não encontrado ou indisponível${json && json.message ? ' (' + json.message + ')' : ''}.\n` +
+          '▸ Confira se o link é de um post público.'
+      );
       e.code = 'NO_RESULT';
       throw e;
     }
     const t = json.tweet;
     const media = (t.media && (t.media.all || t.media.videos || t.media.photos)) || [];
     if (!media.length) {
-      const e = new Error('Tweet sem mídia para baixar.');
+      const e = new Error('🔎 X/Twitter: este tweet não tem foto nem vídeo para baixar.');
       e.code = 'NO_RESULT';
       throw e;
     }

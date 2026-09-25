@@ -9,8 +9,39 @@
 
 const nav = require('../../utils/nav');
 const settings = require('../../database/settings');
+const menuFormat = require('../../utils/menuFormat');
+
+/** Tela do motor de navegação → categoria/grupo do menu HTML. */
+const HTML_POR_TELA = {
+  lua_admin_menu: { kind: 'admin' },
+  lua_members: { kind: 'membros' },
+  lua_owner: { kind: 'owner' },
+  lua_admin: { kind: 'owner' },
+  lua_automod: { kind: 'categoria', categoria: 'admin' },
+  lua_media: { kind: 'categoria', categoria: 'downloads' },
+  lua_sticker_menu: { kind: 'categoria', categoria: 'stickers' },
+  lua_downloads: { kind: 'categoria', categoria: 'downloads' },
+  lua_rpg: { kind: 'categoria', categoria: 'rpg' },
+  lua_life: { kind: 'categoria', categoria: 'life' },
+  lua_anime: { kind: 'categoria', categoria: 'anime' },
+  lua_games: { kind: 'categoria', categoria: 'games' },
+  lua_fun: { kind: 'categoria', categoria: 'fun' },
+  lua_utility: { kind: 'categoria', categoria: 'utility' },
+  lua_ia_menu: { kind: 'categoria', categoria: 'ai' },
+};
 
 async function openOrText(ctx, screen) {
+  // 1) menus em HTML (quando ligados) — mesma fonte de dados do menu tradicional
+  const alvo = HTML_POR_TELA[screen];
+  if (alvo) {
+    const enviado = await menuFormat.abrir(ctx, {
+      ...alvo,
+      foco: alvo.categoria,
+      forceText: ctx && ctx.forceTextMenu,
+    });
+    if (enviado) return;
+  }
+  // 2) lista/botões interativos (comportamento de sempre)
   if (settings.buttonsEnabled()) {
     require('../../menus/screens');
     await nav.openScreen(ctx, screen);

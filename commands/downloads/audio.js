@@ -3,6 +3,7 @@
 const youtube = require('../../downloaders/youtube');
 const { sendAudioResult } = require('../_shared/downloads');
 const errorHandler = require('../../handlers/errorHandler');
+const { dicaBuscaVazia } = require('../_shared/searchHint');
 
 module.exports = [
   {
@@ -16,7 +17,7 @@ module.exports = [
       const query = ctx.args.join(' ');
       if (!query) return ctx.reply('⚠️ Envie o nome da música: !audio <nome>');
       const results = await youtube.search(query, 1);
-      if (!results.length) return ctx.reply('🔎 Nenhum resultado encontrado.');
+      if (!results.length) return ctx.reply(dicaBuscaVazia());
       await ctx.reply('⏳ Baixando áudio...');
       try {
         const audio = await youtube.downloadAudio(results[0].url, results[0].title);

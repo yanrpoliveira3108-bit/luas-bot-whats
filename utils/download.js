@@ -254,4 +254,4 @@ function deleteFile(p) {
   } catch (_) {}
 }
 
-module.exports = { downloadToFile, downloadToBuffer, cleanupTmp, deleteFile, safeFileName };
+module.exports = { downloadToFile, downloadToBuffer, cleanupTmp, deleteFile, safeFileName, ensureTmp };

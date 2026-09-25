@@ -26,6 +26,9 @@ async function main() {
   process.env.OWNER_NUMBER = '5511999999999';
   process.env.DATABASE_FILE = DB;
   process.env.BUTTONS_ENABLED = 'true';
+  // SAFE_MODE não é definido de propósito: o teste roda com o PADRÃO do bot
+  // (cards HTML, menu por lista/botões e pagamento LIBERADOS). A seção 12
+  // cobre o modo seguro ligado explicitamente.
 
   const database = require('../database/database');
   database.open();
@@ -195,6 +198,28 @@ async function main() {
     assert.ok(last && /link|válid|suportad|indispon/i.test(last.content.text || ''), 'erro amigável');
     ok('10: download com URL inválida');
   } catch (e) { fail('10: download inválido', e); }
+
+  /* 12) MODO SEGURO ligado → menu cai no textual (sem payload interativo) */
+  try {
+    const safety = require('../utils/safety');
+    safety.setSafeMode(true);
+    const cooldown = require('../utils/cooldown');
+    cooldown.reset('user', OWNER, 'menu');
+    cooldown.reset('global', '*', 'menu');
+    sent.length = 0;
+    const ctx = await ctxFor(sock, mkMsg({ message: { conversation: '!menu' } }));
+    await commandHandler.runByName(ctx, 'menu');
+    assert.ok(
+      !sent.some((s) => s.content && Array.isArray(s.content.interactiveButtons)),
+      'nenhum payload interativo sai com o modo seguro ligado'
+    );
+    assert.ok(
+      sent.some((s) => /🌙 LUA|MENU/i.test(s.content.text || '')),
+      'menu textual enviado no lugar'
+    );
+    safety.setSafeMode(false);
+    ok('12: modo seguro bloqueia a lista nativa e mantém o menu textual');
+  } catch (e) { fail('12: modo seguro', e); }
 
   /* 11) persistência pós-reinício */
   try {

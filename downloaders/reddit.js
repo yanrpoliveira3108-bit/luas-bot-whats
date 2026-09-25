@@ -10,6 +10,7 @@
 
 const CONFIG = require('../config');
 const { downloadToFile } = require('../utils/download');
+const { erroDeRede, erroHttp, erroSemMidia } = require('../utils/errors');
 
 const UA = 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36';
 
@@ -28,14 +29,33 @@ async function fetchData(url) {
   const api = jsonUrl(url);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30000);
+  let bruto = '';
   try {
-    const res = await fetch(api, { headers: { 'user-agent': UA }, signal: controller.signal });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const json = await res.json();
+    let res;
+    try {
+      res = await fetch(api, {
+        headers: {
+          'user-agent': UA,
+          accept: 'application/json',
+          'accept-language': 'pt-BR,pt;q=0.9,en;q=0.8',
+        },
+        signal: controller.signal,
+      });
+    } catch (errFetch) {
+      throw erroDeRede(errFetch, 'Reddit');
+    }
+    bruto = await res.text();
+    if (!res.ok) throw erroHttp(res.status, 'Reddit', bruto);
+    let json;
+    try {
+      json = JSON.parse(bruto);
+    } catch (_) {
+      throw erroSemMidia('Reddit', bruto);
+    }
     const listing = Array.isArray(json) ? json[0] : json;
     const post = listing && listing.data && listing.data.children && listing.data.children[0] && listing.data.children[0].data;
     if (!post) {
-      const e = new Error('Post não encontrado ou indisponível.');
+      const e = new Error('🔎 Reddit: post não encontrado ou indisponível (pode ter sido apagado).');
       e.code = 'NO_RESULT';
       throw e;
     }
@@ -52,7 +72,7 @@ async function fetchData(url) {
       mediaUrl = post.preview.images[0].source && post.preview.images[0].source.url;
     }
     if (!mediaUrl) {
-      const e = new Error('Post sem mídia compatível (pode ser texto, galeria ou vídeo externo).');
+      const e = new Error('🔎 Reddit: este post não tem mídia compatível (é texto, galeria ou vídeo externo).');
       e.code = 'NO_RESULT';
       throw e;
     }

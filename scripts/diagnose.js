@@ -87,9 +87,9 @@ async function netTest(name, fn, ms = 10000) {
   try {
     const r = spawnSync('yt-dlp', ['--version'], { stdio: 'ignore', timeout: 15000 });
     if (!r.error && r.status === 0) ok('yt-dlp instalado ✓ (download do YouTube confiável)');
-    else bad('yt-dlp NÃO encontrado → pkg install yt-dlp\n     (sem ele, o YouTube depende do ytdl-core, que vive quebrando)');
+    else bad('yt-dlp NÃO encontrado → pkg install python ffmpeg && pip install -U yt-dlp\n     (sem ele, o YouTube depende do ytdl-core, que vive quebrando)');
   } catch (_) {
-    bad('yt-dlp NÃO encontrado → pkg install yt-dlp');
+    bad('yt-dlp NÃO encontrado → pkg install python && pip install -U yt-dlp');
   }
 
   /* ------------------------- conversores WASM ------------------------ */
@@ -216,7 +216,7 @@ async function netTest(name, fn, ms = 10000) {
         warn_('yt-dlp instalado, mas o download de teste falhou (rede/IP bloqueada pelo YouTube? tente com dados móveis).');
       }
     } else {
-      warn_('yt-dlp ausente — pulando teste de download (instale com: pkg install yt-dlp).');
+      warn_('yt-dlp ausente — pulando teste de download (instale com: pip install -U yt-dlp).');
     }
   } catch (e) {
     warn_('teste yt-dlp falhou: ' + e.message.split('\n')[0]);
@@ -295,7 +295,7 @@ async function netTest(name, fn, ms = 10000) {
   const ff = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' });
   if (ff.error) hints.push('pkg install ffmpeg                    # vídeo do YouTube (mescla) + stickers de vídeo/GIF');
   const yt = spawnSync('yt-dlp', ['--version'], { stdio: 'ignore', timeout: 15000 });
-  if (yt.error || yt.status !== 0) hints.push('pkg install yt-dlp                    # download de YouTube confiável (recomendado!)');
+  if (yt.error || yt.status !== 0) hints.push('pip install -U yt-dlp                 # download de YouTube confiável (pkg install python antes)');
   if (typeof fetch !== 'function') hints.push('pkg install nodejs-lts                # fetch (downloads + IA)');
 
   if (hints.length) {

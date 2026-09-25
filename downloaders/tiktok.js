@@ -12,6 +12,7 @@
 
 const CONFIG = require('../config');
 const { downloadToFile } = require('../utils/download');
+const { erroDeRede, erroHttp, erroSemMidia } = require('../utils/errors');
 
 const UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
@@ -24,12 +25,38 @@ async function fetchData(url) {
   const api = `${CONFIG.external.tikwm}?url=${encodeURIComponent(url)}&hd=1`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 35000);
+  let bruto = '';
   try {
-    const res = await fetch(api, { headers: { 'user-agent': UA }, signal: controller.signal });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const json = await res.json();
+    let res;
+    try {
+      res = await fetch(api, {
+        headers: {
+          'user-agent': UA,
+          accept: 'application/json, text/plain, */*',
+          'accept-language': 'pt-BR,pt;q=0.9,en;q=0.8',
+          referer: 'https://www.tikwm.com/',
+        },
+        signal: controller.signal,
+      });
+    } catch (errFetch) {
+      throw erroDeRede(errFetch, 'TikTok');
+    }
+    bruto = await res.text();
+    if (!res.ok) throw erroHttp(res.status, 'TikTok', bruto);
+
+    let json;
+    try {
+      json = JSON.parse(bruto);
+    } catch (_) {
+      // resposta não é JSON → quase sempre é página de challenge do Cloudflare
+      throw erroSemMidia('TikTok', bruto);
+    }
     if (!json || json.code !== 0 || !json.data) {
-      const e = new Error('Sem resultado');
+      const msg = (json && json.msg) || 'a API não devolveu o vídeo';
+      const e = new Error(
+        `🔎 TikTok: não consegui obter o vídeo (${msg}).\n` +
+          '▸ Se o link abre normalmente no navegador, tente de novo em alguns minutos.'
+      );
       e.code = 'NO_RESULT';
       throw e;
     }

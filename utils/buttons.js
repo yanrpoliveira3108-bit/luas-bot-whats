@@ -110,10 +110,21 @@ async function sendInteractiveMainMenu(ctx) {
  */
 function useInteractiveMenu() {
   if (CONFIG.ui && CONFIG.ui.uiMode === 'text') return false;
+  // Modo seguro: o menu por lista/botões é um payload que o cliente oficial
+  // do WhatsApp não produz (foi o gatilho da restrição no !menu). Com o modo
+  // seguro ligado, o menu sai no modo textual numerado — mesmas funções.
+  if (require('./safety').blocksInteractive()) return false;
   return settings.buttonsEnabled();
 }
 
 async function sendMainMenu(ctx) {
+  // 1) formato HTML (só com !modohtml on e fora do modo seguro)
+  // 2) lista/botões interativos (comportamento de sempre)
+  // 3) menu textual numerado (compatibilidade)
+  const menuFormat = require('./menuFormat');
+  if (await menuFormat.abrir(ctx, { kind: 'main', forceText: ctx && ctx.forceTextMenu })) {
+    return true;
+  }
   if (useInteractiveMenu()) {
     return sendInteractiveMainMenu(ctx);
   }

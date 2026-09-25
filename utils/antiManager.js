@@ -137,6 +137,22 @@ function clearUserHistory(groupJid, userJid) {
   if (gh) gh.delete(userJid);
 }
 
+/**
+ * Tira UMA mensagem do histórico (usado quando ela já foi apagada — sem isto o
+ * `!apagar @user N` tentaria revogar de novo a mesma mensagem).
+ */
+function removeFromHistory(groupJid, userJid, messageId) {
+  const gh = messageHistory.get(groupJid);
+  if (!gh) return false;
+  const list = gh.get(userJid);
+  if (!list) return false;
+  const i = list.findIndex((it) => it && it.key && it.key.id === messageId);
+  if (i < 0) return false;
+  list.splice(i, 1);
+  if (!list.length) gh.delete(userJid);
+  return true;
+}
+
 /** Limpeza periódica (registrada no janitor — um timer só para o bot todo). */
 function sweepHistory() {
   const cutoff = Date.now() - HISTORY_TTL_MS;
@@ -430,6 +446,7 @@ module.exports = {
   addToHistory,
   getUserHistory,
   clearUserHistory,
+  removeFromHistory,
   sweepHistory,
   getAntiConfig,
   getAllAntiConfig,

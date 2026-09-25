@@ -30,6 +30,7 @@ const session = require('../utils/session');
 const numberFallback = require('../utils/numberFallback');
 const interactive = require('../utils/interactive');
 const perf = require('../utils/perf');
+const antiBan = require('../utils/antiBan');
 const {
   extractText,
   getQuoted,
@@ -38,6 +39,7 @@ const {
   getMentionedJids,
   detectMediaType,
   resolveSender,
+  resolveSenderCandidates,
   splitCommand,
   isGroupJid,
   isStatusJid,
@@ -102,6 +104,45 @@ function invalidateGroupMeta(jid) {
   groupMeta.invalidate(jid);
 }
 
+/**
+ * Resolve um LID para o telefone (JID PN) usando o mapa da biblioteca
+ * (`signalRepository.lidMapping`). Devolve null quando não há mapa.
+ * Prazo curto: identidade não pode travar o processamento do comando.
+ */
+async function pnPeloMapaDeLid(sock, lid) {
+  try {
+    const mapa = sock && sock.signalRepository && sock.signalRepository.lidMapping;
+    if (!mapa || typeof mapa.getPNForLID !== 'function') return null;
+    let timer = null;
+    const prazo = new Promise((r) => {
+      timer = setTimeout(() => r(null), 3000);
+    });
+    try {
+      const achado = await Promise.race([mapa.getPNForLID(String(lid)), prazo]);
+      if (!achado) return null;
+      const s = String(achado);
+      if (s.endsWith('@lid')) return null;
+      const m = s.match(/^(\d+)(?::\d+)?@/);
+      if (m) return m[1] + '@s.whatsapp.net';
+      return s.includes('@') ? s : null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  } catch (_) {
+    return null;
+  }
+}
+
+/** Primeiro frame do stack (arquivo:linha) — é o que aponta a causa real. */
+function frameDoStack(err) {
+  const linhas = String((err && err.stack) || '').split('\n');
+  for (const l of linhas) {
+    const t = l.trim();
+    if (t.startsWith('at ') && !t.includes('node:internal') && !t.includes('internal/process')) return t;
+  }
+  return linhas.length > 1 ? linhas[1].trim() : '';
+}
+
 /* ----------------------------- contexto ------------------------------ */
 
 async function buildContext(sock, msg) {
@@ -120,11 +161,30 @@ async function buildContext(sock, msg) {
     String(msg.key.participantAlt || '').endsWith('@lid')
   );
 
-  let sender = resolveSender(msg) || remoteJid;
-  if (sender.endsWith('@lid') && participants.length) {
-    const pn = permissions.toPn(sender, participants);
-    if (pn && !pn.endsWith('@lid')) sender = pn;
-    else logger.warn({ sender, chat: remoteJid }, 'não consegui resolver LID → PN do remetente');
+  // IDENTIDADE: o WhatsApp pode identificar a mesma pessoa de várias formas
+  // (PN, LID, com/sem código de dispositivo). Resolvemos TODAS as formas
+  // plausíveis — a autorização (dono/admin) aceita qualquer uma que confira, e a
+  // sessão de confirmação é gravada/procurada por todas elas.
+  const candidatos = [];
+  for (const bruto of resolveSenderCandidates(msg)) {
+    const j = String(bruto || '');
+    if (!j) continue;
+    let resolvido = j;
+    if (j.endsWith('@lid')) {
+      let pn = participants.length ? permissions.toPn(j, participants) : j;
+      if (!pn || pn.endsWith('@lid')) {
+        // o mapa LID↔PN da PRÓPRIA biblioteca (o mesmo usado para cifrar). Em
+        // grupo de comunidade/LID a lista de participantes pode vir sem telefone
+        // (mesmo defeito que derrubava o envio — SEGURANCA-ENVIO.md §4.1.4).
+        pn = await pnPeloMapaDeLid(sock, j);
+      }
+      if (pn && !pn.endsWith('@lid')) resolvido = pn;
+    }
+    for (const v of [resolvido, j]) if (v && !candidatos.includes(v)) candidatos.push(v);
+  }
+  let sender = candidatos[0] || remoteJid;
+  if (sender.endsWith('@lid') && !candidatos.some((c) => !c.endsWith('@lid'))) {
+    logger.warn({ sender, chat: remoteJid }, 'não consegui resolver LID → PN do remetente');
   }
 
   const text = extractText(msg);
@@ -135,7 +195,7 @@ async function buildContext(sock, msg) {
       String(j).endsWith('@lid') ? permissions.toPn(j, participants) : j
     );
   }
-  const quotedKey = getQuotedKey(msg);
+  const quotedKey = getQuotedKey(msg, [botJid, botLid]);
   if (quotedKey && quotedKey.participant && String(quotedKey.participant).endsWith('@lid') && participants.length) {
     quotedKey.participant = permissions.toPn(quotedKey.participant, participants);
   }
@@ -143,12 +203,16 @@ async function buildContext(sock, msg) {
   let isAdmin = false;
   let isBotAdmin = false;
   if (isGroup) {
-    isAdmin = permissions.isAdmin(participants, sender);
+    // admin: basta UMA forma do remetente constar como admin (a lista pode
+    // trazer o LID e o remetente resolver para PN, ou vice-versa)
+    for (const c of candidatos) if (permissions.isAdmin(participants, c)) isAdmin = true;
     isBotAdmin = permissions.isBotAdmin(participants, botLid ? [botJid, botLid] : botJid);
-    if (sender === botJid) isAdmin = true;
+    if (candidatos.includes(botJid) || (botLid && candidatos.includes(botLid))) isAdmin = true;
   }
 
-  const isOwner = permissions.isOwner(sender);
+  // DONO: qualquer forma do remetente que confira com OWNER_NUMBER
+  let isOwner = false;
+  for (const c of candidatos) if (permissions.isOwner(c)) isOwner = true;
   const user = users.get(sender);
   const isRegistered = !!(user && user.is_registered);
 
@@ -168,8 +232,14 @@ async function buildContext(sock, msg) {
     message: msg,
     remoteJid,
     sender,
+    // todas as formas conhecidas do remetente (PN, LID, com/sem dispositivo) —
+    // usadas para autorização e para casar a resposta da confirmação
+    identidades: candidatos.length ? candidatos : [sender].filter(Boolean),
     isGroup,
     isCommunity,
+    // participantes do grupo (já buscados aqui com cache+prazo): evita cada
+    // comando consultar de novo e permite saber se o ALVO é admin
+    participants,
     isAdmin,
     isOwner,
     isBotAdmin,
@@ -184,7 +254,14 @@ async function buildContext(sock, msg) {
     prefix,
     text,
     quoted,
-    quotedKey,
+    quotedKey: quotedKey && (msg.key.remoteJid
+      ? Object.assign({}, quotedKey, {
+          fromMe:
+            quotedKey.fromMe === true ||
+            String(quotedKey.participant || '') === botJid ||
+            Boolean(botLid && String(quotedKey.participant || '') === botLid),
+        })
+      : quotedKey),
     quotedText: getQuotedText(msg),
     mentionedJid,
     mediaType: detectMediaType(msg),
@@ -192,7 +269,14 @@ async function buildContext(sock, msg) {
 
   ctx.reply = async (t, opts = {}) => {
     try {
-      const res = await sock.sendMessage(remoteJid, { text: String(t) }, { quoted: opts.quoted === false ? undefined : msg });
+      await antiBan.simulateTyping(sock, remoteJid, t, 'composing');
+      const res = await antiBan.enqueueOutbound(() =>
+        sock.sendMessage(
+          remoteJid,
+          opts.mentions && opts.mentions.length ? { text: String(t), mentions: opts.mentions } : { text: String(t) },
+          { quoted: opts.quoted === false ? undefined : msg }
+        )
+      );
       if (isCommunity || lidGroupMsg) {
         logger.info(
           { chat: remoteJid, hasId: !!(res && res.key && res.key.id), community: !!isCommunity, lid: !!lidGroupMsg },
@@ -201,19 +285,59 @@ async function buildContext(sock, msg) {
       }
       return res;
     } catch (e) {
-      logger.warn({ chat: remoteJid, err: e && e.message }, '[SEND] sendMessage FALHOU');
+      // SEM o stack, um erro de envio no aparelho vira adivinhação: foi o caso do
+      // grupo de comunidade/LID em 25/09 (56 respostas perdidas, causa desconhecida)
+      logger.warn(
+        { chat: remoteJid, err: e && e.message, frame: frameDoStack(e), stack: e && e.stack },
+        '[SEND] sendMessage FALHOU'
+      );
       throw e;
     }
   };
-  ctx.replyWithMentions = (t, mentions) =>
-    sock.sendMessage(remoteJid, { text: String(t), mentions }, { quoted: msg });
-  ctx.sendButtons = (o) => interactive.sendButtons(sock, remoteJid, Object.assign({ quoted: msg }, o));
-  ctx.sendList = (o) => interactive.sendList(sock, remoteJid, Object.assign({ quoted: msg }, o));
-  ctx.sendImage = (b, caption = '') => mediaUtil.sendImage(sock, remoteJid, b, caption, { quoted: msg });
-  ctx.sendVideo = (b, caption = '', opts = {}) => mediaUtil.sendVideo(sock, remoteJid, b, caption, Object.assign({ quoted: msg }, opts));
-  ctx.sendAudio = (b, opts = {}) => mediaUtil.sendAudio(sock, remoteJid, b, Object.assign({ quoted: msg }, opts));
-  ctx.sendSticker = (b, opts = {}) => mediaUtil.sendSticker(sock, remoteJid, b, Object.assign({ quoted: msg }, opts));
-  ctx.sendDocument = (b, opts = {}) => mediaUtil.sendDocument(sock, remoteJid, b, Object.assign({ quoted: msg }, opts));
+  ctx.replyWithMentions = async (t, mentions) => {
+    await antiBan.simulateTyping(sock, remoteJid, t, 'composing');
+    return antiBan.enqueueOutbound(() =>
+      sock.sendMessage(remoteJid, { text: String(t), mentions }, { quoted: msg })
+    );
+  };
+  ctx.sendButtons = async (o) => {
+    await antiBan.simulateTyping(sock, remoteJid, o && o.text, 'composing');
+    return antiBan.enqueueOutbound(() =>
+      interactive.sendButtons(sock, remoteJid, Object.assign({ quoted: msg }, o))
+    );
+  };
+  ctx.sendList = async (o) => {
+    await antiBan.simulateTyping(sock, remoteJid, o && o.text, 'composing');
+    return antiBan.enqueueOutbound(() =>
+      interactive.sendList(sock, remoteJid, Object.assign({ quoted: msg }, o))
+    );
+  };
+  ctx.sendImage = async (b, caption = '') => {
+    await antiBan.simulateTyping(sock, remoteJid, caption, 'composing');
+    return antiBan.enqueueOutbound(() =>
+      mediaUtil.sendImage(sock, remoteJid, b, caption, { quoted: msg })
+    );
+  };
+  ctx.sendVideo = async (b, caption = '', opts = {}) => {
+    await antiBan.simulateTyping(sock, remoteJid, caption, 'composing');
+    return antiBan.enqueueOutbound(() =>
+      mediaUtil.sendVideo(sock, remoteJid, b, caption, Object.assign({ quoted: msg }, opts))
+    );
+  };
+  ctx.sendAudio = async (b, opts = {}) => {
+    await antiBan.simulateTyping(sock, remoteJid, '', 'recording');
+    return antiBan.enqueueOutbound(() =>
+      mediaUtil.sendAudio(sock, remoteJid, b, Object.assign({ quoted: msg }, opts))
+    );
+  };
+  ctx.sendSticker = (b, opts = {}) =>
+    antiBan.enqueueOutbound(() =>
+      mediaUtil.sendSticker(sock, remoteJid, b, Object.assign({ quoted: msg }, opts))
+    );
+  ctx.sendDocument = (b, opts = {}) =>
+    antiBan.enqueueOutbound(() =>
+      mediaUtil.sendDocument(sock, remoteJid, b, Object.assign({ quoted: msg }, opts))
+    );
   ctx.react = (emoji) => sock.sendMessage(remoteJid, { react: { text: emoji, key: msg.key } }).catch(() => {});
   ctx.deleteMessage = (key) => sock.sendMessage(remoteJid, { delete: key || msg.key }).catch(() => {});
   ctx.presence = (state) => sock.sendPresenceUpdate(state, remoteJid).catch(() => {});
@@ -324,8 +448,11 @@ function shouldProcessMessage(msg) {
   if (!msg.key || !msg.key.fromMe) return true;
   const isBotEcho = typeof msg.key.id === 'string' && msg.key.id.startsWith('3EB0');
   if (isBotEcho) return false;
-  const senderJid = resolveSender(msg) || msg.key.remoteJid;
-  if (!permissions.isOwner(senderJid)) return false;
+  // dono digitando do próprio aparelho/da própria conta (fromMe): qualquer
+  // forma de identidade que confira serve — antes, um `participant` em LID
+  // fazia o comando do dono ser ignorado em silêncio
+  const formas = resolveSenderCandidates(msg);
+  if (!formas.some((jid) => permissions.isOwner(jid))) return false;
   const text = extractText(msg);
   if ((text || '').trim().startsWith(settings.effectivePrefix())) return true;
   if (getInteractivePayload(msg)) return true;
@@ -347,6 +474,15 @@ async function handleMessage(sock, msg, type) {
 
     const ctx = await buildContext(sock, msg);
     if (!ctx.sender) return;
+
+    // O dono falou neste chat agora: durante uma PAUSA do freio, este chat
+    // continua respondendo (sem isso, comando de dono em GRUPO ficava sem
+    // resposta e parecia "comando que não funciona")
+    if (ctx.isOwner) {
+      try {
+        require('../utils/sendGuard').noteOwnerChat(ctx.remoteJid);
+      } catch (_) {}
+    }
 
     perf.add('messages');
 
@@ -429,6 +565,11 @@ async function handleMessage(sock, msg, type) {
     if (parsed) {
       const cmd = registry.resolveTrigger(parsed.command);
       if (!cmd) {
+        // Anti-ban: não envia sugestões/menus para estranhos no privado se silentPv estiver ligado (evita denúncias)
+        if (!ctx.isGroup && !ctx.isOwner && CONFIG.security?.silentPv) {
+          logger.info({ user: ctx.sender, cmd: parsed.command }, '[ANTI-BAN] Silent PV: comando inválido ignorado no privado');
+          return;
+        }
         try {
           const fuzzy = require('../utils/fuzzySearch');
           const allCmds = registry.all();
@@ -502,7 +643,9 @@ async function handleMessage(sock, msg, type) {
         }
       }
       logger.info(
-        { tag: 'COMMAND', sender: ctx.sender, fromMe: !!(msg.key && msg.key.fromMe) },
+        // `chat` no log é o que permite responder "por que não falou NESTE chat?":
+        // sem ele, o relatório do dispositivo não sabia separar as conversas
+        { tag: 'COMMAND', chat: ctx.remoteJid, sender: ctx.sender, fromMe: !!(msg.key && msg.key.fromMe) },
         `[LUA][COMMAND] Comando recebido: ${parsed.raw.split('\n')[0].slice(0, 80)}`
       );
       await executeCommand(ctx, cmd, parsed.args);
@@ -511,11 +654,13 @@ async function handleMessage(sock, msg, type) {
 
     const bare = (ctx.text || '').trim().toLowerCase();
     if (bare === 'prefixo' || bare === 'prefix') {
+      if (!ctx.isGroup && !ctx.isOwner && CONFIG.security?.silentPv) return;
       await ctx.reply(`🔤 Prefixo atual: *${prefix}*\n\n💡 Use *${prefix}menu* para ver os comandos.`);
       return;
     }
 
     if (bare === 'menu' || bare === 'menuprincipal') {
+      if (!ctx.isGroup && !ctx.isOwner && CONFIG.security?.silentPv) return;
       await require('../utils/buttons').sendMainMenu(ctx);
       return;
     }
@@ -524,7 +669,7 @@ async function handleMessage(sock, msg, type) {
       return;
     }
 
-    const gameSession = session.get(ctx.remoteJid, ctx.sender);
+    const gameSession = session.getAny(ctx.remoteJid, ctx.identidades || [ctx.sender]);
     if (gameSession && gameSession.onMessage) {
       try {
         await gameSession.onMessage(ctx);
@@ -603,14 +748,29 @@ async function handlePrivateAntiPv(sock, ctx) {
   }
 
   // pv1 — um aviso por dia
-  const last = pvWarned.get(sender) || 0;
-  if (Date.now() - last > 24 * 60 * 60 * 1000) {
-    pvWarned.set(sender, Date.now());
-    await ctx
-      .reply('🔒 *Anti PV ativo*\n▸ Não atendo no privado. Use os comandos dentro do grupo.')
-      .catch(() => {});
+  if (pv1) {
+    const last = pvWarned.get(sender) || 0;
+    if (Date.now() - last > 24 * 60 * 60 * 1000) {
+      pvWarned.set(sender, Date.now());
+      await ctx
+        .reply('🔒 *Anti PV ativo*\n▸ Não atendo no privado. Use os comandos dentro do grupo.')
+        .catch(() => {});
+    }
+    return true;
   }
-  return true;
+
+  // Silent PV seguro (Anti-Ban): se nenhum anti-pv explícito estiver ligado,
+  // ignora conversas casuais de estranhos no privado para evitar denúncias (report spam).
+  if (CONFIG.security?.silentPv) {
+    const prefix = settings.effectivePrefix();
+    const isCmd = (ctx.text || '').trim().startsWith(prefix);
+    if (!isCmd) {
+      logger.info({ usuario: sender }, '[ANTI-BAN] Silent PV: mensagem casual de estranho ignorada no privado');
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function grantXp(sender) {

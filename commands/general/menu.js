@@ -33,11 +33,21 @@ module.exports = [
     commands: ['menu'],
     aliases: ['menuprincipal'],
     category: 'general',
-    description: 'Abre o menu principal interativo. Use !menu <termo> para buscar comandos.',
-    usage: '!menu [termo de busca]',
+    description:
+      'Abre o menu principal. Use !menu <termo> para buscar e !menu --texto para o formato tradicional.',
+    usage: '!menu [termo de busca] | !menu --texto',
     cooldown: 1500,
     execute: async (ctx) => {
-      const query = ctx.args.join(' ').trim();
+      const args = (ctx.args || []).slice();
+      // Alternativa TRADICIONAL sempre acessível, mesmo com o modo HTML ligado.
+      // A flag `--texto` é inequívoca (não conflita com busca por termo).
+      const flagTexto = args.findIndex((a) => /^--(texto|tradicional|antigo)$/i.test(String(a)));
+      if (flagTexto >= 0) {
+        args.splice(flagTexto, 1);
+        ctx.forceTextMenu = true;
+      }
+
+      const query = args.join(' ').trim();
       if (!query) {
         await mainMenu(ctx);
         return;

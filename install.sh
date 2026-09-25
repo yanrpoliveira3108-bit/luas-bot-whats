@@ -202,7 +202,7 @@ if command -v yt-dlp >/dev/null 2>&1; then
   ok "yt-dlp instalado (motor principal de YouTube)"
 else
   echo "⚠️  yt-dlp NÃO encontrado — YouTube usará ytdl-core (menos estável)"
-  echo "   Termux: pkg install yt-dlp"
+  echo "   Termux: pkg install python ffmpeg && pip install -U yt-dlp"
   echo "   Linux: pip install yt-dlp ou apt install yt-dlp"
 fi
 

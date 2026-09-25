@@ -29,6 +29,10 @@ async function main() {
   process.env.OWNER_NUMBER = '5511999999999';
   process.env.DATABASE_FILE = DB;
   process.env.BUTTONS_ENABLED = 'true';
+  // Valida o FORMATO do card HTML (botForwardedMessage + richResponseMessage)
+  // e do menu interativo com o PADRÃO do bot (SAFE_MODE não definido =
+  // liberado). O comportamento com o modo seguro ligado tem teste próprio em
+  // test/sendguard.test.js.
 
   const database = require('../database/database');
   database.open();

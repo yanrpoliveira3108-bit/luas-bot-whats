@@ -388,6 +388,9 @@ function buildRichMessage(html) {
 async function sendHtmlPing(socket, jid, data = {}) {
   try {
     if (!socket || typeof socket.relayMessage !== 'function') return false;
+    // Modo seguro: o card HTML é um payload de "bot IA" forjado (ver
+    // utils/richHtml.js). Retornar false faz o !ping2 responder em texto.
+    if (require('./safety').blocksRichCards()) return false;
     const cpuNum = await getCpuUsage();
     const ram = getRam();
     const date = getDateInfo();

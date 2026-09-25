@@ -269,7 +269,9 @@ nav.registerScreen('lua_automod', () => ({
     { id: 'antipalavrao', text: '🤬 Anti-palavrão', run: run('anti', ['config', 'antipalavrao']) },
     { id: 'autobot', text: '🤖 Painel AutoBot', run: run('autobot') },
     { id: 'statusgrupo', text: '📊 Status do grupo', run: run('statusgrupo') },
-    { id: 'apagar', text: '🧹 Apagar histórico', run: run('apagar') },
+    // uma entrada só para as duas formas: marcada (qualquer admin) e em lote
+    // (@user + quantidade). Sem marcação o comando explica como marcar.
+    { id: 'apagar', text: '🗑️ Apagar mensagem (marcada/@user)', run: run('apagar') },
     { id: 'antireset', text: '♻️ Resetar todos', run: run('anti', ['reset']) },
   ],
 }));

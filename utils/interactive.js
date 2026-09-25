@@ -14,6 +14,20 @@
 const fs = require('fs');
 const CONFIG = require('../config');
 const logger = require('./logger').child('interactive');
+const safety = require('./safety');
+
+/**
+ * Modo seguro: lista/botões nativos (interactiveMessage + nativeFlowMessage)
+ * são payloads que o cliente OFICIAL do WhatsApp não produz. Enviá-los é o
+ * que fazia a conta cair em "conta restrita" já no !menu. Devolvendo `false`
+ * aqui, todo chamador cai automaticamente no menu TEXTUAL numerado — o
+ * recurso continua funcionando, só muda o formato.
+ */
+function blocked() {
+  if (!safety.blocksInteractive()) return false;
+  logger.info('modo seguro: lista/botões nativos bloqueados (fallback textual)');
+  return true;
+}
 
 /** Lê a mídia para Buffer (aceita Buffer, caminho local ou { url }). */
 async function toBuffer(media) {
@@ -33,6 +47,7 @@ async function toBuffer(media) {
  * @returns {Promise<boolean>} true se enviou (uma única mensagem)
  */
 async function sendListWithImage(sock, jid, { title, text, footer, sections, image, quoted }) {
+  if (blocked()) return false;
   const buf = await toBuffer(image);
   if (!buf) return false;
   try {
@@ -78,6 +93,7 @@ async function sendListWithImage(sock, jid, { title, text, footer, sections, ima
  * @returns {Promise<boolean>} true se enviou a lista, false se caiu no fallback
  */
 async function sendList(sock, jid, { title, text, footer, buttonText = 'Selecionar', sections, quoted }) {
+  if (blocked()) return false;
   try {
     await sock.sendMessage(
       jid,
@@ -112,6 +128,7 @@ async function sendList(sock, jid, { title, text, footer, buttonText = 'Selecion
  * headerType: 1 = texto, 4 = imagem.
  */
 async function sendButtons(sock, jid, { text, footer, buttons, headerType = 1, headerText, image, quoted }) {
+  if (blocked()) return false;
   try {
     const payload = {
       text,

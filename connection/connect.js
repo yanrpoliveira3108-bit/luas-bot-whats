@@ -29,6 +29,7 @@ const logger = require('../utils/logger').child('connection');
 const activity = require('../utils/activity');
 const pairing = require('./pairing');
 const sessionRecovery = require('./sessionRecovery');
+const sendGuard = require('../utils/sendGuard');
 
 let sock = null;
 let connecting = false;
@@ -247,21 +248,87 @@ async function connect({ phone } = {}) {
       logger.info({ version: Array.isArray(version) ? version.join('.') : version }, 'versão do WhatsApp definida');
     }
 
-    // 4) cria o socket
+    // 4) cria o socket (com fingerprint e presença seguros anti-ban)
+    const antiBan = require('../utils/antiBan');
+    const browserConfig = antiBan.getBrowserConfig(Browsers);
+    const markOnline = CONFIG.security ? CONFIG.security.markOnline : false;
+
+    // CACHE DE METADADOS DE GRUPO: sem isto, TODO envio em grupo consulta a
+    // lista de participantes AO VIVO e SEM PRAZO (Socket/messages-send.js:837 →
+    // groups.js:24). Quando o servidor não responde essa consulta — acontecia no
+    // grupo de comunidade/LID do dono (25/09) — o envio fica pendurado para
+    // sempre: o comando roda, o bot fica "digitando…" e nada aparece no chat.
+    // Com `cachedGroupMetadata` a biblioteca usa o cache e não faz a consulta.
+    const groupMetadataCache = require('../utils/groupMetadataCache');
+    const safeNodeCache = require('../utils/safeNodeCache');
+
+    // INTERRUPTORES DE EMERGÊNCIA (código sem edição, só .env, e reiniciar):
+    //   SAFE_CACHE=0      → volta aos caches padrão da biblioteca
+    //   GROUP_META_CACHE=0 → volta à consulta de metadados ao vivo
+    //   SEND_TIMEOUT_MS=0  → envio sem prazo (comportamento antigo)
+    //   SEND_RETRY_ON_HANG=0 → nunca reenvia envio travado
+    // Servem para ISOLAR uma suspeita em segundos, sem mexer em código.
+    const semCacheSeguro = String(process.env.SAFE_CACHE || '1') === '0';
+    const semCacheGrupo = String(process.env.GROUP_META_CACHE || '1') === '0';
+    if (semCacheSeguro) logger.warn('SAFE_CACHE=0 — usando os caches padrão da biblioteca');
+    if (semCacheGrupo) logger.warn('GROUP_META_CACHE=0 — consulta de metadados ao vivo (sem cache)');
+
     sock = makeWASocket({
       version,
       auth: {
         creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, baileysLogger()),
+        // 3º argumento = o cache da biblioteca: usamos a versão blindada
+        // (utils/safeNodeCache.js) — uma chave inválida vira "miss" em vez de
+        // TypeError que derruba o envio
+        keys: makeCacheableSignalKeyStore(
+          state.keys,
+          baileysLogger(),
+          semCacheSeguro ? undefined : safeNodeCache.criar({}, 'signalStore')
+        ),
       },
       printQRInTerminal: false, // QR desabilitado por design
-      browser: Browsers.ubuntu('Chrome'),
+      browser: browserConfig,
       logger: baileysLogger(),
       generateHighQualityLinkPreview: false,
       syncFullHistory: false,
-      markOnlineOnConnect: true,
+      markOnlineOnConnect: markOnline,
+      // usado DENTRO do envio de grupo: responde do cache (fresco), renova em
+      // segundo plano (vencido) ou busca com prazo (frio). NUNCA pendura.
+      ...(semCacheGrupo ? {} : { cachedGroupMetadata: groupMetadataCache.cachedGroupMetadata }),
+      // cache de dispositivos por usuário: é ele que estourava
+      // "Cannot read properties of undefined (reading 'toString')" quando um
+      // participante do grupo (modo LID) vinha sem id (NodeCache.formatKey).
+      // Esta versão não lança — uma chave inválida vira um "miss".
+      ...(semCacheSeguro ? {} : { userDevicesCache: safeNodeCache.criar() }),
     });
-    logger.info('socket criado — aguardando connection.update');
+    logger.info(
+      { browser: browserConfig[0] + ' ' + browserConfig[1], markOnline },
+      'socket criado — aguardando connection.update'
+    );
+
+    // FREIO DE ENVIO (anti-restrição): instala a fila + limites em TODAS as
+    // saídas do socket antes de qualquer handler existir. É isso que impede
+    // rajada de mensagens (o padrão que o WhatsApp trata como spam), trava
+    // mensagem idêntica repetida em vários chats e pausa tudo sozinho quando
+    // aparece sinal de restrição. A simulação de "digitando..." (utils/antiBan)
+    // continua por cima, para o ritmo parecer humano.
+    sendGuard.attach(sock);
+    // pausa que já estava valendo quando o bot parou (sinal de restrição do
+    // WhatsApp): continua valendo — e o dono precisa saber, senão parece que
+    // "o bot está morto". Só a conversa do dono é respondida enquanto durar.
+    try {
+      const pausa = sendGuard.pausaDoEstado && sendGuard.pausaDoEstado();
+      if (pausa) {
+        logger.warn(
+          { ate: pausa.until, minutos: pausa.minutos, motivo: pausa.reason },
+          '⏸️  ENVIOS PAUSADOS (pausa anterior ainda valendo) — só os chats do dono são respondidos'
+        );
+      }
+    } catch (_) {}
+    // metadados de grupo: cache + prazo nas consultas (as dos NOSSOS comandos
+    // também, que até agora podiam pendurar em grupo de comunidade/LID) e
+    // aquecimento em segundo plano com a lista de grupos do número.
+    if (!semCacheGrupo) groupMetadataCache.attach(sock);
     // EXPERIMENTAL (selective payment/text): anexa a API de transporte
     // seletivo ao socket SEM substituí-lo (ver utils/selective.js).
     try {
@@ -281,6 +348,9 @@ async function connect({ phone } = {}) {
         pendingPhone = String(phone).replace(/\D/g, '');
         currentPhoneDigits = pendingPhone;
         pairingCodeRequested = false; // novo pareamento → vai re-pedir o código
+        // número NOVO: recomeça o warmup (limites mais duros nas primeiras
+        // horas, que é quando o WhatsApp mais restringe conta recém-criada)
+        sendGuard.resetWarmup('novo pareamento');
         // ⚠️ IMPORTANTE: espera o websocket abrir e o handshake concluir
         // (evento 'qr') ANTES de pedir o código. O requestPairingCode chama
         // sendNode, que lança "Connection Closed" (428) se o websocket ainda
@@ -436,6 +506,9 @@ function handleConnectionUpdate(update, sockRef) {
     pairingCodeRequested = false;
     currentPhoneDigits = phoneDigitsFromJid(sockRef.user && sockRef.user.id) || currentPhoneDigits;
     logger.info({ jid: sockRef.user && sockRef.user.id }, '✅ conectado ao WhatsApp (connection = open)');
+    // freio: zera as janelas de frequência e respeita a espera inicial
+    // (uma rajada logo depois de conectar é justamente o que chama atenção)
+    sendGuard.markConnected();
     // Diagnóstico de identidade LID (comunidades dependem do LID da sessão).
     logger.info(
       { id: sockRef.user && sockRef.user.id, lid: sockRef.user && sockRef.user.lid, hasLid: !!(sockRef.user && sockRef.user.lid) },

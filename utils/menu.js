@@ -25,6 +25,20 @@ const numberFallback = require('./numberFallback');
  * @returns {Promise<boolean>} true se enviou menu interativo
  */
 async function sendMenu(ctx, opts = {}) {
+  // Formato HTML: só quando temos uma CATEGORIA real do registro (os menus
+  // montados com linhas próprias — x9, rankings, configurações — continuam no
+  // formato tradicional, que é onde as ações delas fazem sentido).
+  if (opts.category && opts.viaHtml !== false) {
+    const menuFormat = require('./menuFormat');
+    const enviado = await menuFormat.abrir(ctx, {
+      kind: 'categoria',
+      categoria: opts.category,
+      foco: opts.foco || opts.category,
+      forceText: ctx && ctx.forceTextMenu,
+    });
+    if (enviado) return true;
+  }
+
   const menuId = String(opts.id || 'menu').replace(/[^a-z0-9-]/gi, '').slice(0, 24);
   const rows = opts.rows || [];
 
@@ -87,6 +101,7 @@ async function categoryMenu(ctx, meta) {
   }));
   return sendMenu(ctx, {
     id: meta.category,
+    category: meta.category,
     title: meta.title,
     text: `${meta.description || ''}\n_Toque em um comando para executá-lo._`,
     rows,

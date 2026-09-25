@@ -11,6 +11,7 @@
 
 const CONFIG = require('../config');
 const { downloadToFile } = require('../utils/download');
+const { erroDeRede, erroHttp, erroSemMidia } = require('../utils/errors');
 
 const UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
@@ -22,13 +23,24 @@ async function fetchPage(url) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 25000);
     try {
-      const res = await fetch(url, {
-        headers: { 'user-agent': UA, accept: 'text/html,application/xhtml+xml' },
-        signal: controller.signal,
-        redirect: 'follow',
-      });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      return await res.text();
+      let res;
+      try {
+        res = await fetch(url, {
+          headers: {
+            'user-agent': UA,
+            accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'accept-language': 'pt-BR,pt;q=0.9,en;q=0.8',
+            'cache-control': 'no-cache',
+          },
+          signal: controller.signal,
+          redirect: 'follow',
+        });
+      } catch (errFetch) {
+        throw erroDeRede(errFetch, 'o site');
+      }
+      const html = await res.text();
+      if (!res.ok) throw erroHttp(res.status, 'o site', html);
+      return html;
     } catch (err) {
       lastErr = err;
       if (attempt < retries) {
@@ -102,9 +114,8 @@ async function fetchOgMedia(url) {
   const html = await fetchPage(url);
   const meta = extractMeta(html);
   if (!meta.videoUrl && !meta.imageUrl) {
-    const e = new Error('Mídia não encontrada (o post pode ser privado ou o site bloqueou o acesso).');
-    e.code = 'NO_RESULT';
-    throw e;
+    // a página veio, mas sem mídia: distinguir "privado" / "captcha" / "sem mídia"
+    throw erroSemMidia('o site', html);
   }
   return meta;
 }
