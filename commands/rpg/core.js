@@ -31,6 +31,9 @@ module.exports = [
           `▸ ${ctx.prefix}emprego — escolha uma profissão`,
           `▸ ${ctx.prefix}trabalhar — ganhe moedas`,
           `▸ ${ctx.prefix}loja — veja os itens`,
+          `▸ ${ctx.prefix}feira — compre e venda itens com jogadores`,
+          `▸ ${ctx.prefix}colecoes — acompanhe seus conjuntos de itens`,
+          `▸ ${ctx.prefix}expedicao — encare aventuras solo`,
           `▸ ${ctx.prefix}fazenda — plante e crie animais`,
           `▸ ${ctx.prefix}perfilrpg — seu status completo`,
         ].join('\n')
