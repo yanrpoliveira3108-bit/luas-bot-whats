@@ -69,6 +69,11 @@ async function finalizeAndSend(ctx, webp, opts = {}) {
   try {
     await ctx.sendSticker(webp);
     logger.info({ stickerBytes: check.bytes }, '[STICKER] Sent OK');
+    try {
+      const profileStats = require('../../database/profileStats');
+      const op = opts.opType || (animated ? 'from_video_gif' : 'from_image');
+      profileStats.recordStickerOperation(ctx.sender, op, { animated });
+    } catch (_) {}
     return true;
   } catch (err) {
     logger.error({ stage: 'send', err: (err && err.message) || String(err) }, '[STICKER ERROR] stage=send');
@@ -189,7 +194,7 @@ module.exports = [
       logger.info({ input: 'text', inputSize: Buffer.byteLength(text) }, '[STICKER] Input');
       try {
         const webp = await engine.textToSticker(text);
-        await finalizeAndSend(ctx, webp);
+        await finalizeAndSend(ctx, webp, { opType: 'text' });
       } catch (err) {
         await errorHandler.handle(ctx, err, { name: 'stickertext' });
       }
@@ -209,6 +214,10 @@ module.exports = [
       try {
         const png = await engine.webpToPng(media.buffer);
         await ctx.sendImage(png, '🖼️ Sticker convertido para imagem.');
+        try {
+          const profileStats = require('../../database/profileStats');
+          profileStats.recordStickerOperation(ctx.sender, 'to_media');
+        } catch (_) {}
       } catch (err) {
         await errorHandler.handle(ctx, err, { name: 'toimg' });
       }

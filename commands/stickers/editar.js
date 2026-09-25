@@ -39,6 +39,10 @@ module.exports = [
           emoji: meta.emoji,
         });
         await ctx.sendSticker(webp);
+        try {
+          const profileStats = require('../../database/profileStats');
+          profileStats.recordStickerOperation(ctx.sender, 'steal');
+        } catch (_) {}
       } catch (err) {
         await errorHandler.handle(ctx, err, { name: 'take' });
       }

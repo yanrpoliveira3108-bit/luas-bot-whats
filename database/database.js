@@ -761,6 +761,30 @@ const MIGRATIONS = [
     expires_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_rpg_exp_user ON rpg_expeditions(user_id, status);`,
+
+  // 45 — ESTATÍSTICAS DE ATIVIDADE, PLATAFORMA E FIGURINHAS (Etapa 4)
+  `CREATE TABLE IF NOT EXISTS user_activity_stats (
+    user_id TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    messages INTEGER NOT NULL DEFAULT 0,
+    commands INTEGER NOT NULL DEFAULT 0,
+    command_counts TEXT NOT NULL DEFAULT '{}',
+    last_device TEXT NOT NULL DEFAULT 'Desconhecido',
+    last_interaction TEXT DEFAULT '',
+    PRIMARY KEY(user_id, scope)
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_activity ON user_activity_stats(user_id);
+  CREATE TABLE IF NOT EXISTS user_sticker_stats (
+    user_id TEXT PRIMARY KEY,
+    created INTEGER NOT NULL DEFAULT 0,
+    stolen INTEGER NOT NULL DEFAULT 0,
+    from_image INTEGER NOT NULL DEFAULT 0,
+    from_video_gif INTEGER NOT NULL DEFAULT 0,
+    animated INTEGER NOT NULL DEFAULT 0,
+    text_stickers INTEGER NOT NULL DEFAULT 0,
+    conversions_to_media INTEGER NOT NULL DEFAULT 0,
+    last_operation TEXT DEFAULT ''
+  );`,
 ];
 
 /* ----------------------------- core ------------------------------ */

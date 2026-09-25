@@ -431,6 +431,16 @@ async function executeCommand(ctx, cmd, args) {
   try {
     await cmd.execute(ctx);
     perf.timing('command', Date.now() - t0);
+    try {
+      const profileStats = require('../database/profileStats');
+      const devEst = profileStats.estimatePlatform(ctx.message && ctx.message.key && ctx.message.key.id);
+      profileStats.recordCommand(ctx.sender, 'global', cmd.name, devEst);
+      if (ctx.isGroup) {
+        profileStats.recordCommand(ctx.sender, ctx.remoteJid, cmd.name, devEst);
+      } else {
+        profileStats.recordCommand(ctx.sender, 'private', cmd.name, devEst);
+      }
+    } catch (_) {}
     return { ok: true };
   } catch (err) {
     perf.add('errors');
@@ -534,6 +544,17 @@ async function handleMessage(sock, msg, type) {
     }
     users.incMessages(ctx.sender);
     grantXp(ctx.sender);
+
+    try {
+      const profileStats = require('../database/profileStats');
+      const devEst = profileStats.estimatePlatform(msg.key && msg.key.id);
+      profileStats.recordMessage(ctx.sender, 'global', devEst);
+      if (ctx.isGroup) {
+        profileStats.recordMessage(ctx.sender, ctx.remoteJid, devEst);
+      } else {
+        profileStats.recordMessage(ctx.sender, 'private', devEst);
+      }
+    } catch (_) {}
 
     const u = users.get(ctx.sender);
     if (u && u.afk) {
