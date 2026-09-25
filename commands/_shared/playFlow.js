@@ -239,32 +239,44 @@ async function executeMediaAction(ctx, session, trackIndex, action) {
   }
 
   const actionLabel = action === 'video' ? '🎬 Vídeo' : '🎵 Áudio';
-  await ctx.reply(`⏳ Baixando ${actionLabel} de "*${playPresentation.sanitizeTitle(track.title)}*"...`);
-
+  console.log('[1] comando recebido: ação de mídia selecionada');
+  console.log('[2] preparando mensagem inicial');
   try {
+    console.log('[3] enviando mensagem inicial');
+    await ctx.reply(`⏳ Baixando ${actionLabel} de \"*${playPresentation.sanitizeTitle(track.title)}*\"...`);
+    console.log('[4] mensagem inicial enviada', { action });
+  } catch (error) {
+    console.error('[INITIAL_MESSAGE_ERROR]', error);
+    console.error(error && error.stack);
+  }
+  try {
+    console.log('[3] enviando texto/HTML do Play');
+    const sent = await sendPlayDetailCard(ctx, track, session.prefix, action);
+    console.log('[4] texto/HTML do Play enviado', { sent: !!sent });
+    if (!sent) await ctx.reply(`🎵 *${playPresentation.sanitizeTitle(track.title)}*\nDuração: ${playPresentation.formatPlayDuration(track.duration)}\n\nA mídia será enviada em seguida.`);
+  } catch (error) {
+    console.error('[PLAY_MESSAGE_ERROR]', error);
+    console.error(error && error.stack);
+    try { await ctx.reply(`🎵 *${playPresentation.sanitizeTitle(track.title)}*\nA mídia será enviada em seguida.`); } catch (fallbackError) { console.error('[PLAY_MESSAGE_FALLBACK_ERROR]', fallbackError, fallbackError && fallbackError.stack); }
+  }
+  try {
+    console.log('[5] iniciando processamento da mídia');
     await downloadQueue.enqueue(ctx.remoteJid, `play_${action}_${session.id}`, async ({ isCancelled }) => {
       if (isCancelled()) throw new Error('Download cancelado');
-
       if (action === 'video') {
         const video = await youtube.downloadVideo(track.url, track.title);
-        if (isCancelled()) {
-          youtube.deleteFile(video.path);
-          throw new Error('Download cancelado');
-        }
+        console.log('[6] mídia preparada', { kind: 'video' });
+        if (isCancelled()) { youtube.deleteFile(video.path); throw new Error('Download cancelado'); }
+        console.log('[7] enviando mídia', { kind: 'video' });
         const sendRes = await sendVideoResult(ctx, video, `🎬 *${playPresentation.sanitizeTitle(track.title)}*`);
-        if (sendRes && sendRes.entregue) {
-          await sendPlayDetailCard(ctx, track, session.prefix, action);
-        }
+        console.log('[8] mídia enviada', { kind: 'video', delivered: !!(sendRes && sendRes.entregue) });
       } else {
         const audio = await youtube.downloadAudio(track.url, track.title);
-        if (isCancelled()) {
-          youtube.deleteFile(audio.path);
-          throw new Error('Download cancelado');
-        }
+        console.log('[6] mídia preparada', { kind: 'audio' });
+        if (isCancelled()) { youtube.deleteFile(audio.path); throw new Error('Download cancelado'); }
+        console.log('[7] enviando mídia', { kind: 'audio' });
         const sendRes = await sendAudioResult(ctx, audio);
-        if (sendRes && sendRes.entregue) {
-          await sendPlayDetailCard(ctx, track, session.prefix, action);
-        }
+        console.log('[8] mídia enviada', { kind: 'audio', delivered: !!(sendRes && sendRes.entregue) });
       }
     });
   } catch (err) {
