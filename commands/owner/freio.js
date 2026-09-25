@@ -97,6 +97,7 @@ function statusText() {
       ? 'Modo seguro: 🛡️ LIGADO (sem cards HTML / menu nativo / pagamento)'
       : 'Modo seguro: ⚪ desligado (padrão — cards HTML e menu normais)',
     `Envios: ${s.paused ? `⏸️ PAUSADO (${s.pauseRemainingMin} min)` : '▶️ ativos'}`,
+    s.paused ? '⚠️ Nada sai em chat nenhum agora — SÓ a sua conversa é respondida.' : null,
     s.paused && s.pauseReason ? `Motivo: ${s.pauseReason}` : null,
     '',
     '*Limites em vigor*',

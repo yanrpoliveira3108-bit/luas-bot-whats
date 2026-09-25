@@ -672,6 +672,39 @@ async function main() {
     fail('15: chat-doctor', e);
   }
 
+  /* ══ 16. PAUSADO: nada sai em nenhum chat — MENOS para o dono ══════════
+   * O relato "não funciona em chat nenhum" tem uma causa silenciosa: quando o
+   * freio detecta sinal de restrição ele PAUSA tudo por SEND_PAUSE_MINUTES.
+   * Antes, nem o `!freio` do dono saía — o bot ficava mudo e ninguém sabia por
+   * quê. Agora a pausa deixa passar a conversa do dono e fica registrada no
+   * estado (o `npm run diagnostico` mostra).                                       */
+  try {
+    const antes = sent.length;
+    sendGuard.setPaused(true, 5, 'teste de pausa (16)');
+
+    const noGrupo = sock.sendMessage(GID, { text: 'isto NAO pode sair (pausado)' });
+    const noDono = sock.sendMessage(OWNER, { text: 'isto DEVE sair (dono, pausado)' });
+    await new Promise((r) => setTimeout(r, 400));
+
+    const novos = sent.slice(antes);
+    const saiuDono = novos.some((x) => x.jid === OWNER && /DEVE sair/.test(JSON.stringify(x.content)));
+    const saiuGrupo = novos.some((x) => x.jid === GID && /NAO pode sair/.test(JSON.stringify(x.content)));
+    assert.ok(saiuDono, 'a mensagem para o DONO sai mesmo com o freio pausado');
+    assert.ok(!saiuGrupo, 'nada sai para o grupo enquanto está pausado');
+
+    const estado = JSON.parse(fs.readFileSync(path.join(RAIZ, 'tmp', 'sendguard-state', 'sendguard.json'), 'utf8'));
+    assert.ok(estado.pausedUntil, 'a pausa fica REGISTRADA no estado (para o diagnóstico)');
+    assert.ok(/teste de pausa/.test(String(estado.pauseReason)), 'com o motivo');
+
+    sendGuard.setPaused(false);
+    await noGrupo; // a fila volta a andar quando a pausa termina
+    const depoisLiberou = sent.slice(antes).some((x) => x.jid === GID && /NAO pode sair/.test(JSON.stringify(x.content)));
+    assert.ok(depoisLiberou, 'ao retomar, o que estava na fila sai');
+    ok('16: freio pausado silencia todos os chats, MAS o dono continua falando — e a pausa fica registrada');
+  } catch (e) {
+    fail('16: pausa do freio', e);
+  }
+
   /* ------------------------------- fim ------------------------------- */
   sendGuard.reset();
   database.close();

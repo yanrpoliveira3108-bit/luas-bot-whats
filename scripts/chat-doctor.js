@@ -239,6 +239,20 @@ if (!versaoNoAr || versaoNoAr.igual === null) {
   }
 }
 
+// PAUSA ATIVA: com o freio pausado nada sai em chat nenhum (só o dono passa).
+// É a explicação de "não funciona em chat nenhum" — aparece logo no topo.
+if (estado && estado.pausedUntil) {
+  const msAte = Date.parse(String(estado.pausedUntil));
+  const restante = Number.isFinite(msAte) ? Math.max(0, Math.round((msAte - Date.now()) / 60000)) : 0;
+  if (restante > 0) {
+    H('0.1) 🔴 ENVIOS PAUSADOS — NADA SAI EM CHAT NENHUM AGORA');
+    L(`Pausado até: ${hhmmss(msAte)} (faltam ${restante} min)`);
+    L(`Motivo......: ${estado.pauseReason || '—'}`);
+    L('▸ Durante a pausa somente a conversa do DONO é respondida.');
+    L('▸ No privado do dono: `!freio` (motivo/estado) e `!freio retomar` (liberar já).');
+  }
+}
+
 /* --------------------------- 2) auditoria do freio ---------------------- */
 
 const eventos = lerJsonl(AUDIT).filter((e) => quando(e.t) >= DESDE);

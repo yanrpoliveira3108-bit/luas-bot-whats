@@ -96,6 +96,10 @@ const state = {
   // o bot "ficava digitando…" e nada aparecia no chat.
   travados: 0,
   lastTravado: null, // { at, jid, kind, ms, tentativa2 }
+  // pausa REGISTRADA (a pausa em si é em memória; isto é o que permite o
+  // diagnóstico responder "o bot está mudo porque está pausado") 
+  pausedUntil: null,
+  pauseReason: null,
 };
 
 const queues = new Map(); // jid -> [item]
@@ -231,6 +235,8 @@ function loadState() {
       if (data.blockedByChat && typeof data.blockedByChat === 'object') state.blockedByChat = data.blockedByChat;
       if (Number.isFinite(data.travados)) state.travados = data.travados;
       if (data.lastTravado && typeof data.lastTravado === 'object') state.lastTravado = data.lastTravado;
+      if (typeof data.pausedUntil === 'string') state.pausedUntil = data.pausedUntil;
+      if (typeof data.pauseReason === 'string') state.pauseReason = data.pauseReason;
       if (data.lastRestriction && typeof data.lastRestriction === 'object') {
         state.lastRestriction = data.lastRestriction;
       }
@@ -239,6 +245,21 @@ function loadState() {
     /* primeiro boot ou arquivo corrompido */
   }
   if (typeof state.travados !== 'number') state.travados = 0;
+  // PAUSA que estava valendo quando o bot parou: continua valendo. Ela é criada
+  // por sinal de restrição do WhatsApp — voltar a enviar só porque o processo
+  // reiniciou é exatamente o que transforma restrição temporária em banimento.
+  if (state.pausedUntil) {
+    const fim = Date.parse(state.pausedUntil);
+    if (Number.isFinite(fim) && fim > Date.now()) {
+      paused = true;
+      pausedUntil = fim;
+      pauseReason = state.pauseReason || 'pausa registrada';
+    } else {
+      state.pausedUntil = null;
+      state.pauseReason = null;
+      dirty = true;
+    }
+  }
   if (!state.firstSeen) {
     // Primeira execução: começa o warmup AGORA (conservador para número novo;
     // para número já quente, o dono pode zerar com !freio warmup reset).
@@ -269,6 +290,8 @@ function saveState(force = false) {
             blockedByChat: state.blockedByChat,
             travados: state.travados,
             lastTravado: state.lastTravado,
+            pausedUntil: state.pausedUntil || null,
+            pauseReason: state.pauseReason || null,
             updatedAt: new Date().toISOString(),
           },
           null,
@@ -621,10 +644,16 @@ function waitFor(jid, item, now) {
   return Math.max(0, wait);
 }
 
-/** Escolhe a próxima conversa elegível (round-robin, ordem preservada). */
-function pickNext(now) {
+/**
+ * Escolhe a próxima conversa elegível (round-robin, ordem preservada).
+ * `apenasDono` é usado durante a PAUSA: mesmo pausado, o dono precisa poder
+ * falar com o bot (é assim que ele descobre o motivo e retoma) — e uma mensagem
+ * para o próprio número não é risco de spam. O resto continua parado.
+ */
+function pickNext(now, apenasDono = false) {
   for (let i = 0; i < chatOrder.length; i++) {
     const jid = chatOrder[i];
+    if (apenasDono && !isOwnerJid(jid)) continue;
     const list = queues.get(jid);
     if (!list || !list.length) continue;
     const item = list[0];
@@ -663,13 +692,22 @@ async function pump() {
     for (;;) {
       const now = Date.now();
 
+      let apenasDono = false;
       if (paused && now < pausedUntil) {
-        schedule(pausedUntil - now);
-        return;
-      }
-      if (paused) {
+        // PAUSADO: tudo espera — menos a conversa do DONO. Sem isso o bot ficava
+        // mudo até no privado do dono, que era justamente quem precisava ver o
+        // motivo (`!freio`) e retomar. Para todos os outros chats, nada sai.
+        apenasDono = true;
+        if (!pickNext(now, true)) {
+          schedule(Math.min(pausedUntil - now, 60 * 1000));
+          return;
+        }
+      } else if (paused) {
         paused = false;
         pauseReason = '';
+        state.pausedUntil = null;
+        state.pauseReason = null;
+        saveState(true);
         logger.info('[FREIO] envios retomados');
         activity.terminalLine('[FREIO] pausa encerrada — envios retomados');
       }
@@ -689,7 +727,7 @@ async function pump() {
         return;
       }
 
-      const picked = pickNext(now);
+      const picked = pickNext(now, apenasDono);
       if (!picked) {
         schedule(nextWait(now));
         return;
@@ -878,6 +916,8 @@ function diagnose(err, picked) {
   pauseReason = `sinal de restrição (${status || text.slice(0, 60)})`;
   state.pauses++;
   state.lastRestriction = { at: new Date().toISOString(), reason: pauseReason };
+  state.pausedUntil = new Date(pausedUntil).toISOString();
+  state.pauseReason = pauseReason;
   saveState(true);
   audit({ t: Date.now(), jid: String((picked && picked.jid) || ''), kind: null, restriction: pauseReason });
   logger.error(
@@ -902,11 +942,18 @@ function setPaused(on, minutes, reason) {
     pauseReason = reason || 'pausa manual';
     state.pauses++;
     state.lastRestriction = { at: new Date().toISOString(), reason: pauseReason };
+    // registrado no estado: com a pausa ativa o bot fica MUDO em todos os chats,
+    // e se isso não ficasse visível em algum lugar ninguém saberia por quê.
+    state.pausedUntil = new Date(pausedUntil).toISOString();
+    state.pauseReason = pauseReason;
     saveState(true);
     logger.warn({ minutos: m, reason: pauseReason }, '[FREIO] envios pausados');
   } else {
     paused = false;
     pausedUntil = 0;
+    state.pausedUntil = null;
+    state.pauseReason = null;
+    saveState(true);
     pauseReason = '';
     saveState(true);
     logger.info('[FREIO] envios retomados (manual)');
@@ -977,6 +1024,15 @@ function isRiskyPayload(message) {
     if (message[k]) return k;
   }
   return null;
+}
+
+/**
+ * A pausa registrada no estado continua valendo depois de reiniciar? (usado
+ * pelo boot para avisar alto: sem isso o dono veria o bot mudo sem explicação)
+ */
+function pausaDoEstado() {
+  if (!isPaused()) return null;
+  return { until: new Date(pausedUntil).toISOString(), reason: pauseReason, minutos: Math.ceil((pausedUntil - Date.now()) / 60000) };
 }
 
 /**
@@ -1151,7 +1207,7 @@ function stats() {
       }
     })(),
     paused: isPaused(),
-    pausedUntil: isPaused() ? new Date(pausedUntil).toISOString() : null,
+    pausedUntil: isPaused() ? new Date(pausedUntil).toISOString() : state.pausedUntil || null,
     pauseRemainingMin: isPaused() ? Math.ceil((pausedUntil - now) / 60000) : 0,
     pauseReason,
     pausedTotal: state.pauses,
@@ -1232,6 +1288,7 @@ function reset() {
 }
 
 module.exports = {
+  pausaDoEstado,
   init,
   attach,
   auditFile: AUDIT_FILE,

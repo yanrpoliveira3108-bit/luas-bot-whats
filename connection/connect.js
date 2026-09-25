@@ -262,6 +262,17 @@ async function connect({ phone } = {}) {
     const groupMetadataCache = require('../utils/groupMetadataCache');
     const safeNodeCache = require('../utils/safeNodeCache');
 
+    // INTERRUPTORES DE EMERGÊNCIA (código sem edição, só .env, e reiniciar):
+    //   SAFE_CACHE=0      → volta aos caches padrão da biblioteca
+    //   GROUP_META_CACHE=0 → volta à consulta de metadados ao vivo
+    //   SEND_TIMEOUT_MS=0  → envio sem prazo (comportamento antigo)
+    //   SEND_RETRY_ON_HANG=0 → nunca reenvia envio travado
+    // Servem para ISOLAR uma suspeita em segundos, sem mexer em código.
+    const semCacheSeguro = String(process.env.SAFE_CACHE || '1') === '0';
+    const semCacheGrupo = String(process.env.GROUP_META_CACHE || '1') === '0';
+    if (semCacheSeguro) logger.warn('SAFE_CACHE=0 — usando os caches padrão da biblioteca');
+    if (semCacheGrupo) logger.warn('GROUP_META_CACHE=0 — consulta de metadados ao vivo (sem cache)');
+
     sock = makeWASocket({
       version,
       auth: {
@@ -269,7 +280,11 @@ async function connect({ phone } = {}) {
         // 3º argumento = o cache da biblioteca: usamos a versão blindada
         // (utils/safeNodeCache.js) — uma chave inválida vira "miss" em vez de
         // TypeError que derruba o envio
-        keys: makeCacheableSignalKeyStore(state.keys, baileysLogger(), safeNodeCache.criar({}, 'signalStore')),
+        keys: makeCacheableSignalKeyStore(
+          state.keys,
+          baileysLogger(),
+          semCacheSeguro ? undefined : safeNodeCache.criar({}, 'signalStore')
+        ),
       },
       printQRInTerminal: false, // QR desabilitado por design
       browser: browserConfig,
@@ -279,12 +294,12 @@ async function connect({ phone } = {}) {
       markOnlineOnConnect: markOnline,
       // usado DENTRO do envio de grupo: responde do cache (fresco), renova em
       // segundo plano (vencido) ou busca com prazo (frio). NUNCA pendura.
-      cachedGroupMetadata: groupMetadataCache.cachedGroupMetadata,
+      ...(semCacheGrupo ? {} : { cachedGroupMetadata: groupMetadataCache.cachedGroupMetadata }),
       // cache de dispositivos por usuário: é ele que estourava
       // "Cannot read properties of undefined (reading 'toString')" quando um
       // participante do grupo (modo LID) vinha sem id (NodeCache.formatKey).
       // Esta versão não lança — uma chave inválida vira um "miss".
-      userDevicesCache: safeNodeCache.criar(),
+      ...(semCacheSeguro ? {} : { userDevicesCache: safeNodeCache.criar() }),
     });
     logger.info(
       { browser: browserConfig[0] + ' ' + browserConfig[1], markOnline },
@@ -298,10 +313,22 @@ async function connect({ phone } = {}) {
     // aparece sinal de restrição. A simulação de "digitando..." (utils/antiBan)
     // continua por cima, para o ritmo parecer humano.
     sendGuard.attach(sock);
+    // pausa que já estava valendo quando o bot parou (sinal de restrição do
+    // WhatsApp): continua valendo — e o dono precisa saber, senão parece que
+    // "o bot está morto". Só a conversa do dono é respondida enquanto durar.
+    try {
+      const pausa = sendGuard.pausaDoEstado && sendGuard.pausaDoEstado();
+      if (pausa) {
+        logger.warn(
+          { ate: pausa.until, minutos: pausa.minutos, motivo: pausa.reason },
+          '⏸️  ENVIOS PAUSADOS (pausa anterior ainda valendo) — só a conversa do dono é respondida'
+        );
+      }
+    } catch (_) {}
     // metadados de grupo: cache + prazo nas consultas (as dos NOSSOS comandos
     // também, que até agora podiam pendurar em grupo de comunidade/LID) e
     // aquecimento em segundo plano com a lista de grupos do número.
-    groupMetadataCache.attach(sock);
+    if (!semCacheGrupo) groupMetadataCache.attach(sock);
     // EXPERIMENTAL (selective payment/text): anexa a API de transporte
     // seletivo ao socket SEM substituí-lo (ver utils/selective.js).
     try {

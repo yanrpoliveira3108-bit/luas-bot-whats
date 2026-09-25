@@ -234,6 +234,25 @@ própria biblioteca** (`signalRepository.lidMapping.getPNForLID`, com prazo de
 acontece no chat ("LID do remetente sem telefone"). Trava: teste 7 de
 `test/vendorfix.test.js`.
 
+**"Nao funciona em chat nenhum" — as quatro causas que o diagnostico separa.**
+Quando o bot para de responder em TODOS os chats (privado e grupo), a causa quase
+sempre e uma destas, e nenhuma e o conteudo:
+
+| causa | como aparece | o que fazer |
+|---|---|---|
+| **freio PAUSADO** | `npm run diagnostico` -> "ENVIOS PAUSADOS ate HH:MM"; `!freio` (privado) -> "PAUSADO" | esperar a pausa ou `!freio retomar`. E reacao a sinal de restricao do WhatsApp (429/`rate-overlimit`/"restricted") |
+| **dois processos** | `npm run diagnostico` -> "N processos do bot ao mesmo tempo" (a sessao e a mesma -> 440, o WhatsApp derruba um e o outro) | `pkill -f "node.*index.js"` e subir UM so |
+| **processo antigo** | `npm run diagnostico` -> secao 2 "O PROCESSO NO AR E DE ANTES DO CODIGO ATUAL" | reiniciar (`git pull` nao troca processo) |
+| **numero restringido** | secao 3 -> "SINAL DE RESTRICAO NO LOG" (`not-authorized`/`forbidden`/429) | e do lado do WhatsApp: parar de testar por horas |
+
+Duas correcoes entraram junto: (a) **durante a pausa, a conversa do DONO
+continua sendo respondida** — antes o bot ficava mudo ate para quem precisava ver
+o motivo e retomar; (b) a pausa passou a ser **registrada no estado** e
+**sobrevive ao reinicio** (a decisao de pausar veio de evidencia de restricao —
+voltar a enviar so porque o processo reiniciou e o que transforma restricao
+temporaria em banimento). Trava: teste 16 (`test/sendguard.test.js`).
+`npm run diagnostico` imprime tudo isso em um comando.
+
 **Como o doctor responde cada caso:**
 
 | sintoma | onde ele mostra |
