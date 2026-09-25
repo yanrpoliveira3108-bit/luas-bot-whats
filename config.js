@@ -155,6 +155,7 @@ const CONFIG = {
   // dela: quando desligada, o fluxo tradicional permanece intacto.
   htmlPlay: {
     enabled: envBool('HTML_PLAY_ENABLED', false),
+    textFallback: envBool('HTML_PLAY_TEXT_FALLBACK', true),
   },
 
   /* ------------- segurança de envio (anti-restrição de conta) -------------

@@ -36,7 +36,7 @@ module.exports = [
         });
 
         const htmlSent = await htmlPlay.send(ctx, htmlPlay.normalizeMediaInfo(audio, { ...parsed, url, kind: 'audio', format: audio.mimetype || 'audio' }), ctx.prefix, { audio: 'ytmp3', lyrics: 'letra', search: 'play' }).catch(() => false);
-        if (!htmlSent) await ctx.reply(card);
+        if (!htmlSent || htmlPlay.textFallbackEnabled()) await ctx.reply(card);
         await sendAudioResult(ctx, audio);
       } catch (err) {
         await errorHandler.handle(ctx, err, { name: 'ytmp3' });

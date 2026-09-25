@@ -36,7 +36,7 @@ module.exports = [
         });
 
         const htmlSent = await htmlPlay.send(ctx, htmlPlay.normalizeMediaInfo(video, { ...parsed, url, kind: 'video', format: video.mimetype || 'video' }), ctx.prefix, { video: 'ytmp4', lyrics: 'letra', search: 'play' }).catch(() => false);
-        await sendVideoResult(ctx, video, htmlSent ? '' : card);
+        await sendVideoResult(ctx, video, htmlSent && !htmlPlay.textFallbackEnabled() ? '' : card);
       } catch (err) {
         await errorHandler.handle(ctx, err, { name: 'ytmp4' });
       }

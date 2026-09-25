@@ -149,6 +149,7 @@ async function sendPlayDetailCard(ctx, track, prefix, kind = 'audio') {
     try {
       const info = htmlPlay.normalizeMediaInfo({ ...details, thumbnail: thumb ? `data:image/jpeg;base64,${thumb.toString('base64')}` : '' }, { kind, format: kind === 'video' ? 'MP4' : 'M4A' });
       await htmlPlay.send(ctx, info, prefix, { audio: 'ytmp3', video: 'ytmp4', lyrics: 'letra', search: 'play' });
+      if (htmlPlay.textFallbackEnabled()) await ctx.reply(card);
       return true;
     } catch (err) {
       logger.warn({ err: err.message }, 'HTML PLAY indisponível; mantendo card tradicional');

@@ -63,4 +63,7 @@ async function send(ctx, info, prefix, commands) {
   await richHtml.sendHtml(ctx.socket, ctx.remoteJid, html, { title: 'HTML PLAY' });
   return true;
 }
-module.exports = { normalizeMediaInfo, buildHtmlPlay, send, validPublicUrl };
+function textFallbackEnabled() {
+  try { return settings.getBool('html_play_text_fallback', CONFIG.htmlPlay && CONFIG.htmlPlay.textFallback !== false); } catch (_) { return CONFIG.htmlPlay ? CONFIG.htmlPlay.textFallback !== false : true; }
+}
+module.exports = { normalizeMediaInfo, buildHtmlPlay, send, validPublicUrl, textFallbackEnabled };
