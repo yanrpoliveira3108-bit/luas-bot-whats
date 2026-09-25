@@ -143,13 +143,7 @@ function encaixar(){
 }
 function notaMedida(){
   var el=document.getElementById("lua-medida");if(!el)return;
-  if(medido>0&&medido<ALTURA_CSS){
-    var extra=medido<PISO?" — abaixo do piso "+PISO+"px, mantido o pedido":"";
-    el.textContent="▸ área do card aqui: "+medido+"px (pedido "+ALTURA_CSS+"px)"+extra;
-    el.hidden=false;
-  }else{
-    el.hidden=true;
-  }
+  el.hidden=true;
 }
 function chave(){return st.tela==="panel"?"panel":"cat:"+st.cat}
 function elV(){return st.tela==="panel"?painel:lista}
