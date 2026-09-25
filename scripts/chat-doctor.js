@@ -257,9 +257,19 @@ const achados = {
   lidNaoResolvido: [],
   outros: [],
 };
+// QUANDO O BOT SUBIU (o processo que está rodando agora). É a informação que
+// evita o erro de ler falhas de ANTES da correção e concluir que "continua
+// quebrado": só o que aconteceu DEPOIS do último start vale como teste.
+let ultimoStart = 0;
 for (const f of arquivos) {
   const caminho = path.join(CONFIG.paths.logsDir, f);
-  for (const linha of lerJsonl(caminho)) {
+  const linhas = lerJsonl(caminho);
+  for (const l of linhas) {
+    if (/socket criado|conectado ao WhatsApp/i.test(String(l.msg || ''))) {
+      ultimoStart = Math.max(ultimoStart, quandoLinha(l));
+    }
+  }
+  for (const linha of linhas) {
     if (String(linha.chat || '') !== JID) continue;
     if (linha.t && quando(linha.t) < DESDE) continue;
     const msg = String(linha.msg || '');
@@ -287,6 +297,13 @@ if (!arquivos.length) {
     L('   ▸ Corrigido nesta versão: quando a lista de participantes não traz o');
     L('     telefone, o bot consulta o mapa LID↔PN da própria biblioteca.');
     L('     `git pull`, reinicie e mande o comando de novo.');
+  }
+  if (ultimoStart) {
+    const depois = achados.falhaEnvio.filter((l) => quandoLinha(l) >= ultimoStart);
+    L(`Bot no ar desde                : ${hhmmss(ultimoStart)}${depois.length ? '' : '  (nenhuma falha desde então ✅)'}`);
+    if (depois.length) L(`Falhas DEPOIS do último start : ${depois.length}  ← são as que valem (o resto é histórico)`);
+  } else {
+    L('Bot no ar desde                : (não achei o start do bot nos logs)');
   }
   L(`Falhas de envio               : ${achados.falhaEnvio.length}`);
   for (const f of achados.falhaEnvio.slice(-5)) {
@@ -400,8 +417,16 @@ if (barrados.length) {
 } else if (achados.falhaEnvio.length) {
   const causaCache = achados.falhaEnvio.some((l) => /NodeCache\.formatKey/.test(String(l.stack || l.frame || '')));
   if (causaCache) {
+    const atuais = achados.falhaEnvio.filter((l) => quandoLinha(l) >= ultimoStart);
     L('🎯 CAUSA CONFIRMADA: cache de dispositivos da biblioteca recebendo chave');
     L('   inválida (participante de grupo LID sem id). TODO envio neste grupo falhava.');
+    if (ultimoStart && !atuais.length) {
+      L('');
+      L(`   ⚠️ ATENÇÃO: TODAS as falhas acima são de ANTES do último start (${hhmmss(ultimoStart)}).`);
+      L('   Isso é histórico. Se o bot foi reiniciado depois do `git pull`, mande um');
+      L('   comando no grupo AGORA e rode o doctor de novo: o que importa é o que');
+      L('   acontece depois do start.');
+    }
     L('   ▸ Corrigido no código (patch na biblioteca + cache blindado). Atualize');
     L('     (`git pull`) e REINICIE o bot — é código carregado na conexão.');
     L('   ▸ Depois de reiniciar, mande o comando de novo: se voltar a falhar, o');
