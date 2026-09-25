@@ -230,7 +230,139 @@ async function main() {
     fail('6: doctor', e);
   }
 
-  console.log(`\n${feitos} ✅ · ${falhas} ❌`);
+  /* 7) BANCO À FRENTE DO CÓDIGO (linhagem de outro deploy) -------------------
+   * O caso real do aparelho em 25/09: `version` 38 com o código tendo 36
+   * migrações. O identificador da migração é o NOME (`v1..vN`), então uma
+   * migração NOVA deste código roda mesmo com o banco à frente. */
+  try {
+    // a) banco normal, depois "sujo" como outra linhagem: nada de nome, e
+    //    números 37/38 gravados por fora
+    noFilho('lua-linhagem.db', `
+      const db=require(path.join(${JSON.stringify(RAIZ)},'database/database'));db.open();
+      const c=db.get();
+      c.exec("UPDATE schema_migrations SET nome = ''");
+      c.exec("INSERT OR REPLACE INTO schema_migrations (version, applied_at, nome) VALUES (37, '', '')");
+      c.exec("INSERT OR REPLACE INTO schema_migrations (version, applied_at, nome) VALUES (38, '', '')");
+      console.log(JSON.stringify({ok:1}));
+    `);
+    // b) processo NOVO com uma migração imaginária no fim do array: ela PRECISA
+    //    rodar (o número 37 já está tomado por outra linhagem)
+    const { saida } = noFilho('lua-linhagem.db', `
+      const db=require(path.join(${JSON.stringify(RAIZ)},'database/database'));
+      db.MIGRATIONS.push('CREATE TABLE IF NOT EXISTS migracao_nova_teste (id INTEGER PRIMARY KEY, x TEXT);');
+      db.open();
+      const c=db.get();
+      const r={
+        nomes_registrados: c.prepare("SELECT COUNT(*) n FROM schema_migrations WHERE nome <> ''").get().n,
+        linha_da_nova: JSON.stringify(c.prepare("SELECT version, nome FROM schema_migrations WHERE nome='v37'").get()||null),
+        tabela_criada: !!c.prepare("SELECT 1 x FROM sqlite_master WHERE name='migracao_nova_teste'").get(),
+        max_version: c.prepare('SELECT MAX(version) v FROM schema_migrations').get().v,
+      };
+      console.log(JSON.stringify(r));
+    `);
+    const r = ultima(saida);
+    assert.strictEqual(r.tabela_criada, true, 'a migração NOVA rodou de verdade (por nome, com o banco à frente)');
+    assert.ok(/v37/.test(r.linha_da_nova), `ela ficou registrada (${r.linha_da_nova})`);
+    assert.ok(r.nomes_registrados >= 37, `todas as migrações ficaram identificadas por nome (${r.nomes_registrados})`);
+    assert.ok(r.max_version >= 37, `versão do banco consistente (${r.max_version})`);
+    ok('7: banco à frente do código — migração nova roda por NOME (o número é só contador)');
+  } catch (e) {
+    fail('7: banco à frente', e);
+  }
+
+  /* 8) BANCO LEGADO (código antigo: sem `nome`) -------------------------------
+   * Caminho de quem atualiza: 35 migrações aplicadas, sem nomes e sem as
+   * tabelas dos jogos. A reexecução das antigas é inofensiva (invariante do
+   * teste 9) e cria o que faltava. Não pode duplicar linha nem reabrir errado. */
+  try {
+    noFilho('lua-legado2.db', `
+      const db=require(path.join(${JSON.stringify(RAIZ)},'database/database'));db.open();
+      const c=db.get();
+      c.exec('ALTER TABLE schema_migrations DROP COLUMN nome');
+      c.exec('DROP TABLE IF EXISTS game_bets; DROP TABLE treasure_games; DROP TABLE game_rounds;');
+      c.prepare('DELETE FROM schema_migrations').run();
+      for (let v=1; v<=35; v++) c.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, '')").run(v);
+      console.log(JSON.stringify({ok:1}));
+    `);
+    const { saida } = noFilho('lua-legado2.db', `
+      const db=require(path.join(${JSON.stringify(RAIZ)},'database/database'));db.open();
+      const c=db.get();
+      const r={
+        linhas: c.prepare('SELECT COUNT(*) n FROM schema_migrations').get().n,
+        nomes: c.prepare("SELECT COUNT(*) n FROM schema_migrations WHERE nome <> ''").get().n,
+        v36: (c.prepare("SELECT nome FROM schema_migrations WHERE nome='v36'").get()||{}).nome,
+        tabelas: c.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name IN ('game_bets','treasure_games','game_rounds')").get().n,
+        ajustes: db.ensureEsquemaReal().length,
+      };
+      console.log(JSON.stringify(r));
+    `);
+    const r = ultima(saida);
+    assert.strictEqual(r.tabelas, 3, 'as 3 tabelas dos jogos foram criadas na atualização');
+    assert.strictEqual(r.v36, 'v36', 'a migração nova (jogos) ficou identificada por nome');
+    assert.strictEqual(r.linhas, 36, `sem inflar linhas (${r.linhas})`);
+    assert.strictEqual(r.nomes, 36, 'todas as migrações têm nome registrado');
+    assert.strictEqual(r.ajustes, 0, 'depois da migração nada falta (cura por medição vazia)');
+
+    const { saida: saida2 } = noFilho('lua-legado2.db', `
+      const db=require(path.join(${JSON.stringify(RAIZ)},'database/database'));db.open();
+      const c=db.get();
+      console.log(JSON.stringify({ linhas: c.prepare('SELECT COUNT(*) n FROM schema_migrations').get().n }));
+    `);
+    assert.strictEqual(ultima(saida2).linhas, 36, 'reabrir é idempotente');
+    ok('8: banco legado (sem nome) — reexecução inofensiva cria o que faltava e não infla linhas');
+  } catch (e) {
+    fail('8: banco legado', e);
+  }
+
+  /* 9) INVARIANTE das migrações (o que torna a reexecução segura) -------------
+   * Se alguém escrever uma migração com ALTER/DROP/DML, reexecutá-la deixa de
+   * ser inofensivo e o teste 8 passa a mentir em silêncio. Este teste trava isso. */
+  try {
+    const M = require('../database/database').MIGRATIONS;
+    const proibido = M.map((sql, i) => ({ i: i + 1, sql: String(sql) })).filter(({ sql }) =>
+      /\b(ALTER\s+TABLE|DROP\s+(TABLE|INDEX|COLUMN)|DELETE\s+FROM|INSERT\s+INTO|UPDATE\s+\w+\s+SET)\b/i.test(sql)
+    );
+    assert.deepStrictEqual(
+      proibido.map((p) => p.i),
+      [],
+      'nenhuma migração pode ter ALTER/DROP/DML (a reexecução precisa ser inofensiva)'
+    );
+    const semIfNotExists = M.filter((sql) =>
+      /CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX)\s+(?!IF\s+NOT\s+EXISTS)/i.test(sql)
+    ).length;
+    assert.strictEqual(semIfNotExists, 0, 'todo CREATE TABLE/INDEX usa IF NOT EXISTS');
+    ok('9: migrações são idempotentes por invariante (só CREATE ... IF NOT EXISTS)');
+  } catch (e) {
+    fail('9: invariante das migrações', e);
+  }
+
+  /* 10) CURA POR MEDIÇÃO também fora dos jogos -------------------------------
+   * A migração dos jogos não é a única que pode não ter rodado: a conferência
+   * vale para TODA tabela/coluna declarada nas migrações. */
+  try {
+    const { saida } = noFilho('lua-medicao.db', `
+      const db=require(path.join(${JSON.stringify(RAIZ)},'database/database'));db.open();
+      const c=db.get();
+      // estraga uma tabela de outra migração (welcome_events é da v~30)
+      c.exec('ALTER TABLE welcome_events DROP COLUMN template');
+      c.prepare('DELETE FROM schema_migrations WHERE nome = ?').run('v30');
+      console.log(JSON.stringify({ok:1}));
+    `);
+    const { saida: depois } = noFilho('lua-medicao.db', `
+      const db=require(path.join(${JSON.stringify(RAIZ)},'database/database'));db.open();
+      const c=db.get();
+      const cols=c.prepare('PRAGMA table_info(welcome_events)').all().map(x=>x.name);
+      console.log(JSON.stringify({ tem_template: cols.includes('template'), colunas: cols.length }));
+    `);
+    const r = ultima(depois);
+    assert.strictEqual(r.tem_template, true, 'a coluna da outra migração voltou (por medição)');
+    ok('10: cura por medição vale para qualquer tabela das migrações (não só as dos jogos)');
+    void saida;
+  } catch (e) {
+    fail('10: cura fora dos jogos', e);
+  }
+
+  console.log(`\n${feitos} ✅ · ${falhas} ❌`);  console.log(`\n${feitos} ✅ · ${falhas} ❌`);
   process.exit(falhas ? 1 : 0);
 }
 

@@ -54,7 +54,17 @@ async function main() {
     return;
   }
   const versao = (db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get() || {}).v;
+  const migracoes = database.MIGRATIONS.length;
   linha(`schema_migrations (version aplicada): ${versao}`);
+  // O que identifica cada migração aplicada hoje é o NOME (v1..vN): um banco
+  // vindo de outro deploy pode ter números à frente (o do aparelho tinha 38 com
+  // o código tendo 36) e, sem isso, a migração nova nunca rodaria.
+  const semNome = (db.prepare("SELECT COUNT(*) c FROM schema_migrations WHERE nome IS NULL OR nome = ''").get() || {}).c;
+  linha(`migrações do código: ${migracoes} · linhas sem nome no banco: ${semNome}`);
+  if (Number(versao) > migracoes) {
+    linha(`⚠️  banco À FRENTE do código (version ${versao} > ${migracoes} migrações) — migrações novas entram por NOME;`);
+    linha('    nada é apagado e o que faltar é criado por medição (é o caso dos jogos).');
+  }
   const tabelas = db
     .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
     .all()
@@ -67,8 +77,12 @@ async function main() {
       linha(`   colunas: ${colunas.join(', ')}`);
     }
   }
-  const ajustes = database.ensureGameSchema();
-  linha(ajustes.length ? `🔧 esquema ajustado agora: ${ajustes.join(', ')}` : '✅ esquema dos jogos íntegro');
+  const ajustes = database.ensureEsquemaReal();
+  linha(
+    ajustes.length
+      ? `🔧 esquema ajustado agora (por medição): ${ajustes.join(', ')}`
+      : '✅ esquema íntegro (tabelas e colunas das migrações conferidas por medição)'
+  );
 
   titulo('3) Configurações que afetam os jogos/menu');
   const settings = require('../database/settings');

@@ -297,11 +297,14 @@ Automatizados:
   simultâneas entre jogos, jsdom (painel valida/copia + card = resultado do bot),
   reinício sem perder rodada/saldo/estatística e **moldura** do card (altura fixa,
   CSS dentro de `<style>` e divs balanceadas).
-- `test/esquemajogos.test.js` — **6/6**: integridade do array `MIGRATIONS` (sem
-  buracos de vírgula), as 3 tabelas com as colunas usadas, banco com version
-  adiantada + tabelas ausentes **curado** na abertura, coluna ausente adicionada
-  sem perder dados, os dois comandos rodando de verdade depois da cura e o
-  `scripts/jogos-doctor.js` rodando nesse banco problemático.
+- `test/esquemajogos.test.js` — **10/10**: integridade do array `MIGRATIONS`
+  (sem buracos de vírgula), as 3 tabelas com as colunas usadas, banco com
+  version adiantada + tabelas ausentes **curado** na abertura, coluna ausente
+  adicionada sem perder dados, os dois comandos rodando de verdade depois da
+  cura, o `scripts/jogos-doctor.js` no banco problemático, **banco à frente do
+  código** (migração nova roda por NOME), **banco legado sem a coluna `nome`**
+  (reexecução inofensiva, sem inflar linhas), a **invariante** de que toda
+  migração é `CREATE ... IF NOT EXISTS` e a **cura por medição fora dos jogos**.
 - Suíte completa: `npm test` (auditoria + smokes + todos os testes, incluindo os
   três acima) e `npm run menu:check` (guarda estática do card do menu).
 
@@ -330,22 +333,39 @@ npm run jogos:doctor          # = node scripts/jogos-doctor.js
 ```
 
 O doctor **não envia nada no WhatsApp** (usa um socket falso e um chat de teste)
-e mostra: node, caminho do banco, **version** de `schema_migrations`, as tabelas
+e mostra: node, caminho do banco, **version** de `schema_migrations` **e quantas
+migrações o código tem**, as tabelas
 `game_bets`/`treasure_games`/`game_rounds` com as colunas, o estado do
 `menu_html`/modo seguro, e executa `!cacatesouro`, `!cacatesouro 3`, `!tigrinho`
 e `!menu` registrando **o erro completo com stack**, **a moldura de cada card
 enviado** (linha `moldura: altura fixa 640px + #__wrap ok`) e “card enviado” quando
 está tudo certo). Salva o relatório em `tmp/jogos-doctor.txt`.
 
-**Causa já tratada de forma automática.** A `version` de `schema_migrations` é o
-índice da migração + 1. Num banco cuja version esteja **adiante** do código
-(banco vindo de outro deploy/revisão), a migração dos jogos **nunca roda** e as
-três tabelas ficam faltando — exatamente o quadro em que *os dois* comandos
-respondem erro (os dois usam essas tabelas). Agora o `open()` confere o esquema
-**por medição** (tabelas e colunas reais em `sqlite_master`/`PRAGMA`) e cria o
-que faltar, sem apagar nada e sem reescrever a version do banco
-(`database/database.js` → `ensureGameSchema()`; migração 36 = `GAME_TABELAS_SQL`
-+ `GAME_INDICES_SQL`). Cobertura em `test/esquemajogos.test.js`.
+**Causa tratada de forma automática — duas garantias independentes.**
+
+1. **A migração é identificada por NOME** (`v1..vN`), não pelo número. `version`
+   continua na tabela (é o índice + 1), mas quem decide o que falta é a coluna
+   `nome`, criada no `open()`. Num banco cuja `version` esteja **adiante** do
+   código (banco vindo de outro deploy/revisão — o do aparelho estava em 38 com
+   o código tendo 36), a migração nova deste código **roda do mesmo jeito**: se o
+   número já estiver tomado por outra linhagem, ela entra com o próximo número
+   livre. É isso que impede o problema de voltar na próxima migração.
+2. **O esquema é conferido por MEDIÇÃO** (`ensureEsquemaReal()`, no `open()`):
+   as tabelas e colunas declaradas nas migrações são comparadas com as que
+   existem de verdade (`sqlite_master` + `PRAGMA table_info`) e o que faltar é
+   criado — tabela com o MESMO `CREATE TABLE IF NOT EXISTS` da migração, coluna
+   com o mesmo tipo/DEFAULT. Nada é apagado, renomeado ou sobrescrito.
+
+Por que reexecutar migração é seguro: **todas as 36 são só
+`CREATE TABLE/INDEX IF NOT EXISTS`** (nenhum `ALTER`, `DROP`, `INSERT`, `UPDATE`
+ou `DELETE`) — a suíte trava isso em `test/esquemajogos.test.js` (teste 9). Numa
+atualização de banco antigo (sem a coluna `nome`), as migrações são reexecutadas:
+o que já existe não muda e o que faltava nasce. A primeira abertura com este
+código **não apaga nem reescreve nada**.
+
+Cobertura: `test/esquemajogos.test.js` 10/10 (banco novo, banco à frente,
+banco legado sem `nome`, coluna ausente de tabela comum, comandos rodando depois
+da cura, doctor e a invariante das migrações).
 
 
 ---

@@ -26,16 +26,17 @@ const prepared = new Map();
 /**
  * SQL das tabelas dos JOGOS (livro-caixa de apostas, expedições e rodadas).
  *
- * Fica numa constante porque é usado em DOIS lugares:
- *   1. na migração 36 (bancos novos/atualizados normalmente);
- *   2. em `ensureGameSchema()`, a rede de segurança do `open()`.
+ * Entra na migração 36 (bancos novos/atualizados normalmente) — e, por ser
+ * `CREATE TABLE IF NOT EXISTS`, também é reaproveitado pela CURA POR MEDIÇÃO
+ * (`ensureEsquemaReal`) quando a migração não roda.
  *
- * Por que a rede de segurança existe: a `version` de `schema_migrations` é o
- * ÍNDICE da migração + 1. Se o banco já estiver com uma version MAIOR (banco
- * vindo de outro estado do código), a migração acima NUNCA roda e as tabelas
- * dos jogos ficariam faltando — os comandos responderiam "algo deu errado" com
- * erro de SQLite. `ensureGameSchema()` confere o esquema de verdade (tabelas e
- * colunas) depois de migrar e conserta o que faltar, sem apagar dado.
+ * Por que a cura existe: a `version` de `schema_migrations` (índice + 1) NÃO
+ * prova que a tabela existe. Um banco vindo de outro deploy pode ter números à
+ * frente (o do aparelho tinha version 38 com o código tendo 36 migrações) — aí
+ * a migração nova nunca roda e as tabelas ficam faltando ("algo deu errado" com
+ * erro de SQLite). Depois de migrar, o `open()` compara as tabelas/colunas
+ * declaradas nas migrações com as que existem de verdade e cria o que faltar,
+ * sem apagar nada.
  */
 const GAME_TABELAS_SQL = `CREATE TABLE IF NOT EXISTS game_bets (
     id TEXT PRIMARY KEY,
@@ -94,82 +95,173 @@ const GAME_INDICES_SQL = `CREATE INDEX IF NOT EXISTS idx_game_bets_user_game ON 
  */
 const GAME_SCHEMA_SQL = GAME_TABELAS_SQL + '\n' + GAME_INDICES_SQL;
 
-/** Colunas obrigatórias de cada tabela dos jogos (nome → definição com default). */
-const GAME_SCHEMA_COLUNAS = {
-  game_bets: {
-    user_id: "TEXT NOT NULL DEFAULT ''",
-    game: "TEXT NOT NULL DEFAULT ''",
-    bet: 'INTEGER NOT NULL DEFAULT 0',
-    status: "TEXT NOT NULL DEFAULT 'settled'",
-    reward: 'INTEGER NOT NULL DEFAULT 0',
-    ref_id: "TEXT DEFAULT ''",
-    created_at: "TEXT DEFAULT ''",
-    settled_at: "TEXT DEFAULT ''",
-  },
-  treasure_games: {
-    user_id: "TEXT NOT NULL DEFAULT ''",
-    chat_id: "TEXT DEFAULT ''",
-    size: 'INTEGER NOT NULL DEFAULT 0',
-    status: "TEXT NOT NULL DEFAULT 'active'",
-    bet: 'INTEGER NOT NULL DEFAULT 0',
-    reward: 'INTEGER NOT NULL DEFAULT 0',
-    digs_total: 'INTEGER NOT NULL DEFAULT 0',
-    digs_used: 'INTEGER NOT NULL DEFAULT 0',
-    treasures_total: 'INTEGER NOT NULL DEFAULT 0',
-    treasures_found: 'INTEGER NOT NULL DEFAULT 0',
-    traps_total: 'INTEGER NOT NULL DEFAULT 0',
-    secret: "TEXT NOT NULL DEFAULT '{}'",
-    revealed: "TEXT NOT NULL DEFAULT '[]'",
-    created_at: "TEXT DEFAULT ''",
-    updated_at: "TEXT DEFAULT ''",
-    expires_at: "TEXT DEFAULT ''",
-    finished_at: "TEXT DEFAULT ''",
-  },
-  game_rounds: {
-    user_id: "TEXT NOT NULL DEFAULT ''",
-    game: "TEXT NOT NULL DEFAULT ''",
-    bet: 'INTEGER NOT NULL DEFAULT 0',
-    reward: 'INTEGER NOT NULL DEFAULT 0',
-    state: "TEXT NOT NULL DEFAULT 'pending'",
-    payload: "TEXT DEFAULT ''",
-    created_at: "TEXT DEFAULT ''",
-    settled_at: "TEXT DEFAULT ''",
-  },
-};
-
 /**
- * Garante que as tabelas/colunas dos jogos existem — roda depois de `migrate()`.
- * Devolve a lista do que precisou ser criado/ajustado (vazia = tudo certo).
+ * Lê o corpo `(...)` de um `CREATE TABLE` a partir do `(` de abertura.
+ * Conta parênteses e respeita strings — o corpo pode ter `CHECK (x IN (...))`,
+ * `DEFAULT (datetime('now'))` e vírgulas dentro dessas expressões.
  */
-function ensureGameSchema() {
-  const ajustes = [];
-  const faltando = Object.keys(GAME_SCHEMA_COLUNAS).filter(
-    (t) => !db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`).get(t)
-  );
-  // 1) tabelas (as que já existem ficam como estão)  2) colunas que faltam
-  // 3) índices — só depois das colunas, senão o índice em coluna nova falha
-  db.exec(GAME_TABELAS_SQL);
-  for (const t of faltando) ajustes.push(`${t} (tabela criada)`);
-  for (const [tabela, colunas] of Object.entries(GAME_SCHEMA_COLUNAS)) {
-    const existentes = new Set(db.prepare(`PRAGMA table_info(${tabela})`).all().map((c) => c.name));
-    if (!existentes.size) {
-      ajustes.push(`${tabela} (tabela ausente)`);
+function corpoDoCreate(sql, abre) {
+  let nivel = 0;
+  let aspas = null;
+  for (let i = abre; i < sql.length; i++) {
+    const c = sql[i];
+    if (aspas) {
+      if (c === aspas) aspas = null;
       continue;
     }
-    for (const [coluna, definicao] of Object.entries(colunas)) {
-      if (existentes.has(coluna)) continue;
-      db.exec(`ALTER TABLE ${tabela} ADD COLUMN ${coluna} ${definicao}`);
-      ajustes.push(`${tabela}.${coluna}`);
+    if (c === "'" || c === '"') aspas = c;
+    else if (c === '(') nivel++;
+    else if (c === ')') {
+      nivel--;
+      if (nivel === 0) return sql.slice(abre + 1, i);
     }
   }
-  db.exec(GAME_INDICES_SQL);
+  return '';
+}
+
+/** O `CREATE TABLE ...;` completo que começa em `i`. */
+function extrairCreate(sql, i) {
+  let nivel = 0;
+  let aspas = null;
+  for (let j = i; j < sql.length; j++) {
+    const c = sql[j];
+    if (aspas) {
+      if (c === aspas) aspas = null;
+      continue;
+    }
+    if (c === "'" || c === '"') aspas = c;
+    else if (c === '(') nivel++;
+    else if (c === ')') nivel--;
+    else if (c === ';' && nivel === 0) return sql.slice(i, j + 1);
+  }
+  return sql.slice(i);
+}
+
+/** Colunas declaradas no corpo de um CREATE TABLE (sem as restrições de tabela). */
+function colunasDeclaradas(corpo) {
+  const partes = [];
+  let nivel = 0;
+  let aspas = null;
+  let atual = '';
+  for (const c of corpo) {
+    if (aspas) {
+      atual += c;
+      if (c === aspas) aspas = null;
+      continue;
+    }
+    if (c === "'" || c === '"') {
+      aspas = c;
+      atual += c;
+    } else if (c === '(') {
+      nivel++;
+      atual += c;
+    } else if (c === ')') {
+      nivel--;
+      atual += c;
+    } else if (c === ',' && nivel === 0) {
+      partes.push(atual);
+      atual = '';
+    } else {
+      atual += c;
+    }
+  }
+  partes.push(atual);
+
+  return partes
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .filter((p) => !/^(PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY|CHECK|CONSTRAINT)\b/i.test(p))
+    .map((def) => ({ nome: (def.match(/^"?([A-Za-z_][A-Za-z0-9_]*)"?/) || [])[1], def }))
+    .filter((c) => !!c.nome);
+}
+
+/**
+ * Definição aceita por `ALTER TABLE ... ADD COLUMN`: tipo + DEFAULT.
+ * O que o ALTER não aceita (PRIMARY KEY, UNIQUE, NOT NULL, REFERENCES,
+ * AUTOINCREMENT) fica de fora — a coluna nasce com o mesmo tipo e o mesmo
+ * valor padrão declarados na migração.
+ */
+function definicaoParaAlter(def) {
+  const tipo = def.match(/^"?[A-Za-z_][A-Za-z0-9_]*"?\s+([A-Za-z]+(?:\s*\([^)]*\))?)/);
+  const padrao = def.match(/DEFAULT\s+(('[^']*')|("[^"]*")|\([^)]*\)|[\w.+-]+)/i);
+  return `${tipo ? tipo[1] : 'TEXT'}${padrao ? ` DEFAULT ${padrao[1]}` : ''}`;
+}
+
+/**
+ * CURA POR MEDIÇÃO: compara o que as MIGRAÇÕES declaram (tabelas e colunas)
+ * com o que existe DE VERDADE no banco e cria o que faltar.
+ *
+ * Por que existe: a `version` de `schema_migrations` (índice + 1) não prova
+ * que a tabela existe. Um banco vindo de outro deploy pode ter números À
+ * FRENTE — o do aparelho tinha version 38 com o código tendo 36 migrações — e
+ * nesse caso a migração nova NUNCA roda e as tabelas ficam faltando (era a
+ * origem dos "algo deu errado" nos jogos). Aqui a conferência é por medição:
+ * tabela ausente é criada com o MESMO `CREATE TABLE IF NOT EXISTS` da
+ * migração; coluna ausente é adicionada com o mesmo tipo/DEFAULT. Nada é
+ * apagado, renomeado ou sobrescrito.
+ *
+ * @returns {string[]} o que foi criado/ajustado agora (vazio = tudo certo)
+ */
+function ensureEsquemaReal() {
+  const ajustes = [];
+  const declarado = new Map(); // tabela → { sql, colunas: Map<nome, def> }
+  const re = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/gi;
+
+  for (const migracao of MIGRATIONS) {
+    if (typeof migracao !== 'string') continue;
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(migracao))) {
+      const tabela = m[1];
+      const abre = m.index + m[0].length - 1;
+      const corpo = corpoDoCreate(migracao, abre);
+      if (!declarado.has(tabela)) declarado.set(tabela, { sql: null, colunas: new Map() });
+      const reg = declarado.get(tabela);
+      for (const c of colunasDeclaradas(corpo)) if (!reg.colunas.has(c.nome)) reg.colunas.set(c.nome, c.def);
+      if (!reg.sql) reg.sql = extrairCreate(migracao, m.index);
+    }
+  }
+
+  for (const [tabela, reg] of declarado) {
+    const existe = db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`).get(tabela);
+    if (!existe) {
+      if (reg.sql) {
+        db.exec(reg.sql);
+        ajustes.push(`${tabela} (criada)`);
+      }
+      continue;
+    }
+    const colunas = new Set(db.prepare(`PRAGMA table_info(${tabela})`).all().map((c) => c.name));
+    for (const [nome, def] of reg.colunas) {
+      if (colunas.has(nome)) continue;
+      if (/PRIMARY\s+KEY/i.test(def)) {
+        ajustes.push(`${tabela}.${nome} (chave primária ausente — tabela de outra linhagem)`);
+        continue;
+      }
+      try {
+        db.exec(`ALTER TABLE ${tabela} ADD COLUMN ${nome} ${definicaoParaAlter(def)}`);
+        ajustes.push(`${tabela}.${nome}`);
+      } catch (err) {
+        ajustes.push(`${tabela}.${nome} (falhou: ${(err && err.message) || err})`);
+      }
+    }
+  }
+
   if (ajustes.length) {
     logger.warn(
-      { ajustes, versao: (db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get() || {}).v },
-      '[DB] esquema dos jogos estava incompleto — ajustado sem apagar dados'
+      {
+        ajustes,
+        versao: (db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get() || {}).v,
+      },
+      '[DB] esquema incompleto — ajustado por medição, sem apagar dados'
     );
   }
   return ajustes;
+}
+
+/** Nome antigo (era só dos jogos): agora é a cura geral, por medição. */
+function ensureGameSchema() {
+  return ensureEsquemaReal();
 }
 
 const MIGRATIONS = [
@@ -590,10 +682,58 @@ function open() {
   db.pragma('synchronous = NORMAL');
   db.pragma('foreign_keys = ON');
   migrate();
-  ensureGameSchema();
+  ensureEsquemaReal();
   seed();
   logger.info({ file: CONFIG.paths.databaseFile }, 'banco aberto');
   return db;
+}
+
+/**
+ * Nome estável de uma migração — é POR ELE que a aplicação decide o que falta.
+ *
+ * Por que não confiar só no número (`version`): a `version` é o índice + 1, e um
+ * banco que passou por outro deploy pode ter números À FRENTE dos que este
+ * código tem. Nesse caso `version > current` nunca é verdade e as migrações
+ * NOVAS deste código nunca rodariam — foi essa a origem dos "algo deu errado"
+ * nos jogos (tabelas ausentes com o número já "batido" por outra linhagem).
+ */
+function nomeDaMigracao(i) {
+  return `v${i + 1}`;
+}
+
+/** Existe essa coluna? (usado no ALTER idempotente da coluna `nome`.) */
+function colunaExiste(tabela, coluna) {
+  return db
+    .prepare(`PRAGMA table_info(${tabela})`)
+    .all()
+    .some((c) => c.name === coluna);
+}
+
+/**
+ * Nome estável de uma migração — é POR ELE que a aplicação decide o que falta.
+ *
+ * Por que não confiar só no número (`version`): a `version` é o índice + 1 e um
+ * banco vindo de outro deploy pode ter números À FRENTE dos que este código
+ * tem — o do aparelho tinha version 38 com o código tendo 36 migrações. Nesse
+ * caso `version > current` nunca é verdade e as migrações NOVAS deste código
+ * nunca rodariam (era a origem dos "algo deu errado" nos jogos).
+ *
+ * INVARIANTE (garantida por teste): toda migração é só
+ * `CREATE TABLE/INDEX IF NOT EXISTS` — nenhum ALTER, DROP, INSERT, UPDATE ou
+ * DELETE. É isso que torna seguro reexecutar uma migração cujo nome não está
+ * registrado (banco antigo, sem a coluna `nome`): a reexecução ou não faz nada,
+ * ou cria o que estava faltando.
+ */
+function nomeDaMigracao(i) {
+  return `v${i + 1}`;
+}
+
+/** Existe essa coluna? (usado no ALTER idempotente da coluna `nome`.) */
+function colunaExiste(tabela, coluna) {
+  return db
+    .prepare(`PRAGMA table_info(${tabela})`)
+    .all()
+    .some((c) => c.name === coluna);
 }
 
 function migrate() {
@@ -603,21 +743,58 @@ function migrate() {
       applied_at TEXT DEFAULT ''
     );`
   );
-  const row = db.prepare('SELECT MAX(version) AS v FROM schema_migrations').get();
-  const current = (row && row.v) || 0;
-  const now = () => new Date().toISOString();
+  // `nome` foi adicionada depois: bancos antigos ganham a coluna aqui (as
+  // linhas ficam com nome vazio e a migração correspondente é reexecutada)
+  if (!colunaExiste('schema_migrations', 'nome')) {
+    db.exec(`ALTER TABLE schema_migrations ADD COLUMN nome TEXT DEFAULT ''`);
+  }
 
+  const linhas = db.prepare('SELECT version, nome FROM schema_migrations ORDER BY version').all();
+  const nomes = new Set(linhas.map((r) => String(r.nome || '')).filter(Boolean));
+  let maior = linhas.reduce((m, r) => Math.max(m, Number(r.version) || 0), 0);
+  const agora = () => new Date().toISOString();
+
+  let aplicadas = 0;
+  let reexecutadas = 0;
   MIGRATIONS.forEach((sql, i) => {
-    const version = i + 1;
-    if (version > current) {
-      const apply = db.transaction(() => {
-        db.exec(sql);
-        db.prepare('INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (?, ?)').run(version, now());
-      });
-      apply();
-      logger.info({ version }, 'migração aplicada');
-    }
+    const nome = nomeDaMigracao(i);
+    if (nomes.has(nome)) return;
+    const linha = db.prepare('SELECT version, nome FROM schema_migrations WHERE version = ?').get(i + 1);
+    const legado = linha && !String(linha.nome || ''); // banco antigo: linha sem nome
+    if (legado) reexecutadas++;
+    const apply = db.transaction(() => {
+      db.exec(sql); // idempotente por invariante (só CREATE ... IF NOT EXISTS)
+      if (legado) {
+        db.prepare('UPDATE schema_migrations SET nome = ?, applied_at = ? WHERE version = ?').run(
+          nome,
+          agora(),
+          i + 1
+        );
+      } else {
+        // número inexistente ou tomado por OUTRA linhagem: usa o próximo livre
+        // (quem identifica a migração é o NOME, não o número)
+        const version = linha ? maior + 1 : i + 1;
+        db.prepare('INSERT INTO schema_migrations (version, applied_at, nome) VALUES (?, ?, ?)').run(
+          version,
+          agora(),
+          nome
+        );
+        maior = Math.max(maior, version);
+      }
+      nomes.add(nome);
+    });
+    apply();
+    aplicadas++;
   });
+
+  if (aplicadas) logger.info({ aplicadas, reexecutadas, versaoBanco: maior }, 'migrações aplicadas/confirmadas');
+  if (maior > MIGRATIONS.length) {
+    logger.warn(
+      { versaoBanco: maior, migracoesDoCodigo: MIGRATIONS.length },
+      '[DB] banco à frente do código — o número virou só um contador; o que identifica a migração é o nome (v1..vN)'
+    );
+  }
+  return aplicadas;
 }
 
 /** Insere dados iniciais (idempotente — só insere se a tabela estiver vazia). */
@@ -725,6 +902,7 @@ module.exports = {
   restore,
   stats,
   migrate,
+  ensureEsquemaReal,
   ensureGameSchema,
   MIGRATIONS,
 };
