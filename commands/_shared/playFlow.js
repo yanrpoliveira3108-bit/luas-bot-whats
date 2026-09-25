@@ -32,6 +32,7 @@ const { sendAudioResult, sendVideoResult } = require('./downloads');
 const { dicaBuscaVazia } = require('./searchHint');
 const interactive = require('../../utils/interactive');
 const CONFIG = require('../../config');
+const antiBan = require('../../utils/antiBan');
 const logger = require('../../utils/logger').child('play');
 
 function canonicalTrackKey(rawUrl) {
@@ -70,7 +71,7 @@ async function selectedTrackDetails(track) {
     let timer;
     const info = await Promise.race([
       youtube.getInfo(track.url),
-      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('metadata timeout')), 8000); }),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('metadata timeout')), 4000); }),
     ]);
     clearTimeout(timer);
     const d = info && info.videoDetails;
@@ -140,14 +141,15 @@ async function sendPlayDetailCard(ctx, track, prefix, kind = 'audio') {
     sourceUrl: details.url || track.url,
     mediaType: 1,
     renderLargerThumbnail: true,
+    thumbnailUrl: details.thumbnail || undefined,
   };
   if (thumb) preview.jpegThumbnail = thumb;
   try {
     if (ctx.socket && typeof ctx.socket.sendMessage === 'function') {
-      await ctx.socket.sendMessage(ctx.remoteJid, {
+      await antiBan.enqueueOutbound(() => ctx.socket.sendMessage(ctx.remoteJid, {
         text: card,
         contextInfo: { externalAdReply: preview },
-      }, { quoted: ctx.message });
+      }, { quoted: ctx.message }));
       return true;
     }
     await ctx.reply(card);
@@ -156,7 +158,7 @@ async function sendPlayDetailCard(ctx, track, prefix, kind = 'audio') {
     // Fallback apenas quando o mecanismo nativo falha; não reenvia mídia.
     try {
       if (thumb && ctx.socket && typeof ctx.socket.sendMessage === 'function') {
-        await ctx.socket.sendMessage(ctx.remoteJid, { image: thumb, caption: card }, { quoted: ctx.message });
+        await antiBan.enqueueOutbound(() => ctx.socket.sendMessage(ctx.remoteJid, { image: thumb, caption: card }, { quoted: ctx.message }));
       } else {
         await ctx.reply(card);
       }
