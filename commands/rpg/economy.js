@@ -1,5 +1,7 @@
 'use strict';
 
+const alvoUtil = require('../../utils/alvo');
+
 const economy = require('../../database/economy');
 const { withLock } = require('../../utils/keyedMutex');
 const { formatMoney } = require('../../utils/formatter');
@@ -83,10 +85,11 @@ module.exports = [
     usage: '!transferir @usuario <valor>',
     cooldown: 5000,
     execute: async (ctx) => {
-      const target = ctx.mentionedJid[0];
-      const amount = parseInt(ctx.args[ctx.mentionedJid.length ? 1 : 0], 10);
-      if (!target || !amount || amount <= 0) return ctx.reply('⚠️ Use: !transferir @usuario <valor>');
-      if (target === ctx.sender) return ctx.reply('🤨 Não dá para transferir para você mesmo.');
+      const target = alvoUtil.alvo(ctx);
+      const resto = alvoUtil.resto(ctx);
+      const amount = parseInt(resto[0], 10);
+      if (!target || !amount || amount <= 0) return ctx.reply('⚠️ Use: !transferir @usuario <valor>\n_(ou responda a mensagem da pessoa)_');
+      if (alvoUtil.ehAutor(ctx, target)) return ctx.reply('🤨 Não dá para transferir para você mesmo.');
       try {
         await withLock(ctx.sender, () => economy.transfer(ctx.sender, target, amount));
         await ctx.reply(`💸 Transferido ${formatMoney(amount)} para @${target.split('@')[0]}.`, { mentions: [target] });

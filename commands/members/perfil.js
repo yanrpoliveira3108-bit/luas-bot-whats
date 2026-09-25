@@ -1,5 +1,7 @@
 'use strict';
 
+const alvoUtil = require('../../utils/alvo');
+
 const users = require('../../database/users');
 const groups = require('../../database/groups');
 const rpg = require('../../database/rpg');
@@ -16,7 +18,7 @@ module.exports = [
     usage: '!perfil [@usuario]',
     cooldown: 3000,
     execute: async (ctx) => {
-      const target = ctx.mentionedJid[0] || ctx.sender;
+      const target = alvoUtil.alvo(ctx) || ctx.sender;
       const u = users.get(target);
       if (!u) return ctx.reply('ℹ️ Este usuário ainda não interagiu com o bot.');
 

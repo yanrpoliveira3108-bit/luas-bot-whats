@@ -1,5 +1,7 @@
 'use strict';
 
+const alvoUtil = require('../../utils/alvo');
+
 const { downloadToBuffer } = require('../../utils/download');
 
 async function getProfilePic(ctx, target) {
@@ -19,7 +21,7 @@ module.exports = [
     usage: '!avatar [@usuario]',
     cooldown: 3000,
     execute: async (ctx) => {
-      const target = ctx.mentionedJid[0] || ctx.sender;
+      const target = alvoUtil.alvo(ctx) || ctx.sender;
       const url = await getProfilePic(ctx, target);
       if (!url) return ctx.reply('ℹ️ Este usuário não possui foto de perfil visível.');
       try {
@@ -38,7 +40,7 @@ module.exports = [
     usage: '!banner [@usuario]',
     cooldown: 3000,
     execute: async (ctx) => {
-      const target = ctx.mentionedJid[0] || ctx.sender;
+      const target = alvoUtil.alvo(ctx) || ctx.sender;
       const url = await getProfilePic(ctx, target);
       if (!url) return ctx.reply('ℹ️ Sem foto de perfil visível (o WhatsApp não possui "banner" separado).');
       try {

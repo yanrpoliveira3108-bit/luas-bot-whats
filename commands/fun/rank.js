@@ -1,5 +1,7 @@
 'use strict';
 
+const alvoUtil = require('../../utils/alvo');
+
 const games = require('../../database/games');
 const users = require('../../database/users');
 
@@ -24,7 +26,7 @@ module.exports = [
     usage: '!karma [@usuario]',
     cooldown: 2000,
     execute: async (ctx) => {
-      const target = ctx.mentionedJid[0] || ctx.sender;
+      const target = alvoUtil.alvo(ctx) || ctx.sender;
       const u = users.get(target);
       await ctx.reply(`⚖️ Karma de @${target.split('@')[0]}: *${u ? u.karma : 0}*`, { mentions: [target] });
     },

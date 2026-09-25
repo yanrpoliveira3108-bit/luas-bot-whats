@@ -314,10 +314,10 @@ async function buildContext(sock, msg) {
       interactive.sendList(sock, remoteJid, Object.assign({ quoted: msg }, o))
     );
   };
-  ctx.sendImage = async (b, caption = '') => {
+  ctx.sendImage = async (b, caption = '', opts = {}) => {
     await antiBan.simulateTyping(sock, remoteJid, caption, 'composing');
     return antiBan.enqueueOutbound(() =>
-      mediaUtil.sendImage(sock, remoteJid, b, caption, { quoted: msg })
+      mediaUtil.sendImage(sock, remoteJid, b, caption, { quoted: msg, mentions: opts.mentions })
     );
   };
   ctx.sendVideo = async (b, caption = '', opts = {}) => {

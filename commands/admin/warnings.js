@@ -1,5 +1,7 @@
 'use strict';
 
+const alvoUtil = require('../../utils/alvo');
+
 const groups = require('../../database/groups');
 const groupHandler = require('../../handlers/groupHandler');
 const { resolveTarget, requireGroupAdmin } = require('../_shared/admin');
@@ -17,8 +19,8 @@ module.exports = [
     cooldown: 2000,
     execute: async (ctx) => {
       const target = resolveTarget(ctx);
-      if (!target) return ctx.reply('⚠️ Marque o usuário: !advertir @usuario [motivo]');
-      const reason = ctx.args.slice(1).join(' ') || 'Sem motivo informado';
+      if (!target) return ctx.reply(alvoUtil.dica(ctx.prefix, 'advertir', ' [motivo]'));
+      const reason = alvoUtil.resto(ctx, { numero: true }).join(' ') || 'Sem motivo informado';
       const { count, action } = await groupHandler.applyWarningFlow(ctx.socket, ctx.remoteJid, target, reason, ctx.sender);
 
       const ACTION_LABEL = { aviso: '📢 aviso enviado', kick: '👢 usuário removido' };
@@ -39,7 +41,7 @@ module.exports = [
     cooldown: 2000,
     execute: async (ctx) => {
       const target = resolveTarget(ctx);
-      if (!target) return ctx.reply('⚠️ Marque o usuário: !rmadv @usuario');
+      if (!target) return ctx.reply(alvoUtil.dica(ctx.prefix, 'rmadv', ''));
       const removed = groups.removeLastWarning(ctx.remoteJid, target);
       if (!removed) return ctx.reply('ℹ️ Este usuário não possui advertências.');
       await ctx.reply(`✅ Última advertência de @${target.split('@')[0]} removida.`, { mentions: [target] });
@@ -56,7 +58,7 @@ module.exports = [
     cooldown: 2000,
     execute: async (ctx) => {
       const target = resolveTarget(ctx);
-      if (!target) return ctx.reply('⚠️ Marque o usuário: !warnings @usuario');
+      if (!target) return ctx.reply(alvoUtil.dica(ctx.prefix, 'warnings', ''));
       const list = groups.getWarnings(ctx.remoteJid, target);
       if (!list.length) return ctx.reply(`✅ @${target.split('@')[0]} não tem advertências.`, { mentions: [target] });
       const lines = list.map((w, i) => `${i + 1}. ${w.reason} — ${formatDate(new Date(w.created_at).getTime())}`);
@@ -74,7 +76,7 @@ module.exports = [
     cooldown: 2000,
     execute: async (ctx) => {
       const target = resolveTarget(ctx);
-      if (!target) return ctx.reply('⚠️ Marque o usuário: !resetadv @usuario');
+      if (!target) return ctx.reply(alvoUtil.dica(ctx.prefix, 'resetadv', ''));
       groups.clearWarnings(ctx.remoteJid, target);
       await ctx.reply(`✅ Advertências de @${target.split('@')[0]} zeradas.`, { mentions: [target] });
     },

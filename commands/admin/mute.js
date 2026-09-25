@@ -1,5 +1,7 @@
 'use strict';
 
+const alvoUtil = require('../../utils/alvo');
+
 const groupHandler = require('../../handlers/groupHandler');
 const { resolveTarget } = require('../_shared/admin');
 
@@ -15,7 +17,7 @@ module.exports = [
     cooldown: 2000,
     execute: async (ctx) => {
       const target = resolveTarget(ctx);
-      if (!target) return ctx.reply('⚠️ Marque o usuário: !mute @usuario');
+      if (!target) return ctx.reply(alvoUtil.dica(ctx.prefix, 'mute', ''));
       groupHandler.muteUser(ctx.remoteJid, target);
       const hint = ctx.isBotAdmin ? '' : '\n_⚠️ Para eu APAGAR as mensagens dele, preciso ser admin do grupo._';
       await ctx.reply(`🔇 @${target.split('@')[0]} foi silenciado.${hint}`, { mentions: [target] });
@@ -32,7 +34,7 @@ module.exports = [
     cooldown: 2000,
     execute: async (ctx) => {
       const target = resolveTarget(ctx);
-      if (!target) return ctx.reply('⚠️ Marque o usuário: !unmute @usuario');
+      if (!target) return ctx.reply(alvoUtil.dica(ctx.prefix, 'unmute', ''));
       groupHandler.unmuteUser(ctx.remoteJid, target);
       await ctx.reply(`🔊 @${target.split('@')[0]} pode falar novamente.`, { mentions: [target] });
     },

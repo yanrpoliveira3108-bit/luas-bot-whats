@@ -1,5 +1,7 @@
 'use strict';
 
+const alvoUtil = require('../../utils/alvo');
+
 const buttonHandler = require('../../handlers/buttonHandler');
 const logger = require('../../utils/logger').child('requests');
 const { resolveTarget } = require('../_shared/admin');
@@ -95,7 +97,7 @@ module.exports = [
     cooldown: 2000,
     execute: async (ctx) => {
       const target = resolveTarget(ctx);
-      if (!target) return ctx.reply('⚠️ Marque o usuário: !aprovar @usuario');
+      if (!target) return ctx.reply(alvoUtil.dica(ctx.prefix, 'aprovar', ''));
       await approveOne(ctx, target);
       await ctx.reply(`✅ @${target.split('@')[0]} aprovado.`, { mentions: [target] });
     },
@@ -111,7 +113,7 @@ module.exports = [
     cooldown: 2000,
     execute: async (ctx) => {
       const target = resolveTarget(ctx);
-      if (!target) return ctx.reply('⚠️ Marque o usuário: !rejeitar @usuario');
+      if (!target) return ctx.reply(alvoUtil.dica(ctx.prefix, 'rejeitar', ''));
       await rejectOne(ctx, target);
       await ctx.reply(`❌ @${target.split('@')[0]} rejeitado.`, { mentions: [target] });
     },

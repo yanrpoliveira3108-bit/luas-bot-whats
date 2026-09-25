@@ -1,5 +1,7 @@
 'use strict';
 
+const alvoUtil = require('../../utils/alvo');
+
 module.exports = [
   {
     name: 'id',
@@ -9,7 +11,7 @@ module.exports = [
     usage: '!id',
     cooldown: 2000,
     execute: async (ctx) => {
-      const alvo = ctx.mentionedJid[0] || ctx.sender;
+      const alvo = alvoUtil.alvo(ctx) || ctx.sender;
       const lines = [
         '🆔 *Identificadores*',
         `▸ Chat: \`${ctx.remoteJid}\``,

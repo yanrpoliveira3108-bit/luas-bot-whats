@@ -76,6 +76,7 @@ async function sendImage(sock, jid, bufferOrPath, caption = '', opts = {}) {
       image: asMedia(bufferOrPath),
       caption: caption || undefined,
       mimetype: opts.mimetype || 'image/jpeg',
+      ...(opts.mentions && opts.mentions.length ? { mentions: opts.mentions } : {}),
     },
     { quoted: opts.quoted }
   );
