@@ -103,6 +103,16 @@ function invalidateGroupMeta(jid) {
   groupMeta.invalidate(jid);
 }
 
+/** Primeiro frame do stack (arquivo:linha) — é o que aponta a causa real. */
+function frameDoStack(err) {
+  const linhas = String((err && err.stack) || '').split('\n');
+  for (const l of linhas) {
+    const t = l.trim();
+    if (t.startsWith('at ') && !t.includes('node:internal') && !t.includes('internal/process')) return t;
+  }
+  return linhas.length > 1 ? linhas[1].trim() : '';
+}
+
 /* ----------------------------- contexto ------------------------------ */
 
 async function buildContext(sock, msg) {
@@ -195,7 +205,11 @@ async function buildContext(sock, msg) {
     try {
       await antiBan.simulateTyping(sock, remoteJid, t, 'composing');
       const res = await antiBan.enqueueOutbound(() =>
-        sock.sendMessage(remoteJid, { text: String(t) }, { quoted: opts.quoted === false ? undefined : msg })
+        sock.sendMessage(
+          remoteJid,
+          opts.mentions && opts.mentions.length ? { text: String(t), mentions: opts.mentions } : { text: String(t) },
+          { quoted: opts.quoted === false ? undefined : msg }
+        )
       );
       if (isCommunity || lidGroupMsg) {
         logger.info(
@@ -205,7 +219,12 @@ async function buildContext(sock, msg) {
       }
       return res;
     } catch (e) {
-      logger.warn({ chat: remoteJid, err: e && e.message }, '[SEND] sendMessage FALHOU');
+      // SEM o stack, um erro de envio no aparelho vira adivinhação: foi o caso do
+      // grupo de comunidade/LID em 25/09 (56 respostas perdidas, causa desconhecida)
+      logger.warn(
+        { chat: remoteJid, err: e && e.message, frame: frameDoStack(e), stack: e && e.stack },
+        '[SEND] sendMessage FALHOU'
+      );
       throw e;
     }
   };

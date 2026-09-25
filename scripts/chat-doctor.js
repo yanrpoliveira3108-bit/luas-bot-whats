@@ -67,6 +67,21 @@ function hhmmss(ms) {
   return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+/** Primeiro frame do stack (arquivo:linha) — é o que aponta a causa real. */
+function frameDoStack(stack) {
+  for (const l of String(stack || '').split('\n')) {
+    const t = l.trim();
+    if (t.startsWith('at ') && !t.includes('node:internal') && !t.includes('internal/process')) return t;
+  }
+  return '';
+}
+
+/** Assinatura do erro: módulo + mensagem + primeiro frame (agrupa repetições). */
+function assinatura(l) {
+  const msg = String(l.err || l.msg || '').replace(/\s+/g, ' ').slice(0, 80);
+  return `${l.module || '?'} | ${msg} | ${frameDoStack(l.stack)}`;
+}
+
 /** Data (ms) de uma linha de log (campo `time` do pino) ou do freio (`t`). */
 function quandoLinha(o) {
   return quando((o && (o.t !== undefined ? o.t : o.time)) || 0);
@@ -243,13 +258,47 @@ if (!arquivos.length) {
   L(`Comandos recebidos neste chat : ${achados.comandos.length}`);
   for (const c of achados.comandos.slice(-5)) L(`   ${hhmmss(quandoLinha(c))}  ${String(c.msg).slice(0, 70)}`);
   L(`Falhas de envio               : ${achados.falhaEnvio.length}`);
-  for (const f of achados.falhaEnvio.slice(-5)) L(`   ${hhmmss(quandoLinha(f))}  ${String(f.err || f.msg).slice(0, 90)}`);
+  for (const f of achados.falhaEnvio.slice(-5)) {
+    L(`   ${hhmmss(quandoLinha(f))}  [${f.module || '?'}] ${String(f.err || f.msg).slice(0, 80)}`);
+    const fr = frameDoStack(f.stack);
+    if (fr) L(`      ↳ ${fr}`);
+  }
   L(`Linhas do freio               : ${achados.freio.length}`);
   for (const f of achados.freio.slice(-5)) L(`   ${hhmmss(quandoLinha(f))}  ${String(f.msg).slice(0, 90)}`);
   if (achados.comunidade.length) {
     L(`Linhas de comunidade/LID       : ${achados.comunidade.length}`);
     for (const c of achados.comunidade.slice(-3)) L(`   ${hhmmss(quandoLinha(c))}  ${String(c.msg).slice(0, 90)}`);
   }
+}
+
+/* ------------------------- 3.1 assinaturas de erro ---------------------- */
+
+const comErro = achados.falhaEnvio.concat(achados.outros.filter((l) => l.err || l.stack));
+if (comErro.length) {
+  const contagem = new Map();
+  for (const l of comErro) {
+    const a = assinatura(l);
+    const atual = contagem.get(a) || { n: 0, ultimo: 0, exemplo: l };
+    atual.n++;
+    atual.ultimo = Math.max(atual.ultimo, quandoLinha(l));
+    contagem.set(a, atual);
+  }
+  const ordenado = [...contagem.entries()].sort((a, b) => b[1].n - a[1].n);
+  H('3.1 ASSINATURAS DE ERRO NESTE CHAT (a causa está no primeiro frame)');
+  for (const [a, info] of ordenado.slice(0, 8)) {
+    const [mod, msg, frame] = a.split(' | ');
+    L(`${info.n}×  ${hhmmss(info.ultimo)}  [${mod}] ${msg}`);
+    if (frame) L(`      ↳ ${frame}`);
+  }
+  if (ordenado.some(([a]) => /Cannot read propert|is not a function/.test(a))) {
+    L('');
+    L('Leitura: erro de MONTAGEM da mensagem (TypeError). O bot executa o comando e');
+    L('a resposta não sai. A partir desta versão o envio é repetido SEM a citação');
+    L('quando isso acontece — se ainda falhar, o primeiro frame acima diz o arquivo.');
+  }
+} else {
+  H('3.1 ASSINATURAS DE ERRO NESTE CHAT');
+  L('✅ Nenhum erro registrado para este chat no período.');
 }
 
 /* ------------------------------ 5) veredito ----------------------------- */
@@ -264,9 +313,18 @@ if (barrados.length) {
   L('     estava ligada por engano no padrão (corrigido em utils/sendGuard.js).');
   L('   ▸ Depois de reiniciar: `!freio bloqueios` deve ficar zerado.');
 } else if (achados.falhaEnvio.length) {
-  L('⚠️  O envio FALHOU (erro do WhatsApp/client). O motivo está nas linhas de');
-  L('   "Falhas de envio" acima — "not-authorized"/"forbidden" indica que o');
-  L('   número não pode postar neste grupo (ver checklist abaixo).');
+  const tipo = achados.falhaEnvio.some((l) => /Cannot read propert|is not a function/i.test(String(l.err || l.msg)));
+  if (tipo) {
+    L('🧩 O envio FALHOU por ERRO DE MONTAGEM da mensagem (TypeError). O comando');
+    L('   roda, mas a resposta não é enviada — é exatamente "ele faz e não fala".');
+    L('   ▸ A partir desta versão o bot REENVIA sem a citação quando isso ocorre.');
+    L('   ▸ Atualize (`git pull`), reinicie e mande os comandos de novo.');
+    L('   ▸ Se voltar a acontecer, a assinatura acima traz o arquivo:linha exato.');
+  } else {
+    L('⚠️  O envio FALHOU (erro do WhatsApp/client). O motivo está nas linhas de');
+    L('   "Falhas de envio" acima — "not-authorized"/"forbidden" indica que o');
+    L('   número não pode postar neste grupo (ver checklist abaixo).');
+  }
 } else if (aceitos.length || achados.comandos.length) {
   L('✅ O bot RECEBEU o comando e o WhatsApp ACEITOU a mensagem (sem bloqueio do');
   L('   freio e sem erro). Ou seja: a mensagem saiu daqui — se ela não aparece');

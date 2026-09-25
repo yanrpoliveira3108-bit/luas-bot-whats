@@ -111,6 +111,39 @@ pelo chat e diz qual das três coisas aconteceu:
 A partir desta versão o log de comando também traz o `chat` — sem isso não dava
 para separar as conversas no relatório.
 
+### 4.1.2 Caso real (25/09) — "o bot faz o comando e não manda mensagem"
+
+Relato: num grupo específico (comunidade/LID) o bot **executava** os comandos
+(adicionar número, fechar/abrir grupo, hidetag, menu, tigrinho) e **nenhuma
+mensagem aparecia**. O doctor de conversa respondeu com dado do aparelho:
+
+```
+1) O QUE O FREIO FEZ COM ESTE CHAT
+   Envios ACEITOS  : 29        ← o bot ENTREGOU em outros momentos
+   Envios BARRADOS : 0         ← o freio NÃO era a causa aqui
+3) LOGS
+   Comandos recebidos : 13     ← os comandos chegavam
+   Falhas de envio    : 56     ← Cannot read properties of undefined (reading 'toString')
+```
+
+Leitura: o comando rodava, e a **montagem da mensagem** (citação/contexto) quebrava
+com `TypeError` — a resposta nunca saía. Duas proteções entraram:
+
+1. **Reenvio sem citação.** No ponto único de saída (`utils/sendGuard.js`, que
+   envolve `sock.sendMessage`) um erro de MONTAGEM (TypeError/`Cannot read
+   properties…`) faz o envio ser repetido **sem o `quoted`** — o texto, as
+   menções, o menu, a lista e o card vão do mesmo jeito; só o "responder citando"
+   é abandonado. Erro de **entrega** (rede/status/Boom) **não** é repetido: pode
+   ter saído, e repetir duplicaria.
+2. **Evidência no log.** A falha escreve `frame` (arquivo:linha), `stack`,
+   `tipo` do envio e `quotedLid` (se a mensagem citada vinha de um participante
+   `@lid`) — sem isso, "não aparece nada" no aparelho vira adivinhação. O
+   `npm run chat:doctor <jid>` mostra a **assinatura de erro** (módulo +
+   mensagem + primeiro frame) agrupada e contada.
+
+Travas: `test/sendfallback.test.js` (4 cenários — reenvio em texto, reenvio no
+menu/lista, sem reenvio em erro de entrega, e o log com stack + `quotedLid`).
+
 ### 4.2 Teste controlado (é o que prova a causa)
 
 ```

@@ -149,6 +149,29 @@ function auditBlock(jid, reason, kind) {
   audit({ t: Date.now(), jid: String(jid), kind: kind || null, blocked: reason });
 }
 
+/**
+ * Erro de MONTAGEM da mensagem (bug de codificação nosso/da lib), não de
+ * entrega: `Cannot read properties of undefined`, `x is not a function`,
+ * `Invalid media`… Só nesse caso é seguro REENVIAR; um erro de rede/status pode
+ * significar que a mensagem JÁ saiu e reenviar duplicaria (ver "timeout ≠ falha").
+ */
+function erroDeMontagem(err) {
+  const msg = String((err && err.message) || '');
+  if (err && err.name === 'TypeError') return true;
+  return /Cannot read propert|is not a function|is not iterable|undefined \(reading|Invalid media|cannot be null/i.test(
+    msg
+  );
+}
+
+/** Primeiro frame do stack (arquivo:linha) do erro. */
+function frameDoStack(err) {
+  for (const l of String((err && err.stack) || '').split('\n')) {
+    const t = l.trim();
+    if (t.startsWith('at ') && !t.includes('node:internal') && !t.includes('internal/process')) return t;
+  }
+  return '';
+}
+
 /** Anota um envio barrado pelo freio (contador por conversa + auditoria). */
 function notaBloqueio(jid, reason, kind) {
   const j = String(jid || '');
@@ -718,7 +741,12 @@ function diagnose(err, picked) {
   const text = `${(err && err.message) || ''} ${(err && err.data) || ''}`;
   const hit = status === 429 || RESTRICTION_RE.test(text);
   if (!hit) {
-    logger.warn({ err: err && err.message, chat: picked && picked.jid }, '[FREIO] falha ao enviar');
+    // o stack é o que permite achar a linha exata de um erro de montagem da
+    // mensagem (foi o que faltou para explicar as 56 respostas perdidas em 25/09)
+    logger.warn(
+      { err: err && err.message, chat: picked && picked.jid, stack: err && err.stack },
+      '[FREIO] falha ao enviar'
+    );
     return false;
   }
   const minutes = Math.max(1, CFG.pauseMinutes);
@@ -842,7 +870,45 @@ function attach(sock) {
     const origSendMessage = sock.sendMessage.bind(sock);
     sock.sendMessage = (jid, content, opts = {}) => {
       const kind = classify(content);
-      const run = () => origSendMessage(jid, content, opts);
+      // PONTO ÚNICO DE SAÍDA: se a MONTAGEM da mensagem citada estourar (o que
+      // acontecia no grupo de comunidade/LID do dono: `Cannot read properties of
+      // undefined (reading 'toString')` — 56 respostas perdidas em 25/09), a
+      // mensagem é REENVIADA sem a citação. Vale para TEXTO, MENU (lista/botões),
+      // CARD HTML e MÍDIA — todos passam por aqui. O texto/configuração são
+      // preservados; só o "responder citando" é abandonado.
+      const run = async () => {
+        try {
+          return await origSendMessage(jid, content, opts);
+        } catch (err) {
+          if (!opts || !opts.quoted || !erroDeMontagem(err)) throw err;
+          const semCitacao = Object.assign({}, opts);
+          delete semCitacao.quoted;
+          const participante = String((opts.quoted && opts.quoted.key && opts.quoted.key.participant) || '');
+          logger.warn(
+            {
+              chat: String(jid),
+              tipo: kind,
+              err: err && err.message,
+              frame: frameDoStack(err),
+              quotedLid: participante.endsWith('@lid'),
+              quotedParticipant: participante || undefined,
+              stack: err && err.stack,
+            },
+            '[FREIO] falha ao MONTAR a mensagem citada — reenviando sem citação'
+          );
+          try {
+            const res = await origSendMessage(jid, content, semCitacao);
+            logger.info({ chat: String(jid) }, '[FREIO] reenvio sem citação funcionou (a mensagem saiu)');
+            return res;
+          } catch (err2) {
+            logger.warn(
+              { chat: String(jid), err: err2 && err2.message, frame: frameDoStack(err2), stack: err2 && err2.stack },
+              '[FREIO] reenvio sem citação também falhou'
+            );
+            throw err2;
+          }
+        }
+      };
       run.__content = content;
       return enqueue(kind, jid, run);
     };
