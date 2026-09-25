@@ -362,7 +362,39 @@ async function main() {
     fail('10: cura fora dos jogos', e);
   }
 
-  console.log(`\n${feitos} ✅ · ${falhas} ❌`);  console.log(`\n${feitos} ✅ · ${falhas} ❌`);
+  /* 11) CONSULTA com tabela/coluna ausente: o esquema se refaz NA HORA ---------
+   * Era este o defeito visto no aparelho: com a tabela faltando, o comando
+   * morria com "⚠️ algo deu errado" no meio do jogo (no such table:
+   * treasure_games / game_rounds). Agora `prepare()` cura por medição e roda a
+   * consulta de novo — o jogo não cai por causa de esquema. */
+  try {
+    const { saida } = noFilho('lua-cura-na-consulta.db', `
+      const db=require(path.join(${JSON.stringify(RAIZ)},'database/database'));db.open();
+      const c=db.get();
+      // simula banco vindo de outro estado: tabelas dos jogos apagadas por fora
+      c.exec('DROP TABLE IF EXISTS game_bets');
+      c.exec('DROP TABLE IF EXISTS game_rounds');
+      c.exec('DROP TABLE IF EXISTS treasure_games');
+      const treasure=require(path.join(${JSON.stringify(RAIZ)},'database/treasure'));
+      const rounds=require(path.join(${JSON.stringify(RAIZ)},'database/gameRounds'));
+      const U='5511999999999@s.whatsapp.net';
+      // consultas que ANTES explodiam com no such table:
+      const est=treasure.estatisticas(U);
+      const ult=rounds.ultima('tigrinho', U);
+      const tabelas=c
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('game_bets','game_rounds','treasure_games')")
+        .all().map(function(r){return r.name}).sort();
+      console.log(JSON.stringify({ jogos: est.jogos, ultima: ult === null || typeof ult === 'object', tabelas }));
+    `);
+    const r = ultima(saida);
+    assert.strictEqual(r.jogos, 0, 'a estatística respondeu (0 jogos) em vez de estourar');
+    assert.strictEqual(r.tabelas.length, 3, 'as 3 tabelas voltaram sozinhas na primeira consulta');
+    ok('11: tabela ausente em pleno uso — esquema refeito na hora e a consulta roda de novo');
+  } catch (e) {
+    fail('11: cura na consulta', e);
+  }
+
+  console.log(`\n${feitos} ✅ · ${falhas} ❌`);
   process.exit(falhas ? 1 : 0);
 }
 

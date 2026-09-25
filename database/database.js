@@ -667,11 +667,60 @@ function get() {
   return db;
 }
 
+/**
+ * Consultas que já tentaram curar o esquema e continuaram falhando (erro de
+ * verdade, não de esquema): não curam de novo — evitam laço de cura em caminho
+ * quente. O Set é limpo a cada cura que deu certo.
+ */
+const curaFalhou = new Set();
+let curandoEsquema = false;
+
+/**
+ * Prepara (com cache) uma consulta.
+ *
+ * CURA NA HORA: se a tabela/coluna não existir — banco vindo de outro estado do
+ * bot, restaurado de backup, ou tabela apagada por fora — o esquema é refeito
+ * por medição (`ensureEsquemaReal`, que só CRIA o que falta) e a consulta roda
+ * de novo. Sem isso, um único `no such table` derrubava o comando inteiro com
+ * "⚠️ algo deu errado" no meio do jogo (foi o visto no aparelho: caça e tigrinho
+ * morriam com `no such table: treasure_games/game_rounds`).
+ */
 function prepare(name, sql) {
   // chave = nome + SQL: permite reutilizar nomes com SQL diferentes
   const key = `${name}::${sql}`;
-  if (!prepared.has(key)) prepared.set(key, get().prepare(sql));
-  return prepared.get(key);
+  if (prepared.has(key)) return prepared.get(key);
+  try {
+    const stmt = get().prepare(sql);
+    prepared.set(key, stmt);
+    return stmt;
+  } catch (err) {
+    const msg = String((err && err.message) || '');
+    const faltaEsquema = /no such (table|column)/i.test(msg);
+    if (!faltaEsquema || curandoEsquema || !db || curaFalhou.has(key)) throw err;
+    curandoEsquema = true;
+    let ajustes = [];
+    try {
+      ajustes = ensureEsquemaReal();
+    } catch (errCura) {
+      logger.error({ err: errCura && errCura.message }, '[DB] falha ao refazer o esquema por medição');
+    } finally {
+      curandoEsquema = false;
+    }
+    logger.warn(
+      { sql: String(sql).replace(/\s+/g, ' ').slice(0, 90), ajustes: ajustes.length, err: msg },
+      '[DB] consulta pediu tabela/coluna ausente — esquema refeito por medição'
+    );
+    prepared.clear();
+    try {
+      const stmt = get().prepare(sql);
+      prepared.set(key, stmt);
+      curaFalhou.clear();
+      return stmt;
+    } catch (err2) {
+      curaFalhou.add(key);
+      throw err2;
+    }
+  }
 }
 
 function open() {

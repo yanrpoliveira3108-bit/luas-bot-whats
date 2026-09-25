@@ -345,7 +345,7 @@ e `!menu` registrando **o erro completo com stack**, **a moldura de cada card
 enviado** (linha `moldura: LIVRE (cresce com o conteúdo, nada é cortado)` nos
 jogos e `moldura: FIXA 640px ... + #__wrap ok` no menu) e “card enviado” quando está tudo certo). Salva o relatório em `tmp/jogos-doctor.txt`.
 
-**Causa tratada de forma automática — duas garantias independentes.**
+**Causa tratada de forma automática — três garantias independentes.**
 
 1. **A migração é identificada por NOME** (`v1..vN`), não pelo número. `version`
    continua na tabela (é o índice + 1), mas quem decide o que falta é a coluna
@@ -360,6 +360,17 @@ jogos e `moldura: FIXA 640px ... + #__wrap ok` no menu) e “card enviado” qua
    criado — tabela com o MESMO `CREATE TABLE IF NOT EXISTS` da migração, coluna
    com o mesmo tipo/DEFAULT. Nada é apagado, renomeado ou sobrescrito.
 
+3. **A consulta que pedir tabela/coluna ausente se cura na hora** (`prepare()`,
+   em `database/database.js`): se o `prepare` de QUALQUER consulta falhar com
+   `no such table`/`no such column`, o esquema é refeito por medição
+   (`ensureEsquemaReal()`) e a consulta roda **de novo**. Antes disso, um único
+   `no such table` derrubava o comando inteiro no meio do jogo com
+   “⚠️ algo deu errado” — foi o visto no aparelho (`no such table:
+   treasure_games` na caça, `game_rounds` no tigrinho). Também cobre tabela
+   apagada por fora/backup antigo, não só a abertura do bot. A cura é
+   memoizada (uma consulta que continuar falhando por erro de verdade não cura
+   em laço).
+
 Por que reexecutar migração é seguro: **todas as 36 são só
 `CREATE TABLE/INDEX IF NOT EXISTS`** (nenhum `ALTER`, `DROP`, `INSERT`, `UPDATE`
 ou `DELETE`) — a suíte trava isso em `test/esquemajogos.test.js` (teste 9). Numa
@@ -367,9 +378,14 @@ atualização de banco antigo (sem a coluna `nome`), as migrações são reexecu
 o que já existe não muda e o que faltava nasce. A primeira abertura com este
 código **não apaga nem reescreve nada**.
 
-Cobertura: `test/esquemajogos.test.js` 10/10 (banco novo, banco à frente,
+Cobertura: `test/esquemajogos.test.js` **11/11** (banco novo, banco à frente,
 banco legado sem `nome`, coluna ausente de tabela comum, comandos rodando depois
-da cura, doctor e a invariante das migrações).
+da cura, doctor, a invariante das migrações e a **cura na consulta** com as
+tabelas dos jogos apagadas em pleno uso).
+
+Fumaça de ponta a ponta com as 3 tabelas apagadas antes de jogar
+(`node tmp/fumaca-jogos.js`): caça aposta 100 e devolve card, tigrinho gira e
+credita, e as 3 tabelas voltam sozinhas — nenhum “algo deu errado”.
 
 
 ---
@@ -384,5 +400,6 @@ da cura, doctor e a invariante das migrações).
   `regrasDoJogo()` de cada comando.
 - TTL da expedição: `database/treasure.js` (`TTL_INATIVA_MS`).
 - Esquema do banco dos jogos: `database/database.js` (`GAME_TABELAS_SQL`,
-  `GAME_INDICES_SQL`, migração 36 e a auto-cura `ensureGameSchema()`).
+  `GAME_INDICES_SQL`, migração 36 e a auto-cura `ensureGameSchema()`);
+  a cura na hora de qualquer consulta fica no `prepare()` do mesmo arquivo.
 - Diagnóstico no aparelho: `scripts/jogos-doctor.js` (`npm run jogos:doctor`).
