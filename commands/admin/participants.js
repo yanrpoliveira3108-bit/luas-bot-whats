@@ -1,7 +1,8 @@
 'use strict';
 
 const groups = require('../../database/groups');
-const { getParticipants, resolveTarget, requireGroupAdmin, addBan, removeBan } = require('../_shared/admin');
+const { getParticipants, resolveTarget, removeBan, mudarParticipante } = require('../_shared/admin');
+const alvoUtil = require('../../utils/alvo');
 
 module.exports = [
   {
@@ -12,14 +13,9 @@ module.exports = [
     groupOnly: true,
     botAdmin: true,
     description: 'Promove um membro a administrador.',
-    usage: '!promover @usuario',
+    usage: '!promover @usuario (ou responda a mensagem da pessoa)',
     cooldown: 3000,
-    execute: async (ctx) => {
-      const target = resolveTarget(ctx);
-      if (!target) return ctx.reply('⚠️ Marque o usuário: !promover @usuario');
-      await ctx.socket.groupParticipantsUpdate(ctx.remoteJid, [target], 'promote');
-      await ctx.reply(`👑 @${target.split('@')[0]} foi promovido a admin.`, { mentions: [target] });
-    },
+    execute: async (ctx) => mudarParticipante(ctx, 'promote'),
   },
   {
     name: 'rebaixar',
@@ -29,14 +25,9 @@ module.exports = [
     groupOnly: true,
     botAdmin: true,
     description: 'Remove o cargo de administrador.',
-    usage: '!rebaixar @usuario',
+    usage: '!rebaixar @usuario (ou responda a mensagem da pessoa)',
     cooldown: 3000,
-    execute: async (ctx) => {
-      const target = resolveTarget(ctx);
-      if (!target) return ctx.reply('⚠️ Marque o usuário: !rebaixar @usuario');
-      await ctx.socket.groupParticipantsUpdate(ctx.remoteJid, [target], 'demote');
-      await ctx.reply(`⬇️ @${target.split('@')[0]} foi rebaixado.`, { mentions: [target] });
-    },
+    execute: async (ctx) => mudarParticipante(ctx, 'demote'),
   },
   {
     name: 'kick',
@@ -46,15 +37,9 @@ module.exports = [
     groupOnly: true,
     botAdmin: true,
     description: 'Remove um membro do grupo.',
-    usage: '!kick @usuario',
+    usage: '!kick @usuario (ou responda a mensagem da pessoa)',
     cooldown: 3000,
-    execute: async (ctx) => {
-      const target = resolveTarget(ctx);
-      if (!target) return ctx.reply('⚠️ Marque o usuário: !kick @usuario');
-      if (target === ctx.socket.user.id) return ctx.reply('🤨 Não vou me remover.');
-      await ctx.socket.groupParticipantsUpdate(ctx.remoteJid, [target], 'remove');
-      await ctx.reply(`👢 @${target.split('@')[0]} foi removido.`, { mentions: [target] });
-    },
+    execute: async (ctx) => mudarParticipante(ctx, 'remove'),
   },
   {
     name: 'ban',
@@ -64,16 +49,9 @@ module.exports = [
     groupOnly: true,
     botAdmin: true,
     description: 'Remove e impede o retorno do usuário.',
-    usage: '!ban @usuario',
+    usage: '!ban @usuario (ou responda a mensagem da pessoa)',
     cooldown: 3000,
-    execute: async (ctx) => {
-      const target = resolveTarget(ctx);
-      if (!target) return ctx.reply('⚠️ Marque o usuário: !ban @usuario');
-      if (target === ctx.socket.user.id) return ctx.reply('🤨 Não posso me banir.');
-      addBan(ctx.remoteJid, target);
-      await ctx.socket.groupParticipantsUpdate(ctx.remoteJid, [target], 'remove');
-      await ctx.reply(`⛔ @${target.split('@')[0]} foi banido do grupo.`, { mentions: [target] });
-    },
+    execute: async (ctx) => mudarParticipante(ctx, 'ban'),
   },
   {
     name: 'unban',
@@ -82,13 +60,13 @@ module.exports = [
     adminOnly: true,
     groupOnly: true,
     description: 'Remove o banimento de um usuário.',
-    usage: '!unban @usuario',
+    usage: '!unban @usuario (ou responda a mensagem da pessoa)',
     cooldown: 3000,
     execute: async (ctx) => {
       const target = resolveTarget(ctx);
-      if (!target) return ctx.reply('⚠️ Marque o usuário: !unban @usuario');
+      if (!target) return ctx.reply(alvoUtil.dica(ctx.prefix, 'unban'));
       removeBan(ctx.remoteJid, target);
-      await ctx.reply(`✅ @${target.split('@')[0]} foi desbanido.`, { mentions: [target] });
+      await ctx.reply(`✅ ${alvoUtil.marca(target)} foi desbanido.`, { mentions: [target] });
     },
   },
   {

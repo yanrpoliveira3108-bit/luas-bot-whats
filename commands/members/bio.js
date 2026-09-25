@@ -1,5 +1,7 @@
 'use strict';
 
+const alvoUtil = require('../../utils/alvo');
+
 module.exports = [
   {
     name: 'bio',
@@ -9,7 +11,7 @@ module.exports = [
     usage: '!bio [@usuario]',
     cooldown: 3000,
     execute: async (ctx) => {
-      const target = ctx.mentionedJid[0] || ctx.sender;
+      const target = alvoUtil.alvo(ctx) || ctx.sender;
       try {
         const res = await ctx.socket.fetchStatus(target);
         const status = res && res.status ? res.status : '(sem recado)';

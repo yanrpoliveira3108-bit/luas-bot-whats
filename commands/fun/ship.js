@@ -1,5 +1,7 @@
 'use strict';
 
+const alvoUtil = require('../../utils/alvo');
+
 const { runInteraction, displayName } = require('../../engine/interactionEngine');
 const R = require('./_responses');
 
@@ -15,21 +17,24 @@ module.exports = [
     commands: ['ship', 'shippar'],
     category: 'fun',
     description: 'Calcula a compatibilidade entre duas pessoas.',
-    usage: '!ship @usuario1 @usuario2 | !ship <nome> <nome>',
+    usage: '!ship @usuario1 @usuario2 | !ship @usuario (ou respondendo) | !ship <nome> <nome>',
     cooldown: 3000,
     execute: async (ctx) => {
+      // @a @b → os dois; @a ou RESPONDENDO a mensagem de alguém → você + a
+      // pessoa; sem ninguém marcado → dois nomes digitados
       let a, b;
-      if (ctx.mentionedJid.length >= 2) {
-        a = ctx.mentionedJid[0];
-        b = ctx.mentionedJid[1];
-      } else if (ctx.args.length >= 2) {
+      const r = alvoUtil.alvos(ctx, { incluirAutor: true });
+      if (r.origem === 'mencao' && r.jids.length >= 2) {
+        a = r.jids[0];
+        b = r.jids[1];
+      } else if (r.jids.length === 1 && !alvoUtil.ehAutor(ctx, r.jids[0])) {
+        a = ctx.sender;
+        b = r.jids[0];
+      } else if (!r.jids.length && ctx.args.length >= 2) {
         a = ctx.args[0];
         b = ctx.args[1];
-      } else if (ctx.mentionedJid.length === 1) {
-        a = ctx.sender;
-        b = ctx.mentionedJid[0];
       } else {
-        return ctx.reply('💞 Marque duas pessoas: !ship @a @b');
+        return ctx.reply(`💞 Marque duas pessoas (${ctx.prefix}ship @a @b), marque uma, ou responda a mensagem de alguém com ${ctx.prefix}ship.`);
       }
       const nameA = displayName(a);
       const nameB = displayName(b);
@@ -38,7 +43,8 @@ module.exports = [
         .replace('{a}', nameA)
         .replace('{b}', nameB)
         .replace('{pct}', pct);
-      await ctx.reply(text);
+      const mentions = [a, b].filter((j) => String(j).includes('@') && text.includes(alvoUtil.marca(j)));
+      await ctx.reply(text, { mentions });
     },
   },
   {

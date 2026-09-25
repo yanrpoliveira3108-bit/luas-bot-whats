@@ -1,7 +1,8 @@
 'use strict';
 
+const alvoUtil = require('../../utils/alvo');
+
 const blocked = require('../../database/blocked');
-const { toJid } = require('../../utils/messages');
 
 module.exports = [
   {
@@ -13,7 +14,7 @@ module.exports = [
     usage: '!block @usuario | !block (sem args = lista)',
     cooldown: 2000,
     execute: async (ctx) => {
-      if (!ctx.args[0] && !ctx.mentionedJid.length) {
+      if (!alvoUtil.alvo(ctx, { numero: true }) && !ctx.args[0]) {
         const list = blocked.list();
         if (!list.length) {
           await ctx.reply('🚫 Nenhum usuário bloqueado.');
@@ -22,12 +23,12 @@ module.exports = [
         await ctx.reply(`🚫 *Bloqueados (${list.length})*\n${list.map((b) => '▸ ' + b.user_id.split('@')[0]).join('\n')}`);
         return;
       }
-      const jid = toJid(ctx.args[0]) || ctx.mentionedJid[0];
+      const jid = alvoUtil.alvo(ctx, { numero: true });
       if (!jid) {
-        await ctx.reply('⚠️ Informe o usuário: !block @usuario ou !block 5511...');
+        await ctx.reply('⚠️ Informe o usuário: !block @usuario, !block 5511... ou responda a mensagem dele com !block');
         return;
       }
-      blocked.block(jid, ctx.args.slice(1).join(' ') || 'Bloqueado pelo dono');
+      blocked.block(jid, alvoUtil.resto(ctx, { numero: true }).join(' ') || 'Bloqueado pelo dono');
       await ctx.reply(`🚫 Usuário ${jid.split('@')[0]} bloqueado.`);
     },
   },
@@ -40,9 +41,9 @@ module.exports = [
     usage: '!unblock @usuario',
     cooldown: 2000,
     execute: async (ctx) => {
-      const jid = toJid(ctx.args[0]) || ctx.mentionedJid[0];
+      const jid = alvoUtil.alvo(ctx, { numero: true });
       if (!jid) {
-        await ctx.reply('⚠️ Informe o usuário: !unblock @usuario');
+        await ctx.reply('⚠️ Informe o usuário: !unblock @usuario, !unblock 5511... ou responda a mensagem dele');
         return;
       }
       blocked.unblock(jid);

@@ -37,18 +37,19 @@ function resolvePath(key) {
  * Envia a imagem da ação (com legenda), ou só o texto se não houver imagem.
  * @returns {Promise<boolean>} true se enviou imagem
  */
-async function send(ctx, key, caption) {
+async function send(ctx, key, caption, mentions) {
   const img = resolvePath(key);
+  const opts = mentions && mentions.length ? { mentions } : {};
   if (!img) {
-    await ctx.reply(caption);
+    await ctx.reply(caption, opts);
     return false;
   }
   try {
-    await ctx.sendImage(img, caption);
+    await ctx.sendImage(img, caption, opts);
     return true;
   } catch (_) {
     try {
-      await ctx.reply(caption);
+      await ctx.reply(caption, opts);
     } catch (_) {
       /* ignora */
     }

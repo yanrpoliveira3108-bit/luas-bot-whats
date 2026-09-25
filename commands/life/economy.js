@@ -5,6 +5,8 @@
 
 'use strict';
 
+const alvoUtil = require('../../utils/alvo');
+
 const life = require('../../database/life');
 const economy = require('../../database/economy');
 const rpg = require('../../database/rpg');
@@ -166,11 +168,12 @@ module.exports = [
     usage: '!presente @usuario <item> [qtd]',
     cooldown: 3000,
     execute: async (ctx) => {
-      const target = ctx.mentionedJid[0];
-      const itemId = String(ctx.args[ctx.mentionedJid.length ? 0 : 1] || '').toLowerCase();
-      const qty = parseInt(ctx.args[ctx.mentionedJid.length ? 1 : 2], 10) || 1;
-      if (!target || !itemId) return ctx.reply('⚠️ Use: !presente @usuario <item> [qtd]');
-      if (target === ctx.sender) return ctx.reply('🤨 Você não pode presentear a si mesmo.');
+      const target = alvoUtil.alvo(ctx);
+      const resto = alvoUtil.resto(ctx);
+      const itemId = String(resto[0] || '').toLowerCase();
+      const qty = parseInt(resto[1], 10) || 1;
+      if (!target || !itemId) return ctx.reply('⚠️ Use: !presente @usuario <item> [qtd]\n_(ou responda a mensagem da pessoa)_');
+      if (alvoUtil.ehAutor(ctx, target)) return ctx.reply('🤨 Você não pode presentear a si mesmo.');
       try {
         const r = await engine.giftItem(ctx.sender, target, itemId, qty);
         await ctx.reply(`🎁 Você presenteou ${displayName(target)} com ${r.item.emoji} *${r.item.name}* x${r.qty}!`);
@@ -187,10 +190,11 @@ module.exports = [
     usage: '!pagar @usuario <valor>',
     cooldown: 5000,
     execute: async (ctx) => {
-      const target = ctx.mentionedJid[0];
-      const amount = parseInt(ctx.args[ctx.mentionedJid.length ? 0 : 1], 10);
-      if (!target || !amount || amount <= 0) return ctx.reply('⚠️ Use: !pagar @usuario <valor>');
-      if (target === ctx.sender) return ctx.reply('🤨 Não dá para pagar a si mesmo.');
+      const target = alvoUtil.alvo(ctx);
+      const resto = alvoUtil.resto(ctx);
+      const amount = parseInt(resto[0], 10);
+      if (!target || !amount || amount <= 0) return ctx.reply('⚠️ Use: !pagar @usuario <valor>\n_(ou responda a mensagem da pessoa)_');
+      if (alvoUtil.ehAutor(ctx, target)) return ctx.reply('🤨 Não dá para pagar a si mesmo.');
       try {
         await withLock(ctx.sender, () => economy.transfer(ctx.sender, target, amount));
         await ctx.reply(`💸 Você pagou ${formatMoney(amount)} para @${target.split('@')[0]}.`, { mentions: [target] });

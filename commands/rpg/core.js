@@ -1,5 +1,7 @@
 'use strict';
 
+const alvoUtil = require('../../utils/alvo');
+
 const rpg = require('../../database/rpg');
 const economy = require('../../database/economy');
 const { formatMoney } = require('../../utils/formatter');
@@ -43,7 +45,7 @@ module.exports = [
     usage: '!perfilrpg',
     cooldown: 3000,
     execute: async (ctx) => {
-      const target = ctx.mentionedJid[0] || ctx.sender;
+      const target = alvoUtil.alvo(ctx) || ctx.sender;
       const p = rpg.getPlayer(target);
       const eco = economy.get(target);
       const ach = rpg.getAchievements(target);

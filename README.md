@@ -566,6 +566,15 @@ Regras completas, causas e como verificar: **[APAGAR-E-DONO.md](APAGAR-E-DONO.md
 Detalhes, regras e onde fica cada configuração:
 **[HORARIO-REACOES-APARENCIA.md](HORARIO-REACOES-APARENCIA.md)**.
 
+### Marcar @ ou responder a mensagem
+
+Todo comando que pede `@usuario` também funciona **respondendo a mensagem da
+pessoa** (promover, rebaixar, kick, ban, mute, advertir, pagar, transferir,
+presente, perfil, avatar, gado e os outros medidores, zoar, ship…). Ordem:
+@menção → mensagem respondida → número digitado (onde o comando aceita).
+Responder a uma mensagem **do bot** não conta como alvo. Resolvedor único:
+`utils/alvo.js`.
+
 ## Recuperação
 
 ### Backup automático

@@ -7,6 +7,8 @@
 
 'use strict';
 
+const alvoUtil = require('../../utils/alvo');
+
 const crypto = require('crypto');
 const { runInteraction } = require('../../engine/interactionEngine');
 const R = require('./_responses');
@@ -188,10 +190,11 @@ module.exports = [
     usage: '!sorteio @user1 @user2 ...',
     cooldown: 3000,
     execute: async (ctx) => {
-      const alvo = ctx.mentionedJid;
-      if (!alvo.length) return ctx.reply('🎲 Marque os participantes: !sorteio @user1 @user2 ...');
+      // sorteio precisa de 2+ pessoas marcadas (responder a UMA mensagem não é sorteio)
+      const alvo = alvoUtil.alvos(ctx, { incluirAutor: true }).jids;
+      if (alvo.length < 2) return ctx.reply('🎲 Marque pelo menos 2 participantes: !sorteio @user1 @user2 ...');
       const winner = alvo[randInt(0, alvo.length - 1)];
-      await ctx.reply(`🎉 *Sorteio entre ${alvo.length} participantes!*\n🏆 Vencedor(a): @${winner.split('@')[0]}!`);
+      await ctx.reply(`🎉 *Sorteio entre ${alvo.length} participantes!*\n🏆 Vencedor(a): ${alvoUtil.marca(winner)}!`, { mentions: [winner] });
     },
   },
   {

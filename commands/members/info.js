@@ -4,6 +4,8 @@
 
 'use strict';
 
+const alvoUtil = require('../../utils/alvo');
+
 const users = require('../../database/users');
 const economy = require('../../database/economy');
 const life = require('../../database/life');
@@ -20,7 +22,7 @@ module.exports = [
     usage: '!userinfo [@usuario]',
     cooldown: 3000,
     execute: async (ctx) => {
-      const target = ctx.mentionedJid[0] || ctx.sender;
+      const target = alvoUtil.alvo(ctx) || ctx.sender;
       const u = users.get(target);
       const eco = economy.get(target);
       const p = life.getPlayer(target);

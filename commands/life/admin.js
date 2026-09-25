@@ -7,6 +7,8 @@
 
 'use strict';
 
+const alvoUtil = require('../../utils/alvo');
+
 const life = require('../../database/life');
 const economy = require('../../database/economy');
 const rpg = require('../../database/rpg');
@@ -52,9 +54,10 @@ module.exports = [
     usage: '!givecoin @usuario <valor>',
     cooldown: 1000,
     execute: async (ctx) => {
-      const target = ctx.mentionedJid[0];
-      const amount = parseInt(ctx.args[ctx.mentionedJid.length ? 0 : 1], 10);
-      if (!target || !Number.isFinite(amount)) return ctx.reply('⚠️ Use: !givecoin @usuario <valor> (negativo remove)');
+      const target = alvoUtil.alvo(ctx);
+      const resto = alvoUtil.resto(ctx);
+      const amount = parseInt(resto[0], 10);
+      if (!target || !Number.isFinite(amount)) return ctx.reply('⚠️ Use: !givecoin @usuario <valor> (negativo remove)\n_(ou responda a mensagem da pessoa)_');
       await withLock(target, () => {
         economy.addWallet(target, amount);
         life.logEconomy(target, 'admin_give', '', amount, economy.get(target).wallet, economy.get(target).wallet, `por ${ctx.sender}`);
@@ -71,9 +74,10 @@ module.exports = [
     usage: '!setmoney @usuario <valor>',
     cooldown: 1000,
     execute: async (ctx) => {
-      const target = ctx.mentionedJid[0];
-      const amount = parseInt(ctx.args[ctx.mentionedJid.length ? 0 : 1], 10);
-      if (!target || !Number.isFinite(amount)) return ctx.reply('⚠️ Use: !setmoney @usuario <valor>');
+      const target = alvoUtil.alvo(ctx);
+      const resto = alvoUtil.resto(ctx);
+      const amount = parseInt(resto[0], 10);
+      if (!target || !Number.isFinite(amount)) return ctx.reply('⚠️ Use: !setmoney @usuario <valor>\n_(ou responda a mensagem da pessoa)_');
       await withLock(target, () => {
         economy.setWallet(target, Math.max(0, amount));
         life.logEconomy(target, 'admin_set', '', amount, economy.get(target).wallet, economy.get(target).wallet, `por ${ctx.sender}`);
@@ -90,10 +94,11 @@ module.exports = [
     usage: '!giveitem @usuario <item> [qtd]',
     cooldown: 1000,
     execute: async (ctx) => {
-      const target = ctx.mentionedJid[0];
-      const itemId = String(ctx.args[ctx.mentionedJid.length ? 0 : 1] || '').toLowerCase();
-      const qty = parseInt(ctx.args[ctx.mentionedJid.length ? 1 : 2], 10) || 1;
-      if (!target || !itemId) return ctx.reply('⚠️ Use: !giveitem @usuario <item> [qtd]');
+      const target = alvoUtil.alvo(ctx);
+      const resto = alvoUtil.resto(ctx);
+      const itemId = String(resto[0] || '').toLowerCase();
+      const qty = parseInt(resto[1], 10) || 1;
+      if (!target || !itemId) return ctx.reply('⚠️ Use: !giveitem @usuario <item> [qtd]\n_(ou responda a mensagem da pessoa)_');
       const item = rpg.getShopItem(itemId);
       if (!item) return ctx.reply('❌ Item não encontrado.');
       await withLock(target, () => {
@@ -112,10 +117,11 @@ module.exports = [
     usage: '!removeitem @usuario <item> [qtd]',
     cooldown: 1000,
     execute: async (ctx) => {
-      const target = ctx.mentionedJid[0];
-      const itemId = String(ctx.args[ctx.mentionedJid.length ? 0 : 1] || '').toLowerCase();
-      const qty = parseInt(ctx.args[ctx.mentionedJid.length ? 1 : 2], 10) || 1;
-      if (!target || !itemId) return ctx.reply('⚠️ Use: !removeitem @usuario <item> [qtd]');
+      const target = alvoUtil.alvo(ctx);
+      const resto = alvoUtil.resto(ctx);
+      const itemId = String(resto[0] || '').toLowerCase();
+      const qty = parseInt(resto[1], 10) || 1;
+      if (!target || !itemId) return ctx.reply('⚠️ Use: !removeitem @usuario <item> [qtd]\n_(ou responda a mensagem da pessoa)_');
       try {
         await withLock(target, () => {
           economy.removeItem(target, itemId, qty);
@@ -136,9 +142,10 @@ module.exports = [
     usage: '!setlevel @usuario <nível>',
     cooldown: 1000,
     execute: async (ctx) => {
-      const target = ctx.mentionedJid[0];
-      const value = parseInt(ctx.args[ctx.mentionedJid.length ? 0 : 1], 10);
-      if (!target || !Number.isFinite(value) || value < 1) return ctx.reply('⚠️ Use: !setlevel @usuario <nível>');
+      const target = alvoUtil.alvo(ctx);
+      const resto = alvoUtil.resto(ctx);
+      const value = parseInt(resto[0], 10);
+      if (!target || !Number.isFinite(value) || value < 1) return ctx.reply('⚠️ Use: !setlevel @usuario <nível>\n_(ou responda a mensagem da pessoa)_');
       await withLock(target, () => {
         life.updatePlayer(target, { level: Math.max(1, value), xp: Math.pow(Math.max(0, value - 1), 2) * 50 });
         life.logEconomy(target, 'admin_level', '', value, 0, 0, `por ${ctx.sender}`);
@@ -156,9 +163,10 @@ module.exports = [
     usage: '!setxp @usuario <xp>',
     cooldown: 1000,
     execute: async (ctx) => {
-      const target = ctx.mentionedJid[0];
-      const value = parseInt(ctx.args[ctx.mentionedJid.length ? 0 : 1], 10);
-      if (!target || !Number.isFinite(value) || value < 0) return ctx.reply('⚠️ Use: !setxp @usuario <xp>');
+      const target = alvoUtil.alvo(ctx);
+      const resto = alvoUtil.resto(ctx);
+      const value = parseInt(resto[0], 10);
+      if (!target || !Number.isFinite(value) || value < 0) return ctx.reply('⚠️ Use: !setxp @usuario <xp>\n_(ou responda a mensagem da pessoa)_');
       await withLock(target, () => {
         const level = life.lifeLevelFromXp(value);
         life.updatePlayer(target, { xp: value, level });
@@ -216,7 +224,7 @@ module.exports = [
     usage: '!player @usuario',
     cooldown: 1000,
     execute: async (ctx) => {
-      const target = ctx.mentionedJid[0] || ctx.sender;
+      const target = alvoUtil.alvo(ctx) || ctx.sender;
       const p = life.getPlayer(target);
       const eco = economy.get(target);
       await ctx.reply(
