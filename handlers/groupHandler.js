@@ -332,7 +332,11 @@ async function handleGroupUpdate(sock, ev) {
 async function maybeWelcome(sock, jid, userJid) {
   const g = groups.get(jid);
   if (!g || !g.welcome_enabled || !g.welcome_msg) return false;
-  const text = String(g.welcome_msg).replace(/\{user\}/g, `@${String(userJid).split('@')[0]}`);
+  let text = String(g.welcome_msg).replace(/\{user\}/g, `@${String(userJid).split('@')[0]}`);
+  const settings = require('../database/settings');
+  const prefix = settings.effectivePrefix();
+  text += `\n\n💡 _Novo por aqui? Digite *${prefix}guia* para ver os primeiros passos!_`;
+
   try {
     await sock.sendMessage(jid, { text, mentions: [userJid] });
     return true;

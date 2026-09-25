@@ -41,6 +41,12 @@ module.exports = [
         `▸ Sobre: ${u.about || '-'}`,
       ];
 
+      const collections = require('../../database/collections');
+      const showcaseItems = collections.getShowcase(target);
+      if (showcaseItems.length) {
+        lines.push(`▸ ✨ Vitrine: ${showcaseItems.map((s) => `${s.emoji} ${s.name}`).join(' • ')}`);
+      }
+
       // Se o modo HTML estiver ativo e permitido, envia o card visual
       const settings = require('../../database/settings');
       if (settings.menuHtmlEnabled()) {
@@ -61,6 +67,7 @@ module.exports = [
             reputation: u.reputation,
             messages: u.messages,
             achievementsCount: achs.length,
+            showcase: showcaseItems,
           });
 
           await richHtml.sendHtml(ctx.socket, ctx.remoteJid, html, { title: `PERFIL DE ${displayName(target)}` });

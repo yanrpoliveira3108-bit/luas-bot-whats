@@ -708,6 +708,59 @@ const MIGRATIONS = [
     PRIMARY KEY(event_id, user_id)
   );
   CREATE INDEX IF NOT EXISTS idx_coop_part_event ON coop_participants(event_id);`,
+
+  // 41 — FEIRA DE ITENS ENTRE JOGADORES (Etapa 3)
+  `CREATE TABLE IF NOT EXISTS rpg_market_listings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    seller_id TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    unit_price INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    buyer_id TEXT DEFAULT '',
+    created_at TEXT DEFAULT '',
+    expires_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_rpg_market_status ON rpg_market_listings(status, expires_at);
+  CREATE INDEX IF NOT EXISTS idx_rpg_market_seller ON rpg_market_listings(seller_id, status);`,
+
+  // 42 — COLEÇÕES E DESCOBERTAS DO RPG (Etapa 3)
+  `CREATE TABLE IF NOT EXISTS rpg_discoveries (
+    user_id TEXT NOT NULL,
+    item_id TEXT NOT NULL,
+    discovered_at TEXT DEFAULT '',
+    PRIMARY KEY(user_id, item_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_rpg_disc_user ON rpg_discoveries(user_id);
+  CREATE TABLE IF NOT EXISTS rpg_completed_collections (
+    user_id TEXT NOT NULL,
+    collection_id TEXT NOT NULL,
+    completed_at TEXT DEFAULT '',
+    PRIMARY KEY(user_id, collection_id)
+  );`,
+
+  // 43 — VITRINE DO PERFIL RPG (Etapa 3)
+  `CREATE TABLE IF NOT EXISTS rpg_showcase (
+    user_id TEXT NOT NULL,
+    slot INTEGER NOT NULL,
+    item_id TEXT NOT NULL,
+    PRIMARY KEY(user_id, slot)
+  );`,
+
+  // 44 — EXPEDIÇÕES SOLO DO RPG (Etapa 3)
+  `CREATE TABLE IF NOT EXISTS rpg_expeditions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    route_id TEXT NOT NULL,
+    stage INTEGER NOT NULL DEFAULT 1,
+    max_stages INTEGER NOT NULL DEFAULT 3,
+    status TEXT NOT NULL DEFAULT 'active',
+    data TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT DEFAULT '',
+    updated_at TEXT DEFAULT '',
+    expires_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_rpg_exp_user ON rpg_expeditions(user_id, status);`,
 ];
 
 /* ----------------------------- core ------------------------------ */

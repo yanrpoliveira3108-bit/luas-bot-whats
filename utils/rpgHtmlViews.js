@@ -80,6 +80,19 @@ function buildBaseHtml(title, bodyContent) {
 
 /** Renderiza card de perfil */
 function renderProfileHtml(data) {
+  let showcaseBlock = '';
+  if (data.showcase && data.showcase.length > 0) {
+    const itemsHtml = data.showcase
+      .map((it) => `<span style="background:#27272a; border:1px solid #3f3f46; padding:3px 7px; border-radius:6px; font-size:11px; margin-right:4px;">${it.emoji} ${escapeHtml(it.name)}</span>`)
+      .join('');
+    showcaseBlock = `
+      <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed #29292e;">
+        <div style="font-size:11px; color:#8d8d99; margin-bottom: 5px;">✨ Vitrine de Destaques:</div>
+        <div style="display:flex; flex-wrap:wrap; gap:4px;">${itemsHtml}</div>
+      </div>
+    `;
+  }
+
   const content = `
     <div style="margin-bottom: 12px; text-align: center;">
       <h3 style="color:#f4ede8; font-size:18px;">${escapeHtml(data.name)}</h3>
@@ -91,6 +104,7 @@ function renderProfileHtml(data) {
     <div class="stat-row"><span class="stat-label">⭐ Reputação:</span><span class="stat-val">${data.reputation}</span></div>
     <div class="stat-row"><span class="stat-label">💬 Mensagens:</span><span class="stat-val">${data.messages}</span></div>
     <div class="stat-row"><span class="stat-label">🏆 Conquistas:</span><span class="stat-val">${data.achievementsCount}</span></div>
+    ${showcaseBlock}
   `;
   return buildBaseHtml(`PERFIL • ${data.name}`, content);
 }

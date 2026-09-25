@@ -25,6 +25,32 @@ module.exports = [
         return ctx.reply(`✅ País padrão alterado para *${cc}* (${phoneParser.countryName(cc)}).`);
       }
 
+      if (sub === 'feira') {
+        if (!ctx.isOwner) return ctx.reply(CONFIG.messages.deniedOwner);
+        const action = (ctx.args[1] || '').toLowerCase();
+        if (action === 'on' || action === 'ativar' || action === 'ligar') {
+          settings.set('feira_enabled', 'true');
+          return ctx.reply('✅ Feira de itens *ativada*.');
+        }
+        if (action === 'off' || action === 'desativar' || action === 'desligar') {
+          settings.set('feira_enabled', 'false');
+          return ctx.reply('⚠️ Feira de itens *desativada*. Anúncios existentes ainda podem ser consultados e cancelados.');
+        }
+        if (action === 'limite' && ctx.args[2]) {
+          const lim = parseInt(ctx.args[2], 10);
+          if (!lim || lim <= 0) return ctx.reply('⚠️ Informe um limite numérico positivo.');
+          settings.set('feira_max_listings', lim);
+          return ctx.reply(`✅ Limite de anúncios por jogador definido para *${lim}*.`);
+        }
+        if (action === 'duracao' && ctx.args[2]) {
+          const h = parseInt(ctx.args[2], 10);
+          if (!h || h <= 0) return ctx.reply('⚠️ Informe uma duração em horas (ex: 24, 48).');
+          settings.set('feira_duration_hours', h);
+          return ctx.reply(`✅ Duração dos anúncios da feira definida para *${h}h*.`);
+        }
+        return ctx.reply(`💡 Uso: *${ctx.prefix}config feira on|off|limite <n>|duracao <horas>*`);
+      }
+
       // Painel Central Unificado de Configurações
       const htmlTheme = require('../../utils/htmlTheme');
       const groups = require('../../database/groups');
@@ -33,6 +59,9 @@ module.exports = [
       const visual = htmlTheme.get();
       const readmorePref = settings.getBool('readmore_enabled', true);
       const buttonsPref = settings.buttonsEnabled();
+      const feiraEnabled = settings.getBool('feira_enabled', true);
+      const feiraMax = settings.getInt('feira_max_listings', 5);
+      const feiraDur = settings.getInt('feira_duration_hours', 24);
 
       const lines = [
         '⚙️ *PAINEL CENTRAL DE CONFIGURAÇÕES*',
@@ -45,6 +74,7 @@ module.exports = [
         `▸ Botões: ${buttonsPref ? '🟢 Ativos' : '⚪ Desativados'} (${ctx.prefix}botao on/off)`,
         `▸ Ler Mais (Readmore): ${readmorePref ? '🟢 Ativo' : '⚪ Desativado'} (${ctx.prefix}readmore on/off)`,
         `▸ Tema HTML: ${visual.fonte || 'Padrão'} • Emojis: ${visual.emojis ? '🟢' : '⚪'} (${ctx.prefix}temahtml)`,
+        `▸ Feira de Itens: ${feiraEnabled ? '🟢 Ativa' : '🔴 Pausada'} (${feiraMax} anúncios/user, ${feiraDur}h duração)`,
         `▸ Comandos Carregados: ${require('../../engine/plugins').registry.count()}`,
       ];
 
