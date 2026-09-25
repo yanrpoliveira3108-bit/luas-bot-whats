@@ -400,6 +400,33 @@ function isOwnerJid(jid) {
   return (CONFIG.owner.numbers || []).some((n) => d === n || (d.length >= 10 && d.endsWith(n)));
 }
 
+/**
+ * Chats onde o DONO falou agora (com timestamp). Serve para a PAUSA não deixar o
+ * dono sem resposta em GRUPO: a autorização de identidade já garante que é ele;
+ * se ele acabou de mandar um comando naquele chat, a resposta daquele chat é
+ * liberada mesmo com o resto da fila parada. Some do mapa em 10 minutos.
+ */
+const donoFalouAqui = new Map();
+const JANELA_DONO_MS = 10 * 60 * 1000;
+
+function noteOwnerChat(jid) {
+  const j = String(jid || '');
+  if (!j) return false;
+  donoFalouAqui.set(j, Date.now());
+  return true;
+}
+
+function chatLiberadoNaPausa(jid, agora = Date.now()) {
+  if (isOwnerJid(jid)) return true;
+  const ts = donoFalouAqui.get(String(jid || '')) || 0;
+  if (!ts) return false;
+  if (agora - ts >= JANELA_DONO_MS) {
+    donoFalouAqui.delete(String(jid || ''));
+    return false;
+  }
+  return true;
+}
+
 function isAllowedPv(jid) {
   const d = digitsOf(jid);
   if (!d) return false;
@@ -609,7 +636,7 @@ function enqueue(kind, jid, run) {
     if (!queues.has(j)) queues.set(j, []);
     queues.get(j).push(item);
     enqueueChat(j);
-    pump();
+    wake();
   });
 }
 
@@ -630,6 +657,21 @@ function schedule(ms) {
     timer = null;
     pump();
   }, Math.max(15, Math.min(ms, 60 * 1000)));
+}
+
+/**
+ * Acorda o agendador quando chega trabalho novo.
+ * Sem isto, um item enfileirado DURANTE a pausa esperava o timer inteiro (até
+ * 60s): o dono mandava o comando, o bot processava e a resposta ficava parada —
+ * exatamente a cara de "comando que não funciona". O próprio `pump()` recalcula
+ * esperas e volta a agendar, então antecipar o despertar nunca fura o ritmo.
+ */
+function wake() {
+  if (timer) {
+    clearTimeout(timer);
+    timer = null;
+  }
+  pump();
 }
 
 /** Espera (ms) até poder enviar o item do topo da fila desta conversa. */
@@ -653,7 +695,9 @@ function waitFor(jid, item, now) {
 function pickNext(now, apenasDono = false) {
   for (let i = 0; i < chatOrder.length; i++) {
     const jid = chatOrder[i];
-    if (apenasDono && !isOwnerJid(jid)) continue;
+    // pausado: passa a conversa do dono E os chats onde ele acabou de pedir algo
+    // (antes, comando de dono em GRUPO ficava sem resposta durante a pausa)
+    if (apenasDono && !chatLiberadoNaPausa(jid, now)) continue;
     const list = queues.get(jid);
     if (!list || !list.length) continue;
     const item = list[0];
@@ -665,6 +709,22 @@ function pickNext(now, apenasDono = false) {
     }
   }
   return null;
+}
+
+/**
+ * Menor espera entre as conversas LIBERADAS durante a pausa (as do dono).
+ * `null` = não há nada do dono na fila.
+ */
+function nextWaitLiberado(now) {
+  let best = null;
+  for (const jid of chatOrder) {
+    if (!chatLiberadoNaPausa(jid, now)) continue;
+    const list = queues.get(jid);
+    if (!list || !list.length) continue;
+    const w = waitFor(jid, list[0], now);
+    if (best === null || w < best) best = w;
+  }
+  return best;
 }
 
 /** Menor espera entre as conversas da fila (usada para reagendar o timer). */
@@ -699,7 +759,16 @@ async function pump() {
         // motivo (`!freio`) e retomar. Para todos os outros chats, nada sai.
         apenasDono = true;
         if (!pickNext(now, true)) {
-          schedule(Math.min(pausedUntil - now, 60 * 1000));
+          // Nada elegível AGORA. Se existe item do dono só esperando o ritmo
+          // (ex.: 39ms), acorda no tempo dele — antes o agendador dormia o timer
+          // inteiro (até 60s) e a resposta ao comando do dono ficava parada,
+          // parecendo "comando que não funciona".
+          const esperaDono = nextWaitLiberado(now);
+          schedule(
+            esperaDono === null
+              ? Math.min(pausedUntil - now, 60 * 1000)
+              : Math.max(15, esperaDono)
+          );
           return;
         }
       } else if (paused) {
@@ -1293,6 +1362,8 @@ module.exports = {
   attach,
   auditFile: AUDIT_FILE,
   noteInbound,
+  noteOwnerChat,
+  chatLiberadoNaPausa,
   enqueue,
   stats,
   setPaused,

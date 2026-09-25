@@ -536,6 +536,17 @@ lista/botões e pagamento.
 !freio warmup off   # número já é antigo/aquecido → limites normais
 ```
 
+## Apagar mensagem e comandos de dono
+
+- **`!apagar`** (respondendo a uma mensagem): **dono** apaga qualquer mensagem,
+  **admin** apaga qualquer mensagem do grupo e **membro** apaga somente a própria.
+  Com `!apagar @usuario 10` o admin apaga as últimas mensagens do histórico.
+- **`!d`** apaga **somente a mensagem marcada** (a que você respondeu).
+- **`!identidade`** mostra como o bot identificou você (dono? admin? veio como
+  LID?) — é o primeiro comando a rodar quando "comando de dono não funciona".
+
+Regras completas, causas e como verificar: **[APAGAR-E-DONO.md](APAGAR-E-DONO.md)**.
+
 ## Recuperação
 
 ### Backup automático

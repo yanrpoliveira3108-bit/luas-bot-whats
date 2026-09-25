@@ -321,7 +321,7 @@ async function connect({ phone } = {}) {
       if (pausa) {
         logger.warn(
           { ate: pausa.until, minutos: pausa.minutos, motivo: pausa.reason },
-          '⏸️  ENVIOS PAUSADOS (pausa anterior ainda valendo) — só a conversa do dono é respondida'
+          '⏸️  ENVIOS PAUSADOS (pausa anterior ainda valendo) — só os chats do dono são respondidos'
         );
       }
     } catch (_) {}

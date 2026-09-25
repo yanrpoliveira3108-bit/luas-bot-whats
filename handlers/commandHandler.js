@@ -39,6 +39,7 @@ const {
   getMentionedJids,
   detectMediaType,
   resolveSender,
+  resolveSenderCandidates,
   splitCommand,
   isGroupJid,
   isStatusJid,
@@ -160,20 +161,30 @@ async function buildContext(sock, msg) {
     String(msg.key.participantAlt || '').endsWith('@lid')
   );
 
-  let sender = resolveSender(msg) || remoteJid;
-  if (sender.endsWith('@lid')) {
-    let pn = participants.length ? permissions.toPn(sender, participants) : sender;
-    if (!pn || pn.endsWith('@lid')) {
-      // 2ª tentativa: o mapa LID↔PN da PRÓPRIA biblioteca (o mesmo usado para
-      // cifrar). Em grupo de comunidade/LID a lista de participantes pode vir
-      // sem telefone (mesmo defeito que derrubava o envio — SEGURANCA-ENVIO.md
-      // §4.1.4); sem o PN, o dono deixa de ser reconhecido (`!freio` respondia
-      // "Apenas o dono do bot") e a identidade da pessoa (carteira/registro)
-      // mudaria só por estar num grupo LID.
-      pn = await pnPeloMapaDeLid(sock, sender);
+  // IDENTIDADE: o WhatsApp pode identificar a mesma pessoa de várias formas
+  // (PN, LID, com/sem código de dispositivo). Resolvemos TODAS as formas
+  // plausíveis — a autorização (dono/admin) aceita qualquer uma que confira, e a
+  // sessão de confirmação é gravada/procurada por todas elas.
+  const candidatos = [];
+  for (const bruto of resolveSenderCandidates(msg)) {
+    const j = String(bruto || '');
+    if (!j) continue;
+    let resolvido = j;
+    if (j.endsWith('@lid')) {
+      let pn = participants.length ? permissions.toPn(j, participants) : j;
+      if (!pn || pn.endsWith('@lid')) {
+        // o mapa LID↔PN da PRÓPRIA biblioteca (o mesmo usado para cifrar). Em
+        // grupo de comunidade/LID a lista de participantes pode vir sem telefone
+        // (mesmo defeito que derrubava o envio — SEGURANCA-ENVIO.md §4.1.4).
+        pn = await pnPeloMapaDeLid(sock, j);
+      }
+      if (pn && !pn.endsWith('@lid')) resolvido = pn;
     }
-    if (pn && !pn.endsWith('@lid')) sender = pn;
-    else logger.warn({ sender, chat: remoteJid }, 'não consegui resolver LID → PN do remetente');
+    for (const v of [resolvido, j]) if (v && !candidatos.includes(v)) candidatos.push(v);
+  }
+  let sender = candidatos[0] || remoteJid;
+  if (sender.endsWith('@lid') && !candidatos.some((c) => !c.endsWith('@lid'))) {
+    logger.warn({ sender, chat: remoteJid }, 'não consegui resolver LID → PN do remetente');
   }
 
   const text = extractText(msg);
@@ -184,7 +195,7 @@ async function buildContext(sock, msg) {
       String(j).endsWith('@lid') ? permissions.toPn(j, participants) : j
     );
   }
-  const quotedKey = getQuotedKey(msg);
+  const quotedKey = getQuotedKey(msg, [botJid, botLid]);
   if (quotedKey && quotedKey.participant && String(quotedKey.participant).endsWith('@lid') && participants.length) {
     quotedKey.participant = permissions.toPn(quotedKey.participant, participants);
   }
@@ -192,12 +203,16 @@ async function buildContext(sock, msg) {
   let isAdmin = false;
   let isBotAdmin = false;
   if (isGroup) {
-    isAdmin = permissions.isAdmin(participants, sender);
+    // admin: basta UMA forma do remetente constar como admin (a lista pode
+    // trazer o LID e o remetente resolver para PN, ou vice-versa)
+    for (const c of candidatos) if (permissions.isAdmin(participants, c)) isAdmin = true;
     isBotAdmin = permissions.isBotAdmin(participants, botLid ? [botJid, botLid] : botJid);
-    if (sender === botJid) isAdmin = true;
+    if (candidatos.includes(botJid) || (botLid && candidatos.includes(botLid))) isAdmin = true;
   }
 
-  const isOwner = permissions.isOwner(sender);
+  // DONO: qualquer forma do remetente que confira com OWNER_NUMBER
+  let isOwner = false;
+  for (const c of candidatos) if (permissions.isOwner(c)) isOwner = true;
   const user = users.get(sender);
   const isRegistered = !!(user && user.is_registered);
 
@@ -217,8 +232,14 @@ async function buildContext(sock, msg) {
     message: msg,
     remoteJid,
     sender,
+    // todas as formas conhecidas do remetente (PN, LID, com/sem dispositivo) —
+    // usadas para autorização e para casar a resposta da confirmação
+    identidades: candidatos.length ? candidatos : [sender].filter(Boolean),
     isGroup,
     isCommunity,
+    // participantes do grupo (já buscados aqui com cache+prazo): evita cada
+    // comando consultar de novo e permite saber se o ALVO é admin
+    participants,
     isAdmin,
     isOwner,
     isBotAdmin,
@@ -233,7 +254,14 @@ async function buildContext(sock, msg) {
     prefix,
     text,
     quoted,
-    quotedKey,
+    quotedKey: quotedKey && (msg.key.remoteJid
+      ? Object.assign({}, quotedKey, {
+          fromMe:
+            quotedKey.fromMe === true ||
+            String(quotedKey.participant || '') === botJid ||
+            Boolean(botLid && String(quotedKey.participant || '') === botLid),
+        })
+      : quotedKey),
     quotedText: getQuotedText(msg),
     mentionedJid,
     mediaType: detectMediaType(msg),
@@ -420,8 +448,11 @@ function shouldProcessMessage(msg) {
   if (!msg.key || !msg.key.fromMe) return true;
   const isBotEcho = typeof msg.key.id === 'string' && msg.key.id.startsWith('3EB0');
   if (isBotEcho) return false;
-  const senderJid = resolveSender(msg) || msg.key.remoteJid;
-  if (!permissions.isOwner(senderJid)) return false;
+  // dono digitando do próprio aparelho/da própria conta (fromMe): qualquer
+  // forma de identidade que confira serve — antes, um `participant` em LID
+  // fazia o comando do dono ser ignorado em silêncio
+  const formas = resolveSenderCandidates(msg);
+  if (!formas.some((jid) => permissions.isOwner(jid))) return false;
   const text = extractText(msg);
   if ((text || '').trim().startsWith(settings.effectivePrefix())) return true;
   if (getInteractivePayload(msg)) return true;
@@ -443,6 +474,15 @@ async function handleMessage(sock, msg, type) {
 
     const ctx = await buildContext(sock, msg);
     if (!ctx.sender) return;
+
+    // O dono falou neste chat agora: durante uma PAUSA do freio, este chat
+    // continua respondendo (sem isso, comando de dono em GRUPO ficava sem
+    // resposta e parecia "comando que não funciona")
+    if (ctx.isOwner) {
+      try {
+        require('../utils/sendGuard').noteOwnerChat(ctx.remoteJid);
+      } catch (_) {}
+    }
 
     perf.add('messages');
 
@@ -629,7 +669,7 @@ async function handleMessage(sock, msg, type) {
       return;
     }
 
-    const gameSession = session.get(ctx.remoteJid, ctx.sender);
+    const gameSession = session.getAny(ctx.remoteJid, ctx.identidades || [ctx.sender]);
     if (gameSession && gameSession.onMessage) {
       try {
         await gameSession.onMessage(ctx);

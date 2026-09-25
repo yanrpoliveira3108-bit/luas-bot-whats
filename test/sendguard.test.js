@@ -74,6 +74,12 @@ require('../commands/loader').loadCommands(true);
 const { registry } = require('../engine/plugins');
 
 const GID = '551100000000@g.us';
+const OUTRO_GID = '551100000099@g.us';
+// grupo que o teste 9 NÃO usou: naquele o dono mandou !menu, e a partir da
+// rodada "comando de dono na pausa" esse chat fica marcado como "chat do dono"
+// por 10 min (de propósito). Para medir o silêncio da pausa, grupo limpo.
+const PAUSA_GID = '551100000077@g.us';
+const DONO_GID = '551100000088@g.us';
 const OWNER = '5511999999999@s.whatsapp.net';
 const STRANGER = '5511911111111@s.whatsapp.net';
 
@@ -682,13 +688,16 @@ async function main() {
     const antes = sent.length;
     sendGuard.setPaused(true, 5, 'teste de pausa (16)');
 
-    const noGrupo = sock.sendMessage(GID, { text: 'isto NAO pode sair (pausado)' });
+    const noGrupo = sock.sendMessage(PAUSA_GID, { text: 'isto NAO pode sair (pausado)' });
     const noDono = sock.sendMessage(OWNER, { text: 'isto DEVE sair (dono, pausado)' });
-    await new Promise((r) => setTimeout(r, 400));
+    // espera o envio do dono (a fila tem ritmo): checa até 1,5s
+    for (let i = 0; i < 15 && !sent.slice(antes).some((x) => x.jid === OWNER); i++) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
 
     const novos = sent.slice(antes);
     const saiuDono = novos.some((x) => x.jid === OWNER && /DEVE sair/.test(JSON.stringify(x.content)));
-    const saiuGrupo = novos.some((x) => x.jid === GID && /NAO pode sair/.test(JSON.stringify(x.content)));
+    const saiuGrupo = novos.some((x) => x.jid === PAUSA_GID && /NAO pode sair/.test(JSON.stringify(x.content)));
     assert.ok(saiuDono, 'a mensagem para o DONO sai mesmo com o freio pausado');
     assert.ok(!saiuGrupo, 'nada sai para o grupo enquanto está pausado');
 
@@ -698,11 +707,43 @@ async function main() {
 
     sendGuard.setPaused(false);
     await noGrupo; // a fila volta a andar quando a pausa termina
-    const depoisLiberou = sent.slice(antes).some((x) => x.jid === GID && /NAO pode sair/.test(JSON.stringify(x.content)));
+    const depoisLiberou = sent.slice(antes).some((x) => x.jid === PAUSA_GID && /NAO pode sair/.test(JSON.stringify(x.content)));
     assert.ok(depoisLiberou, 'ao retomar, o que estava na fila sai');
     ok('16: freio pausado silencia todos os chats, MAS o dono continua falando — e a pausa fica registrada');
   } catch (e) {
     fail('16: pausa do freio', e);
+  }
+
+  /* ══ 17. PAUSADO + DONO FALANDO NO GRUPO ═══════════════════════════════
+   * 2ª parte do relato "comando de dono não funciona mesmo eu sendo o dono":
+   * com a pausa ligada, a resposta de um comando de dono EM GRUPO ficava na
+   * fila. Agora o chat onde o dono acabou de falar também passa durante a
+   * pausa — e o resto do grupo continua parado.                                */
+  try {
+    const antes = sent.length;
+    sendGuard.setPaused(true, 5, 'teste de pausa (17)');
+    // o dono acabou de falar NESTE grupo (é o que o commandHandler marca)
+    sendGuard.noteOwnerChat(DONO_GID);
+    const noGrupoDoDono = sock.sendMessage(DONO_GID, { text: 'resposta do comando do dono (pausado)' });
+    const emOutroGrupo = sock.sendMessage(OUTRO_GID, { text: 'resposta para outro grupo (tem de esperar)' });
+    for (let i = 0; i < 15 && !sent.slice(antes).some((x) => x.jid === DONO_GID); i++) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const novos = sent.slice(antes);
+    const saiuDono = novos.some((x) => x.jid === DONO_GID && /comando do dono/.test(JSON.stringify(x.content)));
+    const saiuOutro = novos.some((x) => x.jid === OUTRO_GID && /outro grupo/.test(JSON.stringify(x.content)));
+    assert.ok(saiuDono, 'o chat onde o DONO acabou de falar é respondido mesmo na pausa');
+    assert.ok(!saiuOutro, 'os outros chats continuam parados');
+
+    sendGuard.setPaused(false);
+    await emOutroGrupo;
+    assert.ok(
+      sent.slice(antes).some((x) => x.jid === OUTRO_GID && /outro grupo/.test(JSON.stringify(x.content))),
+      'e ao retomar, o resto sai'
+    );
+    ok('17: na pausa, os chats do dono (inclusive grupo) são respondidos — os demais esperam');
+  } catch (e) {
+    fail('17: pausa + chat do dono', e);
   }
 
   /* ------------------------------- fim ------------------------------- */
