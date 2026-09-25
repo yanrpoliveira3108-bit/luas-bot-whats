@@ -24,6 +24,7 @@ const CONFIG = require('../config');
 const logger = require('../utils/logger').child('youtube');
 const { safeFileName, deleteFile, ensureTmp } = require('../utils/download');
 const mediaCache = require('../utils/mediaCache');
+const { assertSafeDestination } = require('../utils/urlSecurity');
 
 const MAX_BYTES = CONFIG.limits.maxDownloadMB * 1024 * 1024;
 const DL = CONFIG.downloader || {};
@@ -247,6 +248,10 @@ function buildAudioFormat() {
 /* ------------------------- download yt-dlp (alta velocidade) ---------------------- */
 
 async function ytdlpDownload(url, suggestedName, kind) {
+  // yt-dlp é processo externo e pode seguir redirecionamentos; só o texto da
+  // URL não basta para prevenir SSRF. Resolva e rejeite destinos internos antes
+  // de entregar o argumento ao processo.
+  await assertSafeDestination(url);
   ensureTmp();
   const base = safeFileName(suggestedName || 'youtube', '');
   const outTemplate = path.join(CONFIG.paths.tmpDir, base + '.%(ext)s');
@@ -536,6 +541,9 @@ function friendlyError(err) {
 }
 
 async function getInfo(url) {
+  // A validação síncrona no comando não protege chamadas feitas por outros
+  // comandos. Valide novamente no ponto que realmente abre a conexão.
+  await assertSafeDestination(url);
   let lastErr;
   for (const clients of [PLAYER_CLIENTS, ['ANDROID', 'IOS']]) {
     try {

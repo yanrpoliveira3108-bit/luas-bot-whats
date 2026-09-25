@@ -33,15 +33,44 @@ const interactive = require('../../utils/interactive');
 const CONFIG = require('../../config');
 const logger = require('../../utils/logger').child('play');
 
+function canonicalTrackKey(rawUrl) {
+  try {
+    const u = new URL(String(rawUrl));
+    if (u.hostname === 'youtu.be') return `yt:${u.pathname.slice(1).split('/')[0]}`;
+    if (u.hostname === 'youtube.com' || u.hostname.endsWith('.youtube.com')) {
+      const id = u.searchParams.get('v');
+      if (id) return `yt:${id}`;
+    }
+    u.hash = '';
+    u.search = '';
+    return u.toString().replace(/\/$/, '').toLowerCase();
+  } catch (_) {
+    return String(rawUrl || '').trim().toLowerCase();
+  }
+}
+
+function safeProviderTrack(track) {
+  if (!track || !track.url) return null;
+  const checked = urlSecurity.validateSafeUrl(track.url);
+  if (!checked.valid) return null;
+  return { ...track, url: checked.url };
+}
+
 /**
  * Envia mensagem complementar pós-envio com link e comando de letra
  */
 async function sendComplementaryMessage(ctx, track, prefix) {
   try {
-    const text = playPresentation.formatComplementaryMessage(track.title, track.url, prefix || ctx.prefix || '!');
+    // Nunca ecoe uma URL que não tenha passado pelo mesmo allowlist do
+    // download. A mensagem posterior usa apenas a URL pública original.
+    const safe = urlSecurity.validateSafeUrl(track && track.url);
+    if (!safe.valid) throw new Error('URL complementar inválida');
+    const text = playPresentation.formatComplementaryMessage(track.title, safe.url, prefix || ctx.prefix || '!');
     await ctx.reply(text);
   } catch (err) {
-    logger.warn({ err: err.message, track: track.url }, 'falha ao enviar mensagem complementar do play (mídia já entregue)');
+    // A mídia já foi entregue: não tente reenviá-la. O log não inclui URL,
+    // tokens ou metadados externos desnecessários.
+    logger.warn({ err: err.message }, 'falha ao enviar mensagem complementar do play (mídia já entregue)');
   }
 }
 
@@ -75,8 +104,13 @@ async function executeMediaAction(ctx, session, trackIndex, action) {
 
   // Se a ação solicitada for somente o Link
   if (action === 'link') {
-    playSession.unlockSession(session.id);
-    await sendComplementaryMessage(ctx, track, session.prefix);
+    try {
+      await sendComplementaryMessage(ctx, track, session.prefix);
+    } finally {
+      // Keep the lock through the send so a repeated click cannot emit the
+      // same link block twice concurrently.
+      playSession.unlockSession(session.id);
+    }
     return;
   }
 
@@ -245,7 +279,8 @@ async function handlePlay(ctx) {
 
       const singleTrack = {
         title: (info.videoDetails && info.videoDetails.title) || 'Música do YouTube',
-        url: query,
+        // Preserve a canonical public URL, never an internal provider URL.
+        url: safeCheck.url,
         duration: (info.videoDetails && info.videoDetails.lengthSeconds) || '',
         author: (info.videoDetails && info.videoDetails.author && info.videoDetails.author.name) || '',
       };
@@ -278,17 +313,24 @@ async function handlePlay(ctx) {
       return ctx.reply(dicaBuscaVazia());
     }
 
-    // Deduplicação estrita por URL/ID e seleção dos 3 melhores resultados
-    const seenUrls = new Set();
+    // O provedor já devolve relevância; mantenha essa ordem (e, quando a
+    // relevância empata, ela normalmente já considera views). Não rotule isso
+    // como ranking mundial nem converta views em "ouvintes".
+    const seenTracks = new Set();
     const cleanResults = [];
 
-    for (const r of rawResults) {
-      if (!r || !r.url) continue;
-      const canonical = r.url.toLowerCase().split('&')[0];
-      if (seenUrls.has(canonical)) continue;
-      seenUrls.add(canonical);
+    for (const raw of rawResults) {
+      const r = safeProviderTrack(raw);
+      if (!r) continue;
+      const canonical = canonicalTrackKey(r.url);
+      if (seenTracks.has(canonical)) continue;
+      seenTracks.add(canonical);
       cleanResults.push(r);
       if (cleanResults.length >= 3) break;
+    }
+
+    if (!cleanResults.length) {
+      return ctx.reply(dicaBuscaVazia());
     }
 
     const session = playSession.createSession({

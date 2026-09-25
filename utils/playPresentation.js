@@ -37,6 +37,8 @@ function sanitizeTitle(str) {
   return String(str)
     .replace(/@([0-9]{5,})/g, '@\u200B$1')
     .replace(/[\r\n\t]+/g, ' ')
+    // External titles must not alter WhatsApp's visual hierarchy.
+    .replace(/([*_~`\\])/g, '\\$1')
     .trim();
 }
 
