@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Central estratégica do bot Lua para WhatsApp">
+  <title>Lua Command · Central Estratégica</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <button class="icon-button menu-toggle" type="button" aria-label="Abrir menu" aria-expanded="false">☰</button>
+      <a class="brand" href="#overview" aria-label="Lua Command, início">
+        <span class="brand-mark">L</span>
+        <span><strong>LUA COMMAND</strong><small>WHATSAPP STRATEGIC NETWORK</small></span>
+      </a>
+      <div class="topbar-status"><span class="status-dot online"></span><span>Operacional</span><b>v1.0.0</b></div>
+      <div class="top-actions">
+        <button class="icon-button" type="button" data-action="notifications" aria-label="Ver notificações">◌<i class="notification-dot"></i></button>
+        <button class="operator" type="button" data-action="operator" aria-label="Abrir perfil do operador"><span class="avatar">NX</span><span><b>Operador</b><small>Administrador</small></span><span aria-hidden="true">⌄</span></button>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-heading">CENTRAL DE COMANDO</div>
+        <nav class="main-nav" aria-label="Navegação principal">
+          <a class="nav-link active" href="#overview" data-view="overview"><span>◈</span> Visão geral <em>01</em></a>
+          <a class="nav-link" href="#groups" data-view="groups"><span>⬡</span> Territórios <em>12</em></a>
+          <a class="nav-link" href="#commands" data-view="commands"><span>⌘</span> Arsenal de comandos <em>48</em></a>
+          <a class="nav-link" href="#diplomacy" data-view="diplomacy"><span>⇄</span> Diplomacia</a>
+          <a class="nav-link" href="#users" data-view="users"><span>♙</span> População</a>
+        </nav>
+        <div class="sidebar-heading second">SISTEMA</div>
+        <nav class="main-nav" aria-label="Sistema">
+          <a class="nav-link" href="#events" data-view="events"><span>◷</span> Registro de eventos <em class="warn-count">03</em></a>
+          <a class="nav-link" href="#settings" data-view="settings"><span>⚙</span> Configurações</a>
+        </nav>
+        <div class="sidebar-footer"><span class="status-dot online"></span><span>Conexão segura</span><small>Último pulso · agora</small></div>
+      </aside>
+
+      <main class="main-content" id="main-content">
+        <div class="page-heading" id="overview">
+          <div><p class="eyebrow">RELATÓRIO DE SITUAÇÃO · 25 SET 2026</p><h1>Visão geral da rede</h1><p class="muted">Monitore o pulso dos seus territórios e mantenha o Lua pronto para agir.</p></div>
+          <button class="primary-button" type="button" data-action="refresh"><span>↻</span> Atualizar dados</button>
+        </div>
+
+        <section class="metric-grid" aria-label="Indicadores da rede">
+          <article class="metric-card accent-cyan"><div class="metric-top"><span>ESTADO DA REDE</span><span class="metric-icon">◉</span></div><strong>Operacional</strong><small><i class="trend up">↑ 2,4%</i> estabilidade semanal</small></article>
+          <article class="metric-card accent-gold"><div class="metric-top"><span>POPULAÇÃO ATIVA</span><span class="metric-icon">♙</span></div><strong>18.642</strong><small><i class="trend up">↑ 8,7%</i> usuários registrados</small></article>
+          <article class="metric-card accent-violet"><div class="metric-top"><span>ATIVIDADE HOJE</span><span class="metric-icon">⌁</span></div><strong>7.381</strong><small><i class="trend up">↑ 12,1%</i> comandos processados</small></article>
+          <article class="metric-card accent-red"><div class="metric-top"><span>ALERTAS PENDENTES</span><span class="metric-icon">!</span></div><strong>03</strong><small><i class="trend down">atenção</i> requerem revisão</small></article>
+        </section>
+
+        <section class="content-grid">
+          <article class="panel map-panel" aria-labelledby="map-title">
+            <div class="panel-header"><div><p class="eyebrow">MAPA DE INFLUÊNCIA</p><h2 id="map-title">Territórios da rede</h2></div><div class="map-tools"><button class="tool-button" type="button" data-map="zoom-out" aria-label="Diminuir zoom">−</button><button class="tool-button" type="button" data-map="reset" aria-label="Redefinir mapa">⌖</button><button class="tool-button" type="button" data-map="zoom-in" aria-label="Aumentar zoom">+</button></div></div>
+            <div class="map-legend" aria-label="Legenda do mapa"><span><i class="legend-swatch swatch-cyan"></i>Estável</span><span><i class="legend-swatch swatch-gold"></i>Ativo</span><span><i class="legend-swatch swatch-red"></i>Atenção</span></div>
+            <div class="map-stage" id="map-stage">
+              <svg class="world-map" id="world-map" viewBox="0 0 900 470" role="img" aria-label="Mapa estilizado de territórios da rede Lua">
+                <defs><pattern id="grid-pattern" width="30" height="30" patternUnits="userSpaceOnUse"><path d="M30 0H0V30" fill="none" stroke="#a3c4ca" stroke-opacity=".07"/></pattern><filter id="territory-shadow"><feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#041114" flood-opacity=".7"/></filter></defs>
+                <rect width="900" height="470" fill="url(#grid-pattern)"/>
+                <g class="map-lines" aria-hidden="true"><path d="M0 108H900M0 235H900M0 356H900M150 0V470M300 0V470M450 0V470M600 0V470M750 0V470"/><ellipse cx="450" cy="235" rx="325" ry="195"/></g>
+                <g class="territories" filter="url(#territory-shadow)">
+                  <path class="territory stable" data-territory="atlas" tabindex="0" d="M83 112l83-35 76 27 27 61-38 55-82 6-61-41z"/><path class="territory active" data-territory="aurora" tabindex="0" d="M285 67l83-19 67 44-7 75-69 33-78-41 11-42z"/><path class="territory stable" data-territory="orion" tabindex="0" d="M455 90l75-38 91 37 7 70-52 49-103-21-35-50z"/><path class="territory alert" data-territory="sahara" tabindex="0" d="M650 92l94-14 64 44-20 83-78 21-75-43z"/><path class="territory active" data-territory="leste" tabindex="0" d="M117 256l75-46 91 27 31 66-52 66-105 14-61-61z"/><path class="territory stable" data-territory="meridiana" tabindex="0" d="M340 225l90-32 94 44 6 77-81 60-99-31-31-58z"/><path class="territory stable" data-territory="pacifica" tabindex="0" d="M566 225l86-22 95 55-17 75-90 37-86-55z"/><path class="territory active" data-territory="sul" tabindex="0" d="M272 380l75-49 95 12 59 67-64 48-111-3z"/>
+                </g>
+                <g class="territory-labels" aria-hidden="true"><text x="137" y="145">ATLAS</text><text x="326" y="106">AURORA</text><text x="514" y="111">ORION</text><text x="699" y="132">SAHARA</text><text x="170" y="281">LESTE</text><text x="385" y="269">MERIDIANA</text><text x="610" y="267">PACÍFICA</text><text x="333" y="409">SUL</text></g>
+              </svg>
+              <div class="map-tooltip" id="map-tooltip" role="status"></div>
+              <div class="map-scale"><span>ESCALA DE ATIVIDADE</span><i></i><b></b><em></em></div>
+            </div>
+            <div class="map-caption"><span><b id="territory-count">08</b> territórios representados</span><span>Selecione uma região para consultar os detalhes</span></div>
+          </article>
+
+          <aside class="panel details-panel" id="details-panel" aria-labelledby="details-title"><div class="panel-header"><div><p class="eyebrow">DOSSIÊ TERRITORIAL</p><h2 id="details-title">Aurora</h2></div><span class="status-pill stable-pill" id="details-status">ESTÁVEL</span></div><div class="territory-banner" id="territory-banner"><span class="banner-symbol">A</span><span><b id="details-code">AU-07</b><small>Zona administrativa</small></span></div><div class="detail-facts"><div><span>População</span><strong id="details-population">4.821</strong></div><div><span>Atividade</span><strong id="details-activity">82%</strong></div><div><span>Proteção</span><strong id="details-protection">94%</strong></div><div><span>Comandos</span><strong id="details-commands">1.946</strong></div></div><div class="progress-block"><div><span>Índice de estabilidade</span><b id="details-progress-label">94%</b></div><div class="progress"><i id="details-progress" style="width:94%"></i></div></div><div class="panel-divider"></div><div class="detail-list"><div><span>Capital administrativa</span><b id="details-capital">Grupo principal</b></div><div><span>Última atividade</span><b id="details-last">há 4 min</b></div><div><span>Relação com a rede</span><b class="cyan-text" id="details-relation">Aliada</b></div></div><button class="secondary-button full-button" type="button" data-action="open-territory">Abrir dossiê completo <span>→</span></button></aside>
+        </section>
+
+        <section class="lower-grid" id="events">
+          <article class="panel events-panel"><div class="panel-header"><div><p class="eyebrow">LINHA DO TEMPO</p><h2>Eventos recentes</h2></div><button class="text-button" type="button" data-action="view-all-events">Ver registro completo →</button></div><div class="event-list" id="event-list"></div></article>
+          <article class="panel commands-panel" id="commands"><div class="panel-header"><div><p class="eyebrow">ARSENAL</p><h2>Comandos mais usados</h2></div><button class="text-button" type="button" data-action="show-commands">Explorar comandos →</button></div><div class="command-bars" id="command-bars"></div></article>
+        </section>
+      </main>
+    </div>
+    <footer class="footer"><span>Lua Command Center · interface demonstrativa</span><span>Dados fictícios · API pronta para integração</span></footer>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js" defer></script>
+</body>
+</html>
