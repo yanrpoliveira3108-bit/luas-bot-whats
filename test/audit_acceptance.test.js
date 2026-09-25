@@ -21,8 +21,8 @@ test.after(() => {
 });
 
 test('1. Sistema de trocas: suporte a itens e moedas com consistência e atomismo', async () => {
-  const p1 = 'user-trade-1@s.whatsapp.net';
-  const p2 = 'user-trade-2@s.whatsapp.net';
+  const p1 = `user-trade-1-${Date.now()}@s.whatsapp.net`;
+  const p2 = `user-trade-2-${Date.now()}@s.whatsapp.net`;
 
   economy.ensure(p1);
   economy.ensure(p2);
