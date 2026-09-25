@@ -29,7 +29,9 @@
  *   {p}cacatesouro saldo             → carteira e estatísticas
  *   {p}cacatesouro rapido            → jogo rápido 3×3 casual (o antigo, preservado)
  *
- * Sem cadastro no RPG/vida (ou carteira indisponível) o caça roda em modo
+ * A aposta sai da CARTEIRA (economy.wallet) — não exige personagem do RPG/vida;
+ * o personagem só entra no XP.
+ * Com a carteira indisponível o caça roda em modo
  * CASUAL: expedição por pontuação, sem movimentar carteira. O painel diz como
  * criar o personagem ({p}vida <nome>) para apostar valendo.
  *
@@ -45,6 +47,10 @@ const jogo = require('../../utils/treasureGame');
 const store = require('../../database/treasure');
 const wallet = require('../../utils/gameWallet');
 const betPanel = require('../../utils/betPanel');
+// moldura do card: altura FIXA em px e página que não rola — os MESMOS números
+// do card do menu (menus/html/dimensoes.js). Sem isso o WebView do card mede o
+// conteúdo e o card sai minúsculo/tremendo (ver MENU-HTML.md §2.1).
+const moldura = require('../../menus/html/moldura');
 const richHtml = require('../../utils/richHtml');
 const menuFormat = require('../../utils/menuFormat');
 const life = require('../../database/life');
@@ -52,6 +58,9 @@ const session = require('../../utils/session');
 const games = require('../../database/games');
 const { formatMoney } = require('../../utils/formatter');
 const logger = require('../../utils/logger').child('tesouro');
+
+/** Valor que já vem digitado no painel (nunca o saldo todo). */
+const APOSTA_SUGERIDA = 100;
 
 const SUBCMD = {
   jogar: ['jogar', 'iniciar', 'comecar', 'começar', 'apostar'],
@@ -95,10 +104,13 @@ function horaAgora() {
 /* ------------------------------- carteira ------------------------------ */
 
 /**
- * Estado do jogador no RPG/vida, SEM criar nada:
- *   'ok'            → tem personagem/carteira
- *   'sem_cadastro'  → não tem personagem
- *   'indisponivel'  → a consulta falhou (NUNCA tratado como "saldo 0")
+ * Estado do jogador no RPG/vida, SEM criar nada (usa `life.getPlayer`, que não
+ * cria linha). Serve para: XP (quem tem personagem) e para detectar FALHA de
+ * consulta — que nunca pode virar "saldo 0".
+ *   'ok'            → tem personagem
+ *   'sem_cadastro'  → não tem personagem (aposta continua valendo: a moeda é a
+ *                     carteira, que existe para todo mundo)
+ *   'indisponivel'  → a consulta falhou
  */
 function estadoDoJogador(userId) {
   try {
@@ -110,10 +122,6 @@ function estadoDoJogador(userId) {
   }
 }
 
-function temCadastro(userId) {
-  return estadoDoJogador(userId) === 'ok';
-}
-
 /**
  * Dados do painel lidos do BOT (nunca do HTML).
  * Falha de consulta → `indisponivel: true` + motivo, com o saldo mostrado como
@@ -123,6 +131,9 @@ function temCadastro(userId) {
 function dadosDoPainel(sender, size, prefix) {
   const cfg = jogo.configDoTabuleiro(size);
   const vazio = { wallet: 0, disponivel: 0, comprometido: 0, pendentes: [], quando: horaAgora() };
+  // aposta sugerida no campo: nunca o saldo inteiro — um valor pequeno e fixo,
+  // só para o botão já estar pronto para o toque (o jogador troca se quiser)
+  const sugerida = (max) => (max >= APOSTA_SUGERIDA ? APOSTA_SUGERIDA : 0);
   const estado = estadoDoJogador(sender);
   const base = {
     estado,
@@ -133,14 +144,8 @@ function dadosDoPainel(sender, size, prefix) {
     bloqueio: '',
   };
 
-  if (estado === 'sem_cadastro') {
-    base.bloqueio =
-      `Você ainda não tem carteira: crie seu personagem com ${prefix}vida <nome> para apostar valendo. ` +
-      'Enquanto isso a expedição pode rodar em modo casual (pontuação, sem apostar).';
-    return base;
-  }
   if (estado === 'indisponivel') {
-    base.bloqueio = 'Não consegui consultar seu cadastro/saldo agora. Tente novamente — nada foi cobrado.';
+    base.bloqueio = 'Não consegui consultar sua carteira agora. Tente novamente — nada foi cobrado.';
     return base;
   }
 
@@ -155,7 +160,13 @@ function dadosDoPainel(sender, size, prefix) {
       quando: horaAgora(),
     };
     base.limites = { min: lim.min, max: lim.max, tetoJogo: lim.limiteDoJogo };
-    if (lim.max <= 0) base.bloqueio = 'Seu saldo disponível é 0 — sem aposta possível agora.';
+    base.valorSugerido = sugerida(lim.max);
+    if (lim.max <= 0) {
+      // saldo 0 (ou tudo comprometido) NÃO impede jogar: o casual é sem carteira
+      base.bloqueio =
+        'Seu saldo disponível é 0 agora — sem aposta possível. ' +
+        `A expedição casual (sem apostar) continua: \`${prefix}cacatesouro jogar ${cfg.size} casual\``;
+    }
     return base;
   } catch (err) {
     logger.warn({ err: err && err.message }, 'não consegui ler a carteira do jogador');
@@ -323,7 +334,10 @@ function cssBase() {
   return (
     '*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}\n' +
     'body{margin:0;background:#0b0614;font-family:Arial,sans-serif;color:#efe7ff}\n' +
-    '.wrap{width:100%;max-width:560px;margin:0 auto;padding:10px}\n' +
+    // #__wrap = moldura de altura cheia; a rolagem fica AQUI dentro (gesto de
+    // arrastar na página viraria "responder" no WhatsApp)
+    '.wrap{width:100%;max-width:560px;margin:0 auto;padding:10px;flex:1 1 auto;min-height:0;' +
+    'overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}\n' +
     '.head{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:14px;' +
     'padding:6px 2px 2px;border-bottom:1px solid rgba(199,146,255,.25)}\n' +
     '.head span{font-size:11px;color:rgba(199,146,255,.9)}\n' +
@@ -398,7 +412,9 @@ function buildHtml(g, prefix) {
       ? 'Expedição em andamento: use o botão Escavar. Para abrir outra, termine esta ou use sair (a aposta atual não volta).'
       : p.bloqueio,
     titulo: ativa ? '💼 Carteira (expedição em andamento)' : '💼 Carteira e próxima expedição',
-    rotuloConfirmar: '▶️ Confirmar próxima expedição',
+    rotuloConfirmar: '🗺️ Abrir expedição (copia o comando)',
+    // valor já digitado = aposta sugerida (o jogador troca; o saldo todo nunca)
+    valorInicial: ativa ? null : p.valorSugerido,
   });
 
   const cabecalho = ativa
@@ -406,11 +422,11 @@ function buildHtml(g, prefix) {
     : `🗺️ <b>CAÇA AO TESOURO</b><span>${fimTexto(g)}</span>`;
 
   return (
-    '<style>' + cssBase() + cssTabuleiro() + painel.css + '</style>' +
-    '<body><div class="wrap"><div class="head">' + cabecalho + '</div>' +
+    '<style>' + moldura.css() + cssBase() + cssTabuleiro() + painel.css + '</style>' +
+    '<body><div id="__wrap"><div class="wrap"><div class="head">' + cabecalho + '</div>' +
     tabuleiroHtml(g, prefix, {}) +
     painel.markup +
-    '</div></body>' +
+    '</div></div></body>' +
     '<script>' + painel.js + '</script>' +
     '<script>' + tabuleiroJs(g, prefix) + '</script>'
   );
@@ -426,6 +442,7 @@ function regrasDoJogo(cfg) {
     '🚪 Sair no meio paga os tesouros já achados, sem bônus, e não devolve a aposta',
     `💰 Cada tesouro paga ${pctPorTesouro(cfg)}% da sua aposta (arredondado para baixo) e o tesouro só é pago uma vez`,
     '⚠️ A aposta vale pela expedição inteira: cobrada UMA vez, não devolvida — nem ao sair, nem ao expirar',
+    `⭐ Experiência: ${store.XP_POR_TESOURO} por tesouro + ${store.XP_VITORIA} ao completar (com personagem do RPG/vida)`,
     '🪙 A moeda é inteira: valores sem centavos',
   ];
 }
@@ -511,25 +528,19 @@ function painelTexto(p, prefix, cfg) {
       `▸ Sem aposta: \`${prefix}cacatesouro rapido\``,
     ].join('\n');
   }
-  if (p.estado === 'sem_cadastro') {
+  if (p.bloqueio) {
+    // saldo 0 (ou comprometido) não impede jogar: o casual é sem carteira
     return [
       '🗺️ *CAÇA AO TESOURO*',
       jogo.regrasTexto(cfg.size),
       '',
       '💼 *Carteira*',
+      `▸ Saldo na carteira: ${formatMoney(p.saldo.wallet)} ${m.simbolo}`,
+      `▸ Disponível para apostar: ${formatMoney(p.saldo.disponivel)}`,
       `⚠️ ${p.bloqueio}`,
       '',
       `🧭 Modo casual (sem apostar): \`${prefix}cacatesouro jogar ${cfg.size} casual\``,
       `⚡ Jogo rápido 3×3 (o antigo, sem aposta): \`${prefix}cacatesouro rapido\``,
-    ].join('\n');
-  }
-  if (p.bloqueio) {
-    return [
-      '🗺️ *CAÇA AO TESOURO*',
-      `⚠️ ${p.bloqueio}`,
-      `▸ Saldo na carteira: ${formatMoney(p.saldo.wallet)} ${m.simbolo}`,
-      `▸ Tente de novo: \`${prefix}cacatesouro ${cfg.size}\``,
-      `▸ Sem aposta: \`${prefix}cacatesouro rapido\``,
     ].join('\n');
   }
   return [
@@ -598,22 +609,24 @@ async function abrirPainel(ctx, prefix, size) {
     indisponivel: p.indisponivel,
     titulo: `🗺️ Expedição ${cfg.size}×${cfg.size}`,
     rotuloConfirmar: '▶️ Confirmar aposta e abrir o mapa',
+    // aposta sugerida já digitada (o saldo todo NUNCA é pré-selecionado)
+    valorInicial: p.valorSugerido,
   });
 
-  const html =
-    '<style>' + cssBase() + painel.css + '</style><body><div class="wrap">' +
-    '<div class="head">🗺️ <b>CAÇA AO TESOURO</b><span>escolha o tamanho e a aposta</span></div>' +
-    '<div class="tb-tamanhos">' +
-    jogo.TAMANHOS.map((n) => `<span class="tb-tam${n === cfg.size ? ' on' : ''}">${n}×${n}</span>`).join('') +
-    '</div>' +
-    `<p class="tb-jan">Para outro tamanho: <code>${betPanel.esc(prefix)}cacatesouro &lt;3 a 13&gt;</code> · ` +
-    `casual sem aposta: <code>${betPanel.esc(prefix)}cacatesouro jogar ${cfg.size} casual</code></p>` +
-    painel.markup +
-    '</div></body><script>' + painel.js + '</script>';
-
+  // a MONTAGEM do card fica protegida: se falhar, o painel sai em texto (o
+  // jogador nunca recebe só "algo deu errado" por causa do card)
   let doc = null;
   try {
-    doc = html;
+    doc =
+      '<style>' + moldura.css() + cssBase() + painel.css + '</style><body><div id="__wrap"><div class="wrap">' +
+      '<div class="head">🗺️ <b>CAÇA AO TESOURO</b><span>escolha o tamanho e a aposta</span></div>' +
+      '<div class="tb-tamanhos">' +
+      jogo.TAMANHOS.map((n) => `<span class="tb-tam${n === cfg.size ? ' on' : ''}">${n}×${n}</span>`).join('') +
+      '</div>' +
+      `<p class="tb-jan">Para outro tamanho: <code>${betPanel.esc(prefix)}cacatesouro &lt;3 a 13&gt;</code> · ` +
+      `casual sem aposta: <code>${betPanel.esc(prefix)}cacatesouro jogar ${cfg.size} casual</code></p>` +
+      painel.markup +
+      '</div></div></body><script>' + painel.js + '</script>';
   } catch (err) {
     logger.error({ err: err && err.message }, '[TESOURO] falha ao montar o painel — usando texto');
   }
@@ -635,8 +648,10 @@ async function jogar(ctx, prefix, sizeTexto, valorTexto) {
     );
     return true;
   }
-  const semCadastro = estado === 'sem_cadastro';
-  const pediuCasual = String(valorTexto || '').toLowerCase().trim() === 'casual' || semCadastro;
+  // apostar NÃO exige personagem do RPG/vida: a moeda mora na carteira
+  // (economy.wallet). O personagem só é usado para XP/estatística.
+  const temPersonagem = estado === 'ok';
+  const pediuCasual = String(valorTexto || '').toLowerCase().trim() === 'casual';
 
   if (pediuCasual) {
     const ref = msgId ? `${msgId}:casual` : `casual:${Date.now()}`;
@@ -651,8 +666,11 @@ async function jogar(ctx, prefix, sizeTexto, valorTexto) {
     const g = casual.game;
     if (casual.cobranca && casual.cobranca.jaAtiva) {
       await ctx.reply(`🗺️ Você já tem uma expedição aberta (partida \`${g.id}\`) — terminando ela você abre outra.`);
-    } else if (!semCadastro) {
-      await ctx.reply('🧭 Expedição CASUAL: sem aposta, vale pontuação (XP e tesouros).');
+    } else {
+      await ctx.reply(
+        '🧭 Expedição CASUAL: sem aposta e sem prêmio em moeda — vale XP e estatística.' +
+          (temPersonagem ? '' : ' (Dica: para apostar valendo, use `<valor>` no lugar de `casual`.)')
+      );
     }
     return mostrar(ctx, g, prefix, '🗺️ Caça ao Tesouro (casual)');
   }
@@ -708,7 +726,6 @@ async function jogar(ctx, prefix, sizeTexto, valorTexto) {
 async function cavar(ctx, prefix, idTexto, coordTexto) {
   const id = String(idTexto || '').trim();
   const coord = String(coordTexto || '').trim();
-  const cadastro = temCadastro(ctx.sender);
   if (!id) {
     const ativa = store.ativaDo(ctx.sender);
     if (ativa) {
@@ -737,17 +754,57 @@ async function cavar(ctx, prefix, idTexto, coordTexto) {
   const g = r.game;
   if (r.repetida) {
     await ctx.reply(`🔁 Esta escavação já tinha sido processada (${r.casa && r.casa.c ? r.casa.c : coord}) — nada mudou.`);
+    await mostrar(ctx, g, prefix, '🗺️ Caça ao Tesouro');
+    return true;
+  }
+
+  // O QUE ACONTECEU, em texto: sem isso o resultado só existia dentro do card —
+  // quem não via o card (ou via pequeno) ficava sem saber que achou/não achou.
+  if (r.terminou) {
+    // o XP é pago pelo STORE (database/treasure.premiarXp) na mesma transação do
+    // fim da expedição: aqui só mostramos o que ele registrou
+    await ctx.reply([resultadoEscavacao(g, r.casa), '', fechamentoTexto(g, r, prefix, r.xp)].join('\n'));
+  } else {
+    await ctx.reply(resultadoEscavacao(g, r.casa, prefix));
   }
   await mostrar(ctx, g, prefix, '🗺️ Caça ao Tesouro');
-
-  if (r.terminou) {
-    await ctx.reply(fechamentoTexto(g, r, cadastro, prefix));
-  }
   return true;
 }
 
+/**
+ * Resultado de UMA escavação (o bot é quem revela — o card só repete isto).
+ * Sempre traz o progresso e, na aposta valendo, quanto já rendeu até agora.
+ */
+function resultadoEscavacao(g, casa, prefix) {
+  const k = (casa && casa.k) || 'v';
+  const coord = (casa && casa.c) || '?';
+  const linhas = [];
+  if (k === 't') {
+    linhas.push(`💎 *TESOURO na casa ${coord}!*`);
+  } else if (k === 'a') {
+    linhas.push(`💥 *ARMADILHA na casa ${coord}!* Queimou mais uma escavação.`);
+  } else {
+    linhas.push(`🕳️ Casa ${coord}: vazia.`);
+  }
+  if (k !== 't') linhas.push(`▸ Pista: ${Number((casa && casa.d) || 0)} tesouro(s) nas 8 casas vizinhas.`);
+  linhas.push(`▸ Tesouros: ${g.treasuresFound}/${g.treasuresTotal} · escavações usadas: ${g.digsUsed}/${g.digsTotal}`);
+  if (g.bet > 0) {
+    const calc = jogo.calcularRecompensa({
+      bet: g.bet,
+      size: g.size,
+      encontrados: g.treasuresFound,
+      total: g.treasuresTotal,
+    });
+    linhas.push(`▸ Retorno acumulado: ${formatMoney(calc.total)} (pago quando a expedição termina)`);
+  }
+  if (prefix && g.status === store.STATUS.ATIVA) {
+    linhas.push(`▸ Próxima escavação: \`${prefix}cacatesouro cavar ${g.id} <casa>\``);
+  }
+  return linhas.join('\n');
+}
+
 /** Fechamento: resultado, tesouros, aposta, retorno e saldo (quando houver carteira). */
-function fechamentoTexto(g, r, cadastro, prefix) {
+function fechamentoTexto(g, r, prefix, xp) {
   const m = moeda().simbolo;
   const linhas = [];
   if (r.venceu) linhas.push(`🏆 *EXPEDIÇÃO COMPLETA!* Você achou os ${g.treasuresTotal} tesouros.`);
@@ -762,16 +819,15 @@ function fechamentoTexto(g, r, cadastro, prefix) {
         ` (o retorno ${g.reward >= g.bet ? 'inclui' : 'não cobre'} a aposta)`
     );
     linhas.push(`▸ Lucro líquido: ${formatMoney(g.reward - g.bet)}`);
-    if (cadastro) {
-      try {
-        linhas.push(`▸ Saldo agora: ${formatMoney(wallet.saldo(g.userId).wallet)} ${m}`);
-      } catch (_) {
-        linhas.push('▸ Saldo: não consegui consultar agora — use o comando de saldo.');
-      }
+    try {
+      linhas.push(`▸ Saldo agora: ${formatMoney(wallet.saldo(g.userId).wallet)} ${m}`);
+    } catch (_) {
+      linhas.push('▸ Saldo: não consegui consultar agora — use o comando de saldo.');
     }
   } else {
     linhas.push('▸ Modo casual: sem aposta, sem prêmio em moeda (vale XP e estatística).');
   }
+  if (xp) linhas.push(`⭐ XP: +${xp.ganho} (${xp.tipo === 'life' ? 'Lua Life' : 'RPG'})`);
   linhas.push(`▸ Nova expedição: \`${prefix}cacatesouro\``);
   return linhas.join('\n');
 }
@@ -792,7 +848,6 @@ async function continuar(ctx, prefix) {
 }
 
 async function sair(ctx, prefix) {
-  const cadastro = temCadastro(ctx.sender);
   const msgId = (ctx.message && ctx.message.key && ctx.message.key.id) || null;
   const id = String(ctx.args[1] || '').trim();
   if (!id && !store.ativaDo(ctx.sender)) {
@@ -805,13 +860,15 @@ async function sair(ctx, prefix) {
     return true;
   }
   const g = r.game;
+  const xp = r.xp;
   await ctx.reply(
     [
       '🚪 *Expedição encerrada.*',
       `▸ Tesouros encontrados: ${g.treasuresFound}/${g.treasuresTotal}`,
       `▸ Aposta: ${formatMoney(g.bet)} — não devolvida (a regra avisa isso antes de confirmar)`,
       g.bet > 0 ? `▸ Retorno pelos tesouros achados: ${formatMoney(g.reward)}` : '▸ Modo casual: sem aposta, sem retorno em moeda.',
-      cadastro && g.bet > 0 ? `▸ Saldo: ${formatMoney(wallet.saldo(g.userId).wallet)}` : '',
+      g.bet > 0 ? `▸ Saldo: ${formatMoney(wallet.saldo(g.userId).wallet)}` : '',
+      xp ? `⭐ XP: +${xp.ganho} (${xp.tipo === 'life' ? 'Lua Life' : 'RPG'})` : '',
       `▸ Nova expedição: \`${prefix}cacatesouro\``,
     ]
       .filter(Boolean)
@@ -833,24 +890,17 @@ async function saldo(ctx, prefix) {
     await ctx.reply(`⚠️ ${p.bloqueio}\n▸ Nova tentativa: \`${prefix}cacatesouro saldo\``);
     return true;
   }
-  if (p.estado === 'sem_cadastro') {
-    await ctx.reply(
-      `⚠️ Você ainda não tem carteira/cadastro. Crie seu personagem com \`${prefix}vida <nome>\` para apostar valendo.`
-    );
-    return true;
-  }
-  if (p.bloqueio) {
-    await ctx.reply(`⚠️ ${p.bloqueio}\n▸ Nova tentativa: \`${prefix}cacatesouro saldo\``);
-    return true;
-  }
   const stats = store.estatisticas(ctx.sender);
+  const cfg3 = jogo.configDoTabuleiro(3);
   await ctx.reply(
     [
       '🗺️ *CAÇA AO TESOURO — CARTEIRA*',
-      `▸ Saldo: ${formatMoney(p.saldo.wallet)}`,
+      `▸ Saldo na carteira: ${formatMoney(p.saldo.wallet)}`,
       p.saldo.comprometido > 0 ? `▸ Comprometido em expedições abertas: ${formatMoney(p.saldo.comprometido)}` : '',
       `▸ Disponível para apostar: ${formatMoney(p.saldo.disponivel)}`,
       `▸ Mínimo ${formatMoney(p.limites.min)} · máximo permitido agora ${formatMoney(p.limites.max)}`,
+      p.bloqueio ? '' : `▸ Abrir expedição: \`${prefix}cacatesouro jogar ${cfg3.size} <valor>\``,
+      p.bloqueio ? `⚠️ ${p.bloqueio}` : '',
       '',
       `📊 Expedições: ${stats.jogos} · 🏆 ${stats.vitorias} vitórias · 💀 ${stats.derrotas} derrotas`,
       `💎 Tesouros: ${stats.tesouros} · apostado ${formatMoney(stats.apostado)} · recebido ${formatMoney(stats.recebido)}`,

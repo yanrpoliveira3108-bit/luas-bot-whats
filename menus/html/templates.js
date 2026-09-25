@@ -55,34 +55,11 @@ function emojiDeComando(cmd) {
 /**
  * Altura do card: valor FIXO em px (igual à versão que renderizava bem).
  *
- * REGRESSÃO (não repetir): uma tentativa anterior usou
- * `height:min(520px,100vh)` para o card encolher em WebView baixo. Como a
- * segunda declaração SOBREPÕE a primeira, bastou o `100vh` resolver para um
- * valor degenerado — o WebView do card é dimensionado pelo próprio conteúdo,
- * então a janela de layout mede ~0-1px no primeiro layout — para o card
- * INTEIRO colapsar numa faixa de ~1px, mesmo com a declaração em px na frente.
- * Medido: com viewport de 60px, o html/body/#__wrap iam para 60px e a lista
- * para 6px (antes: 520px/520px/309px).
- *
- * Conclusão: este WebView NÃO oferece medida de viewport confiável. Portanto
- * aqui só entra medida absoluta (`${n}px`), sem `vh`, sem `min()`, sem
- * `@media (max-height:)`. Quem trata WebView mais baixo é o client.js, em
- * runtime, com guardas (só encolhe se a medida for plausível — ver `encaixar`).
- *
- * `overflow:hidden` no html/body/#__wrap é proposital: a página NÃO rola. Toda
- * rolagem acontece nos contêineres internos (#lua-tabs, #lua-list,
- * #lua-panel-body), o que evita o gesto de arrastar virar "responder" no
- * WhatsApp.
+ * A implementação (e o histórico da regressão com `vh`) ficou em
+ * `./moldura.js`, junto da mesma moldura usada pelos cards dos JOGOS — assim os
+ * três cards (menu, caça e tigrinho) têm uma altura declarada só.
  */
-function travarAltura(px) {
-  const { DIM } = require('./dimensoes');
-  const n = Math.max(DIM.alturaMin, Math.min(DIM.alturaMax, Number(px) || DIM.altura));
-  return (
-    `<style>html,body{margin:0;padding:0;height:${n}px;max-height:${n}px;overflow:hidden}` +
-    `#__wrap{height:${n}px;max-height:${n}px;overflow:hidden;display:flex;flex-direction:column;` +
-    'overscroll-behavior:contain}</style>'
-  );
-}
+const { travarAltura } = require('./moldura');
 
 /** Envolve o corpo no contêiner (#__wrap) antes do client rodar. */
 const ENVOLVER =

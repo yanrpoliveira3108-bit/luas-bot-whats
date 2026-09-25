@@ -43,15 +43,10 @@ const CAP_PADRAO = 30;
 const { PASSO_PADRAO } = require('./client');
 
 /**
- * Altura fixa do card, em pixels (MENU_HTML_HEIGHT sobrescreve).
- * Fixar evita o host medir o conteúdo a cada rolagem/troca de tela — o
- * comportamento medido como "card tremendo" no upstream.
+ * Altura fixa do card, em pixels (MENU_HTML_HEIGHT sobrescreve) — definida em
+ * `./moldura.js` e compartilhada com os cards dos jogos.
  */
-function alturaDoCard() {
-  const bruto = Number(process.env.MENU_HTML_HEIGHT);
-  if (Number.isFinite(bruto) && bruto >= DIM.alturaMin && bruto <= DIM.alturaMax) return Math.round(bruto);
-  return ALTURA_PADRAO;
-}
+const { alturaDoCard } = require('./moldura');
 
 /** Dados do bot/chat usados pelos templates (sem nada sensível). */
 /**

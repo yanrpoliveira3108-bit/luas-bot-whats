@@ -54,6 +54,9 @@ function esc(txt) {
  * @param {boolean} [o.indisponivel] true = saldo NÃO pôde ser lido agora (mostra "—", nunca 0 inventado)
  * @param {string} [o.titulo]
  * @param {number} [o.passo]       passo dos botões +/− (padrão 10 LC)
+ * @param {number} [o.valorInicial] valor já preenchido no campo (ex.: a aposta
+ *   PADRÃO do jogo) — nunca o saldo inteiro; só vale se estiver entre o mínimo e
+ *   o máximo do momento (fora da faixa o campo abre vazio)
  * @param {string} [o.rotuloConfirmar]
  */
 function montar(o) {
@@ -68,6 +71,16 @@ function montar(o) {
   const comando = String(o.comando || '').replace(/"/g, '&quot;');
   const comandoRefresh = String(o.comandoRefresh || '').replace(/"/g, '&quot;');
   const pendentes = Array.isArray(saldo.pendentes) ? saldo.pendentes : [];
+  /**
+   * Valor já preenchido (opcional). Quem monta o painel decide o número — a
+   * regra do jogo é NUNCA pré-selecionar o saldo todo; aqui só entra valor
+   * inteiro dentro da faixa válida do momento (senão o campo abre vazio).
+   */
+  const inicialBruto = Number(o.valorInicial);
+  const valorInicial =
+    Number.isFinite(inicialBruto) && inicialBruto >= lim.min && (lim.max <= 0 || inicialBruto <= lim.max)
+      ? Math.floor(inicialBruto)
+      : null;
   const temComprometido = saldo.comprometido > 0;
 
   const fmt = (n) => (indisponivel ? '—' : `${moeda.emoji} ${valor(n)} ${moeda.simbolo}`);
@@ -149,6 +162,7 @@ function montar(o) {
     '<div class="bp-field">' +
     `<button type="button" class="bp-menos" id="bp-menos-${esc(id)}" aria-label="Diminuir aposta">−</button>` +
     `<input id="bp-in-${esc(id)}" type="text" inputmode="numeric" autocomplete="off" aria-label="Valor da aposta"` +
+    (valorInicial === null ? '' : ` value="${esc(valorInicial)}"`) +
     (indisponivel ? ' disabled' : '') +
     ` placeholder="ex.: ${esc(lim.min)}" aria-describedby="bp-lim-${esc(id)}">` +
     `<button type="button" class="bp-mais" id="bp-mais-${esc(id)}" aria-label="Aumentar aposta">+</button>` +

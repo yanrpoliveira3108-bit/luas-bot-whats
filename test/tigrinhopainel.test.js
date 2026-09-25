@@ -110,7 +110,9 @@ async function main() {
     assert.ok(/LUA TIGRINHO/.test(html), 'card do tigrinho');
     assert.ok(/Saldo na carteira/.test(html) && /Disponível para apostar/.test(html), 'painel de carteira no card');
     assert.ok(/Valor da aposta/.test(html) && /Mínimo/.test(html) && /Máximo/.test(html), 'campo de valor com mín/máx');
-    assert.ok(/Confirmar giro/.test(html), 'botão de confirmar antes da rodada');
+    assert.ok(/Jogar agora/.test(html), 'botão de jogar (copia o comando) já na abertura');
+    assert.ok(/value="100"/.test(html), 'a aposta padrão (100) já vem no campo — nunca o saldo todo');
+    assert.ok(!/replay/.test(html), 'sem o botão de rever a rodada');
     assert.ok(/tigrinho jogar \{valor\}|tigrinho jogar &lt;valor&gt;/.test(html), 'comando do giro no card');
     assert.ok(/NENHUMA RODADA VALIDADA|ULTIMA RODADA VALIDADA|ÚLTIMA RODADA VALIDADA/.test(html), 'estado da rodada informado');
     assert.ok(/nada foi cobrado|Nada é cobrado/.test(html), 'deixa claro que abrir/consultar não cobra');
@@ -278,12 +280,25 @@ async function main() {
       [['ajuda'], /AJUDA|JACKPOT/],
       [['acelerar'], /AJUDA|JACKPOT/],
     ];
+    // com o card desligado, `fichas` (/saldo) responde em TEXTO — nada se perde
+    const antes = require('../utils/menuFormat');
+    const md = require('../database/settings');
+    md.setMenuHtmlEnabled(false);
+    const ctxTxt = fakeCtx({ args: ['saldo'] });
+    await cmd.execute(ctxTxt);
+    assert.ok(/Saldo:/.test(ctxTxt.replies.join('\n')) && !ctxTxt.enviados.length, 'fichas/saldo em texto com o HTML desligado');
+    assert.ok(/tigrinho jogar/.test(ctxTxt.replies.join('\n')), 'e ensina o comando de jogar');
+    md.setMenuHtmlEnabled(true);
+    assert.ok(antes.usarHtmlJogo().usar, 'modo HTML restaurado para os próximos testes');
     for (const [args, re] of casos) {
       const ctx = fakeCtx({ args });
       await cmd.execute(ctx);
-      assert.ok(re.test(ctx.replies.join('\n')), `!tigrinho ${args.join(' ')} responde`);
+      // `fichas`/`saldo` agora abre o card (saldo real + botão de jogar); os
+      // demais continuam em texto — o teste aceita as duas formas
+      const saida = ctx.enviados.length ? card(ctx) : ctx.replies.join('\n');
+      assert.ok(re.test(saida), `!tigrinho ${args.join(' ')} responde`);
     }
-    ok('8: subcomandos do tigrinho preservados (fichas/historico/ranking/ajuda)');
+    ok('8: subcomandos do tigrinho preservados (fichas/saldo em card, historico/ranking/ajuda em texto)');
   } catch (e) {
     fail('8: subcomandos', e);
   }
@@ -364,9 +379,10 @@ async function main() {
       assert.strictEqual(go.disabled, false, 'valor válido habilita');
       go.dispatchEvent(new win.Event('click', { bubbles: true }));
       assert.ok(/tigrinho jogar 150/.test(doc.getElementById('bp-cmd-tigrinho').textContent), 'copia o comando do giro');
-      // rever a rodada termina no resultado validado
-      const replay = doc.getElementById('replay');
-      assert.strictEqual(replay.disabled, false, 'botão de rever ativo (há rodada validada)');
+      // botão de JOGAR (o "rever a última rodada" saiu a pedido do dono)
+      assert.strictEqual(doc.getElementById('replay'), null, 'o botão de rever a rodada não existe mais');
+      assert.ok(/Jogar agora/i.test(go.textContent), 'o botão do painel é o de jogar');
+      assert.ok(/ULTIMO RESULTADO VALIDADO/i.test(doc.getElementById('rodada').textContent), 'a faixa mostra o último resultado validado');
       ok('10: card no jsdom — painel valida/copia e o card mostra o resultado do bot');
     } catch (e) {
       fail('10: jsdom', e);
@@ -375,13 +391,18 @@ async function main() {
     try {
       // sem rodada validada o botão fica desativado (não inventa giro)
       const N = '5511966666666@s.whatsapp.net';
+      economy.setWallet(N, 500);
       const ctx = fakeCtx({ args: [], sender: N, msgId: 'JS-EMPTY' });
       await cmd.execute(ctx);
       const dom = new jsdom.JSDOM(card(ctx), { runScripts: 'dangerously', pretendToBeVisual: true });
       const doc = dom.window.document;
-      assert.strictEqual(doc.getElementById('replay').disabled, true, 'sem rodada: botão de rever desativado');
+      assert.strictEqual(doc.getElementById('replay'), null, 'sem botão de rever');
       assert.ok(/NENHUMA RODADA VALIDADA/i.test(doc.getElementById('status').textContent), 'diz o que falta');
-      ok('11: sem rodada validada — o card não finge girar e diz o que falta');
+      const inp0 = doc.getElementById('bp-in-tigrinho');
+      const go0 = doc.getElementById('bp-go-tigrinho');
+      assert.strictEqual(inp0.value, '100', 'a aposta PADRÃO já vem preenchida (nunca o saldo todo)');
+      assert.strictEqual(go0.disabled, false, 'o botão de jogar já está pronto para o toque');
+      ok('11: sem rodada validada — o card não finge girar, mostra o que falta e já deixa o jogar pronto');
     } catch (e) {
       fail('11: jsdom vazio', e);
     }
@@ -413,6 +434,31 @@ async function main() {
     ok('12: reinício — rodada, saldo e estatística continuam no banco');
   } catch (e) {
     fail('12: reinício', e);
+  }
+
+  /* ------------- 13) moldura: altura fixa (card nunca minúsculo) ------------- */
+  try {
+    const moldura = require('../menus/html/moldura');
+    const altura = moldura.alturaDoCard();
+    const M = '5511955550001@s.whatsapp.net';
+    economy.setWallet(M, 400);
+    const ctx = fakeCtx({ args: [], sender: M, msgId: 'MOLD-TIG' });
+    await cmd.execute(ctx);
+    const html = card(ctx);
+    assert.ok(
+      new RegExp(`html,body\\{margin:0;padding:0;height:${altura}px;max-height:${altura}px;overflow:hidden\\}`).test(html),
+      `o card do tigrinho declara altura FIXA de ${altura}px`
+    );
+    assert.ok(/id="__wrap"/.test(html), 'usa a mesma moldura dos outros cards');
+    assert.ok(/<style>/.test(html) && /<\/style>/.test(html), 'o CSS vai dentro de <style> (sem isso o card sai sem estilo)');
+    assert.ok(/overflow-y:auto/.test(html), 'rolagem interna (a página não rola)');
+    assert.ok(!/\d+vh/.test(html), 'nenhuma medida de viewport');
+    const aberturas = (html.match(/<div/g) || []).length;
+    const fechamentos = (html.match(/<\/div>/g) || []).length;
+    assert.strictEqual(aberturas, fechamentos, 'as divs estão balanceadas (moldura fechada)');
+    ok('13: moldura do tigrinho — altura fixa em px, CSS no <style> e divs balanceadas');
+  } catch (e) {
+    fail('13: moldura', e);
   }
 
   console.log(`\n${feitos} ✅ · ${falhas} ❌`);

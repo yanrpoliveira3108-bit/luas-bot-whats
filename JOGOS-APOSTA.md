@@ -46,7 +46,7 @@ confirmação com o motivo (`data-indisponivel`), e o bot pede nova tentativa.
 | `database/treasure.js` | estado das expedições (criar, cavar, sair, expirar, estatísticas) |
 | `database/gameRounds.js` | rodadas (`game_rounds`): grava o resultado **antes** de pagar, para não perder nada numa queda |
 | `database/tigrinho.js` | estatísticas/histórico/ranking/cooldown do tigrinho (`applySpin` continua existindo; `registrarRodada` faz só estatística, sem dinheiro) |
-| `database/database.js` | migração 41: `game_bets` (livro-caixa), `treasure_games` (expedição, com o **mapa secreto**), `game_rounds` (rodada) |
+| `database/database.js` | migração 36 (a última; a `version` gravada é o índice + 1): `game_bets` (livro-caixa), `treasure_games` (expedição, com o **mapa secreto**), `game_rounds` (rodada) — e a auto-cura `ensureGameSchema()` |
 | `utils/menuFormat.js` | `usarHtmlJogo()`: decide card × texto para os **jogos** |
 
 ---
@@ -105,10 +105,18 @@ Outras regras:
 - **Expiração**: 30 min sem escavar → status `expired`; a aposta não volta e o
   livro-caixa é fechado (sem pendência eterna). Sem timer por partida: a limpeza
   roda sob demanda (`limparExpiradas`).
-- **Modo casual**: sem personagem/carteira (ou `... jogar <n> casual`) a
-  expedição roda por pontuação, com aposta 0 — nenhuma linha no livro-caixa.
-- XP: 5 por tesouro + 20 na vitória, via `database/life.addLifeXp` ou
-  `database/rpg.addRpgXp` (serviços existentes; XP não é moeda).
+- **Modo casual**: `... jogar <n> casual` roda por pontuação, com aposta 0 —
+  nenhuma linha no livro-caixa. Também é a saída quando o saldo disponível é 0.
+- **Aposta NÃO exige personagem do RPG/vida**: a moeda mora na carteira
+  (`economy.wallet`), que existe para todo mundo. O personagem só entra no XP —
+  quem não tem personagem aposta normalmente e ganha moeda; só não ganha XP.
+- XP: 5 por tesouro + 20 ao completar a expedição (e também ao `sair` com o que
+  achou), via `database/life.addLifeXp` (personagem do Lua Life) ou
+  `database/rpg.addRpgXp` (personagem do RPG) — serviços existentes, na ordem
+  vida → RPG. Sem personagem: nenhum XP, nenhum erro (XP não é moeda).
+- **Cada escavação responde EM TEXTO** (💎 tesouro / 🕳️ vazia + pista / 💥
+  armadilha), com o progresso e o **retorno acumulado** — o resultado não fica
+  só dentro do card, então a jogada é legível mesmo se o card não abrir.
 
 ---
 
@@ -152,20 +160,54 @@ Outras regras:
 - o card abre com o **painel compartilhado** (saldo, disponível, mín/máx, campo
   de valor, atualizar saldo, regras de pagamento e o botão que **copia**
   `!tigrinho jogar <valor>`);
+- **`{p}tigrinho saldo` / `fichas` abre esse mesmo card** (antes era só texto):
+  saldo real lido pelo bot + o **botão de jogar** com a **aposta padrão
+  (100 LC) já digitada** — um toque copia o comando, você envia e o giro
+  acontece. O valor nunca vem preenchido com o saldo todo (regra comum aos dois
+  jogos), e o campo continua livre para trocar;
 - o giro passa pela camada financeira comum (`cobrarAposta` → resultado no
   backend → `pagarPremio`), com idempotência pelo id da mensagem;
 - a **rodada** é gravada em `game_rounds` **antes** do pagamento;
-- a animação dos rolos **representa o resultado validado** pelo bot: os rolos,
-  o prêmio e o texto vêm do registro da rodada. O único uso de aleatoriedade no
-  JS é visual (os quadros da “girada”), e o botão **sempre termina na posição
-  validada**. Sem rodada registrada, o botão fica desativado e o card diz o que
-  falta;
-- reabrir o card mostra **o mesmo** resultado (não sorteia de novo);
+- **o botão de “rever a última rodada” foi removido** (pedido do dono): no lugar
+  dele ficou uma faixa com o **último resultado já validado** — rolos e prêmio do
+  registro da rodada, sem animação e sem sorteio. Sem rodada registrada, a faixa
+  diz que ainda não houve giro e o card convida a jogar;
+- reabrir o card mostra **o mesmo** resultado (não sorteia de novo) e o **mesmo**
+  painel: nada é sorteado, cobrado ou alterado só por abrir a tela;
+- o card tem a **mesma moldura** do menu (`menus/html/moldura.js`): altura FIXA
+  em px e rolagem por dentro. Sem ela o WebView mede o conteúdo e o card sai
+  minúsculo/“tremendo” — foi por isso que os cards dos jogos apareciam
+  pequenos;
 - rodada pendente (queda no meio) é concluída ao reabrir/usar: paga uma vez e
   registra a estatística uma vez. Rodada **sem resultado** registrado devolve a
   aposta (não houve giro a concluir).
 
 ---
+
+### 5.1 Correções desta rodada (relato do dono: “o caça ainda não está funcionando, não acha o dinheiro”)
+
+Três causas **encontradas no código** (cada uma com teste que a trava de voltar):
+
+1. **Tabelas dos jogos ausentes em banco com `version` adiantada.** A migração
+   dos jogos só roda se a `version` gravada estiver atrás dela; num banco vindo
+   de outro estado do bot, `game_bets`/`treasure_games`/`game_rounds` não
+   existiam e os DOIS jogos respondiam erro de SQL. Agora o `open()` confere o
+   esquema por medição (`ensureGameSchema`) e cria o que faltar, sem apagar dado
+   e sem reescrever a `version`. Como conferir no aparelho: `npm run
+   jogos:doctor` (seção 2) — e a linha `✅ esquema dos jogos íntegro`.
+2. **XP pago duas vezes** na caça (o comando pagava 5/tesouro + 20 e o
+   `database/treasure.js` pagava de novo) — dava para ganhar XP em dobro. O XP
+   agora é pago **num lugar só** (`database/treasure.js → premiarXp`), uma vez
+   por expedição que termina, e o comando só mostra o que foi registrado.
+3. **Aposta que exigia personagem** do RPG/vida para apostar: quem não tinha
+   personagem caía no modo casual (sem aposta) e por isso “não achava o
+   dinheiro”. A moeda é da **carteira** (`economy.wallet`), que existe para
+   todo mundo — agora a aposta vale com ou sem personagem (o personagem só
+   entra no XP).
+
+Além disso, o **card dos jogos passou a ter a moldura do menu** (altura fixa em
+px — §2.4 do MENUS-HTML.md): sem altura declarada o WebView mede o conteúdo e o
+card saía minúsculo no aparelho.
 
 ## 6. Comandos
 
@@ -176,6 +218,8 @@ Prefixo real do bot (`!` por padrão). Caça ao tesouro:
 {p}cacatesouro 3 | 13                mesmo painel, já no tamanho
 {p}cacatesouro jogar <3-13> <valor>  abre a expedição (cobra UMA vez)
 {p}cacatesouro jogar <3-13> casual   expedição por pontuação (sem aposta)
+{p}cacatesouro saldo                  saldo real + estatísticas (o card mostra o botão)
+{p}tigrinho saldo (fichas)            card com o saldo real + BOTÃO DE JOGAR (aposta padrão já preenchida)
 {p}cacatesouro cavar <partida> A1    escava uma casa (A1..M13)
 {p}cacatesouro continuar             mostra a expedição ativa
 {p}cacatesouro sair                  encerra (aposta não volta)
@@ -229,7 +273,7 @@ categoria **games** e o tigrinho em **rpg** — nada de lista paralela.
 
 Automatizados:
 
-- `test/tesouro.test.js` — **22/22**: 3..13 (parâmetros, mapa, dicas,
+- `test/tesouro.test.js` — **25/25**: 3..13 (parâmetros, mapa, dicas,
   coordenadas), retorno esperado ≤ aposta em 3/5/8/13 (simulação), valores
   inválidos (vazio/negativo/zero/decimal/malformado/milhar), acima do saldo ×
   acima do limite, cobrança única por ref, prêmio único, saldo nunca negativo,
@@ -239,15 +283,20 @@ Automatizados:
   armadilha (−2 escavações), saldo revalidado na confirmação, carteira vazia ×
   sem cadastro (casual), falha de consulta (“—”, sem 0 inventado), sair/expirar
   sem devolução, recuperação em **processo novo**, jogo rápido preservado,
-  registro/menu preservados, e **jsdom**: seleção, cópia do comando, setas nos
-  extremos, janela 13×13, painel validando/prévia/cópia.
-- `test/tigrinhopainel.test.js` — **12/12**: card com carteira e sem sorteio ao
+  registro/menu preservados, **jsdom**: seleção, cópia do comando, setas nos
+  extremos, janela 13×13, painel validando/prévia/cópia; **aposta sem
+  personagem** (carteira decide) com o resultado de CADA escavação em texto,
+  **XP 5/tesouro + 20 na vitória pago UMA vez** (Lua Life) e **moldura do card**
+  (altura fixa em px compartilhada com o menu, `MENU_HTML_HEIGHT` valendo nos
+  dois).
+- `test/tigrinhopainel.test.js` — **13/13**: card com carteira e sem sorteio ao
   abrir (reabrir mostra o mesmo), giro com cobrança/prêmio/estatística únicos,
   card com o resultado validado, mensagem repetida e cooldown sem giro novo,
   rodada pendente paga uma vez, rodada sem resultado devolve a aposta, recusa por
   saldo, texto equivalente com `!modohtml off`, subcomandos preservados, apostas
-  simultâneas entre jogos, jsdom (painel valida/copia + card = resultado do bot) e
-  reinício sem perder rodada/saldo/estatística.
+  simultâneas entre jogos, jsdom (painel valida/copia + card = resultado do bot),
+  reinício sem perder rodada/saldo/estatística e **moldura** do card (altura fixa,
+  CSS dentro de `<style>` e divs balanceadas).
 - `test/esquemajogos.test.js` — **6/6**: integridade do array `MIGRATIONS` (sem
   buracos de vírgula), as 3 tabelas com as colunas usadas, banco com version
   adiantada + tabelas ausentes **curado** na abertura, coluna ausente adicionada
@@ -284,7 +333,8 @@ O doctor **não envia nada no WhatsApp** (usa um socket falso e um chat de teste
 e mostra: node, caminho do banco, **version** de `schema_migrations`, as tabelas
 `game_bets`/`treasure_games`/`game_rounds` com as colunas, o estado do
 `menu_html`/modo seguro, e executa `!cacatesouro`, `!cacatesouro 3`, `!tigrinho`
-e `!menu` registrando **o erro completo com stack** (ou “card enviado” quando
+e `!menu` registrando **o erro completo com stack**, **a moldura de cada card
+enviado** (linha `moldura: altura fixa 640px + #__wrap ok`) e “card enviado” quando
 está tudo certo). Salva o relatório em `tmp/jogos-doctor.txt`.
 
 **Causa já tratada de forma automática.** A `version` de `schema_migrations` é o

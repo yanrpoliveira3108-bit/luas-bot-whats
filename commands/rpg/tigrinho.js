@@ -26,7 +26,8 @@
  * Comandos:
  *   {prefix}tigrinho                        → interface visual
  *   {prefix}tigrinho jogar [aposta|tudo]    → girar valendo LC (backend)
- *   {prefix}tigrinho fichas                 → saldo/estatísticas
+ *   {prefix}tigrinho saldo (fichas)         → card com o saldo real + botão de jogar
+ *   {prefix}tigrinho jogar <valor>          → gira: o BOT cobra, sorteia e paga
  *   {prefix}tigrinho historico              → últimos giros
  *   {prefix}tigrinho ranking                → melhores jogadores
  *   {prefix}tigrinho ajuda                  → regras e prêmios
@@ -46,6 +47,8 @@ const store = require('../../database/tigrinho');
 const rounds = require('../../database/gameRounds');
 const wallet = require('../../utils/gameWallet');
 const betPanel = require('../../utils/betPanel');
+// mesma moldura do card do menu: altura FIXA em px, página que não rola
+const moldura = require('../../menus/html/moldura');
 const richHtml = require('../../utils/richHtml');
 const menuFormat = require('../../utils/menuFormat');
 const { formatMoney } = require('../../utils/formatter');
@@ -119,12 +122,6 @@ function buildMachineHtml({ balance, jackpots, coin, prefix, painel, ultima, rec
           : 'nao ganhou · 0')
     : 'NENHUMA RODADA VALIDADA AINDA — escolha o valor e envie o comando';
 
-  const headline = ultima
-    ? ultima.reward > 0
-      ? `🎬 Reproduzir a última rodada (+${betPanel.valor(ultima.reward)})`
-      : '🎬 Reproduzir a última rodada (sem prêmio)'
-    : '🎬 Reproduzir a última rodada';
-
   // resultado validado em JSON — o JS do card só LÊ isto, nunca calcula prêmio
   const resultadoJson = JSON.stringify(
     ultima
@@ -142,7 +139,8 @@ function buildMachineHtml({ balance, jackpots, coin, prefix, painel, ultima, rec
   const css =
     `*{-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;box-sizing:border-box}\n` +
     `body{margin:0;background:transparent;font-family:Arial,sans-serif;color:#f6d77a;touch-action:manipulation}\n` +
-    `.wrap{width:100%;max-width:560px;margin:auto;padding:10px}\n` +
+    `.wrap{width:100%;max-width:560px;margin:auto;padding:10px;flex:1 1 auto;min-height:0;` +
+    `overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}\n` +
     `.card{position:relative;background:linear-gradient(165deg,#180902,#2a0d04 40%,#120602);border:1px solid rgba(255,190,60,.5);border-radius:20px;overflow:hidden;box-shadow:0 0 44px rgba(255,150,20,.25),0 12px 36px rgba(0,0,0,.65)}\n` +
     `.marquee{overflow:hidden;background:linear-gradient(90deg,#8b0000,#c02800 50%,#8b0000);border-bottom:1px solid rgba(255,190,60,.5);white-space:nowrap;padding:5px 0}\n` +
     `.marquee span{display:inline-block;padding-left:100%;animation:scroll 14s linear infinite;font-size:10px;letter-spacing:2px;color:#ffd86b;font-weight:bold}\n` +
@@ -167,9 +165,7 @@ function buildMachineHtml({ balance, jackpots, coin, prefix, painel, ultima, rec
     `.machine.jackpot .reels{animation:jackGlow .45s ease 5}\n` +
     `@keyframes winGlow{0%,100%{box-shadow:0 0 0 rgba(255,210,60,0)}50%{box-shadow:0 0 36px rgba(255,210,60,.7)}}\n` +
     `@keyframes jackGlow{0%,100%{box-shadow:0 0 0 rgba(255,120,20,0);transform:scale(1)}50%{box-shadow:0 0 52px rgba(255,150,20,.95);transform:scale(1.03)}}\n` +
-    `.replay{display:block;width:100%;min-height:48px;border:1px solid rgba(255,190,60,.8);border-radius:12px;color:#fff;font-weight:bold;font-size:14px;background:linear-gradient(135deg,rgba(255,190,60,.55),rgba(139,0,0,.6));text-transform:uppercase;cursor:pointer;letter-spacing:1px}\n` +
-    `.replay[disabled]{opacity:.45;cursor:not-allowed;letter-spacing:normal;text-transform:none;font-size:13px}\n` +
-    `.replay:active{transform:scale(.98)}\n` +
+    `.rodada{width:100%;min-height:44px;display:flex;align-items:center;justify-content:center;border:1px dashed rgba(255,190,60,.55);border-radius:12px;color:#ffd86b;font-weight:bold;font-size:13px;background:rgba(0,0,0,.35);padding:6px 8px;text-align:center}\n` +
     `.status{text-align:center;font:10px monospace;color:rgba(255,196,60,.85);margin-top:12px;min-height:12px;letter-spacing:.4px}\n` +
     `.paytable{padding:10px 14px;border-top:1px dashed rgba(255,190,60,.25);background:rgba(0,0,0,.35)}\n` +
     `.paytable .pt{font-size:8px;letter-spacing:1.5px;color:rgba(255,196,60,.6);text-transform:uppercase;margin-bottom:6px}\n` +
@@ -182,7 +178,7 @@ function buildMachineHtml({ balance, jackpots, coin, prefix, painel, ultima, rec
     `@media (prefers-reduced-motion: reduce){.marquee span,.tiger{animation:none!important}.machine,.machine *{animation:none!important;transition:none!important}}\n`;
 
   const html =
-    '<body><div class="wrap"><div class="card">' +
+    '<body><div id="__wrap"><div class="wrap"><div class="card">' +
     `<div class="marquee"><span>✦ LUA TIGRINHO ✦ VALENDO ${coinEmoji} ✦ O RESULTADO VEM DO BOT ✦ LUA TIGRINHO ✦ VALENDO ${coinEmoji} ✦</span></div>` +
     '<div class="head"><div class="brand"><div class="tiger">🐯</div><div><div class="tt">LUA TIGRINHO</div></div></div>' +
     `<div class="stats"><div><div class="label">SALDO</div><div class="value" id="chips">${b === null ? '—' : b}</div></div>` +
@@ -190,7 +186,7 @@ function buildMachineHtml({ balance, jackpots, coin, prefix, painel, ultima, rec
     '<div class="main"><div class="machine" id="machine">' +
     '<div class="payline"><i>1</i><i>2</i><i>3</i><i>4</i><i>5</i></div>' +
     `<div class="reels">${reelsHtml}</div></div>` +
-    `<button class="replay" id="replay"${ultima ? '' : ' disabled'}>${betPanel.esc(headline)}</button>` +
+    `<div class="rodada" id="rodada">${betPanel.esc(ultima ? '🎬 ÚLTIMO RESULTADO VALIDADO (do bot)' : '🎰 NENHUMA RODADA AINDA — ESCOLHA O VALOR E TOQUE EM JOGAR')}</div>` +
     `<div class="status" id="status">${betPanel.esc(textoResultado)}</div>` +
     (aviso ? `<div class="aviso">⚠️ ${betPanel.esc(aviso)}</div>` : '') +
     (recuperada
@@ -217,14 +213,14 @@ function buildMachineHtml({ balance, jackpots, coin, prefix, painel, ultima, rec
     ' · ' +
     betPanel.esc(`${prefix}tigrinho historico`) +
     '</div>' +
-    '</div></div>';
+    '</div></div></div>';
 
   // JS: só apresenta o resultado VALIDADO (nada de sorteio nem cálculo de prêmio)
   const js =
     '(function(){\n' +
     'var R=' + resultadoJson + ';\n' +
     'var machine=document.getElementById("machine");\n' +
-    'var replay=document.getElementById("replay");\n' +
+    'var faixa=document.getElementById("rodada");\n' +
     'var statusEl=document.getElementById("status");\n' +
     'var reels=[document.getElementById("reel0"),document.getElementById("reel1"),document.getElementById("reel2"),document.getElementById("reel3"),document.getElementById("reel4")];\n' +
     'var SYM=["🍒","🍋","🍊","🔔","💎","👑","🐯"];\n' +
@@ -236,29 +232,14 @@ function buildMachineHtml({ balance, jackpots, coin, prefix, painel, ultima, rec
     ' reels.forEach(function(reel,idx){var cells=reel.querySelectorAll(".cell");var col=f[idx]||[];\n' +
     '  for(var k=0;k<3;k++)cells[k].textContent=col[k]!==undefined?col[k]:SYM[(idx+k)%SYM.length];\n' +
     '  reel.classList.remove("spinning")})}\n' +
-    'if(replay)replay.addEventListener("click",function(){\n' +
-    ' if(!R)return;\n' +
-    ' machine.classList.remove("win","jackpot");set("MOSTRANDO A RODADA VALIDADA PELO BOT...");\n' +
-    ' var f=final(),done=0;\n' +
-    ' reels.forEach(function(reel,idx){var cells=reel.querySelectorAll(".cell");reel.classList.add("spinning");\n' +
-    '  var col=f[idx]||[],n=0,max=10+idx*3;\n' +
-    '  (function tick(){cells[0].textContent=SYM[Math.floor(Math.random()*SYM.length)];\n' +
-    '   cells[1].textContent=SYM[Math.floor(Math.random()*SYM.length)];\n' +
-    '   cells[2].textContent=SYM[Math.floor(Math.random()*SYM.length)];n++;\n' +
-    '   if(n<max){setTimeout(tick,40+n*4);return}\n' +
-    '   for(var k=0;k<3;k++)cells[k].textContent=col[k]!==undefined?col[k]:SYM[k];\n' +
-    '   reel.classList.remove("spinning");done++;\n' +
-    '   if(done===reels.length){if(R.jackpot)machine.classList.add("jackpot");else if(R.won)machine.classList.add("win");set(texto())}\n' +
-    '  })();\n' +
-    ' });\n' +
-    '});\n' +
     'pinta();set(texto());\n' +
-    'window.__tigrinho={resultado:function(){return R},texto:texto,rodaRolos:function(){if(replay)replay.click()}};\n' +
+    'if(faixa&&R)faixa.textContent="🎬 ULTIMO RESULTADO VALIDADO (do bot)";\n' +
+    'window.__tigrinho={resultado:function(){return R},texto:texto};\n' +
     '})();';
 
-  const estilos = painel ? '<style>' + css + painel.css + '</style>' : '<style>' + css + '</style>';
+  const estilos = moldura.css() + css + (painel ? painel.css : '');
   const scripts = painel ? '<script>' + painel.js + '</script><script>' + js + '</script>' : '<script>' + js + '</script>';
-  return estilos + html + scripts;
+  return '<style>' + estilos + '</style>' + html + scripts;
 }
 
 /* ------------------------------------------------------------------ */
@@ -346,7 +327,10 @@ function montarPainel(userId, prefix, extra = {}) {
     bloqueio: d.bloqueio,
     indisponivel: d.indisponivel,
     titulo: '💼 Carteira e aposta do giro',
-    rotuloConfirmar: '✅ Confirmar giro (copia o comando)',
+    rotuloConfirmar: '🎰 Jogar agora (copia o comando)',
+    // valor já preenchido = aposta PADRÃO do jogo (nunca o saldo inteiro; se o
+    // saldo não alcança, o painel abre vazio e explica)
+    valorInicial: Math.max(d.limites.min, TIGRINHO_CONFIG.betCost),
     ...extra,
   });
   return { painel, dados: d };
@@ -636,7 +620,7 @@ async function enviarCard(ctx, prefix, extra = {}) {
       painel,
       ultima,
       recuperada: extra.recuperada || null,
-      aviso: dados.indisponivel ? dados.bloqueio : '',
+      aviso: [dados.indisponivel ? dados.bloqueio : '', extra.aviso || ''].filter(Boolean).join(' · '),
     });
   } catch (err) {
     logger.error({ err: err && err.message }, '[LUA TIGRINHO] falha ao montar o card — seguindo no texto');
@@ -652,18 +636,39 @@ async function enviarCard(ctx, prefix, extra = {}) {
   }
 }
 
-async function handleChips(ctx) {
-  const p = store.getPlayer(ctx.sender);
+async function handleChips(ctx, prefix) {
+  let p = null;
+  try {
+    p = store.getPlayer(ctx.sender);
+  } catch (err) {
+    logger.warn({ err: err && err.message }, '[LUA TIGRINHO] saldo indisponível em fichas');
+  }
+  const detalhe = p
+    ? [
+        `🎰 Giros: ${p.spins}`,
+        `🏆 Vitórias: ${p.wins} · 💔 Derrotas: ${p.losses}`,
+        `🐯 Jackpots: ${p.jackpots}`,
+        `📈 Maior prêmio: ${formatMoney(p.best_win)}`,
+      ].join('\n')
+    : '';
+  // Com o card ligado, `saldo`/`fichas` abre a MESMA tela do tigrinho: saldo real
+  // (lido pelo bot) + BOTÃO DE JOGAR com a aposta padrão já preenchida.
+  if (await enviarCard(ctx, prefix, { aviso: detalhe })) return true;
+  const saldoTxt = p
+    ? `💰 Saldo: ${formatMoney(p.balance)}`
+    : '💰 Saldo: — (não consegui consultar agora — tente de novo)';
   await ctx.reply(
     [
       '🐯 *LUA TIGRINHO — SALDO*',
-      `💰 Saldo: ${formatMoney(p.balance)}`,
-      `🎰 Giros: ${p.spins}`,
-      `🏆 Vitórias: ${p.wins}  ·  💔 Derrotas: ${p.losses}`,
-      `🐯 Jackpots: ${p.jackpots}`,
-      `📈 Maior prêmio: ${formatMoney(p.best_win)}`,
-    ].join('\n')
+      saldoTxt,
+      detalhe,
+      `▸ Jogar: \`${prefix}tigrinho jogar <valor>\``,
+      `▸ Histórico: \`${prefix}tigrinho historico\``,
+    ]
+      .filter(Boolean)
+      .join('\n')
   );
+  return true;
 }
 
 async function handleHistory(ctx) {
@@ -805,7 +810,7 @@ module.exports = [
           case 'jogar':
             return await handleSpin(ctx, prefix);
           case 'fichas':
-            return await handleChips(ctx);
+            return await handleChips(ctx, prefix);
           case 'historico':
             return await handleHistory(ctx);
           case 'ranking':

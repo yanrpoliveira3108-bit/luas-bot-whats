@@ -341,19 +341,24 @@ function cavar({ id, userId, coord, ref }) {
     });
     tx();
 
-    if (terminou && g.bet > 0) {
-      // prêmio creditado UMA vez (idempotente pelo id da aposta)
-      try {
-        wallet.pagarPremioInterno(`cacatesouro:${g.userId}:${g.id}`, premio);
-      } catch (err) {
-        logger.error({ err: err && err.message, partida: g.id }, '[TESOURO] falha ao creditar prêmio — recuperável pelo id da aposta');
+    let xpGanho = null;
+    if (terminou) {
+      if (g.bet > 0) {
+        // prêmio creditado UMA vez (idempotente pelo id da aposta)
+        try {
+          wallet.pagarPremioInterno(`cacatesouro:${g.userId}:${g.id}`, premio);
+        } catch (err) {
+          logger.error({ err: err && err.message, partida: g.id }, '[TESOURO] falha ao creditar prêmio — recuperável pelo id da aposta');
+        }
       }
       try {
         games.recordGame(g.userId, 'cacatesouro', completo ? 'win' : 'loss');
       } catch (_) {
         /* estatística é secundária: nunca derruba a partida */
       }
-      premiarXp(g, tesourosEncontrados, completo);
+      // XP vale para TODA expedição que termina (o casual entra aqui também:
+      // "vale XP e estatística" — só não movimenta moeda)
+      xpGanho = premiarXp(g, tesourosEncontrados, completo);
     }
 
     const atual = get(g.id);
@@ -364,13 +369,18 @@ function cavar({ id, userId, coord, ref }) {
       premiado,
       terminou,
       venceu: completo,
+      xp: xpGanho,
     };
   });
 }
 
+/** XP da expedição (não é moeda). Fonte única dos números: aqui e no texto das regras. */
+const XP_POR_TESOURO = 5;
+const XP_VITORIA = 20;
+
 /** XP como recompensa de expedição — usa os serviços do RPG/vida existentes. */
 function premiarXp(g, encontrados, completo) {
-  const ganho = (Number(encontrados) || 0) * 5 + (completo ? 20 : 0);
+  const ganho = (Number(encontrados) || 0) * XP_POR_TESOURO + (completo ? XP_VITORIA : 0);
   if (ganho <= 0) return null;
   try {
     const life = require('./life');
@@ -422,8 +432,15 @@ function sair({ id, userId, ref }) {
         logger.error({ err: err && err.message, partida: g.id }, '[TESOURO] falha ao creditar no encerramento');
       }
     }
-    logger.info({ partida: g.id, user: userId, premio }, '[TESOURO] expedição encerrada pelo jogador');
-    return { ok: true, game: get(g.id), premiado: { total: premio, porTesouro: calc.porTesouro, bonus: 0, completo: false } };
+    // XP pelo que já foi achado (sem bônus de vitória: encerrar não é completar)
+    const xpGanho = premiarXp(g, g.treasuresFound, false);
+    logger.info({ partida: g.id, user: userId, premio, xp: xpGanho && xpGanho.ganho }, '[TESOURO] expedição encerrada pelo jogador');
+    return {
+      ok: true,
+      game: get(g.id),
+      premiado: { total: premio, porTesouro: calc.porTesouro, bonus: 0, completo: false },
+      xp: xpGanho,
+    };
   });
 }
 
@@ -460,6 +477,8 @@ function estatisticas(userId) {
 }
 
 module.exports = {
+  XP_POR_TESOURO,
+  XP_VITORIA,
   STATUS,
   MOTIVO,
   TTL_INATIVA_MS,

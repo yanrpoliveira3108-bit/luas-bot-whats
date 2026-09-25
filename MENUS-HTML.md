@@ -310,6 +310,25 @@ Sem editar código: `MENU_HTML_HEIGHT` e `MENU_HTML_STEP` (§3).
 
 ---
 
+### 2.4 A moldura é a mesma para o menu E para os jogos (caça/tigrinho)
+
+A regra de altura fixa (e o histórico da regressão com `vh`) mudou para
+`menus/html/moldura.js`:
+
+- `alturaDoCard()` — número único (`dimensoes.js`, com `MENU_HTML_HEIGHT`
+  sobrescrevendo). O card do menu, o painel do caça e o card do tigrinho usam
+  **esse mesmo** número;
+- `css(altura)` — as regras `html,body{height:NNNpx;max-height:NNNpx;
+  overflow:hidden}` + `#__wrap` (contêiner de altura cheia);
+- a rolagem fica **dentro** do card (`.wrap` com `overflow-y:auto`), nunca na
+  página: o gesto de arrastar na página viraria “responder” no WhatsApp.
+
+Os cards dos jogos usavam só CSS próprio, **sem altura declarada** — e o WebView
+do card se dimensiona pelo conteúdo quando não há altura em px. Resultado no
+aparelho: o card saía minúsculo (“encolhido”). Agora os três cards declaram a
+altura e o `npm run jogos:doctor` confere isso em cada card enviado (linha
+`moldura: altura fixa 640px + #__wrap ok`).
+
 ## 3. Configuração e escopo
 
 - Chave no banco: **`menu_html`** (padrão `false` — se a chave não existe, o

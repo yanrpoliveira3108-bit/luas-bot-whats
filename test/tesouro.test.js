@@ -770,12 +770,17 @@ async function main() {
       const go = doc.getElementById('bp-go-tesouro');
       const erro = doc.getElementById('bp-erro-tesouro');
       const est = doc.getElementById('bp-est-tesouro');
-      assert.strictEqual(go.disabled, true, 'confirmar desativado sem valor');
-      assert.ok(/Informe um valor/i.test(erro.textContent), 'pede o valor');
+      // a aposta SUGERIDA já vem digitada (100) — nunca o saldo todo
+      assert.strictEqual(inp.value, '100', 'campo já vem com a aposta sugerida');
+      assert.ok(Number(inp.value) < Number(doc.getElementById('bp-tesouro').getAttribute('data-disp')), 'e não é o saldo todo');
+      assert.strictEqual(go.disabled, false, 'com a sugerida, o botão já está pronto');
       const digitar = (v) => {
         inp.value = v;
         inp.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
       };
+      digitar('');
+      assert.strictEqual(go.disabled, true, 'confirmar desativado sem valor');
+      assert.ok(/Informe um valor/i.test(erro.textContent), 'pede o valor');
       digitar('0');
       assert.strictEqual(go.disabled, true, 'zero recusado na tela');
       assert.ok(/maior que zero/i.test(erro.textContent), 'explica o zero');
@@ -798,6 +803,145 @@ async function main() {
     } catch (e) {
       fail('22: painel jsdom', e);
     }
+  }
+
+  /* ---------- 23) aposta SEM personagem + resultado da escavação em texto -- */
+  try {
+    // jogador SEM personagem do RPG/vida, mas COM moeda na carteira: a aposta
+    // vale do mesmo jeito (a moeda é a carteira, não o personagem)
+    const S = '5511600000001@s.whatsapp.net';
+    economy.setWallet(S, 900);
+    assert.ok(!life.getPlayer(S).name, 'jogador sem personagem (garantia do teste)');
+
+    const abrir = fakeCtx({ args: ['jogar', '3', '100'], sender: S, msgId: 'SEMCAD-1' });
+    await cmd.execute(abrir);
+    const g = store.ativaDo(S);
+    assert.ok(g, 'expedição aberta sem personagem');
+    assert.strictEqual(g.bet, 100, 'aposta cobrada de verdade (100)');
+    assert.strictEqual(economy.get(S).wallet, 800, 'carteira debitada UMA vez (900 - 100)');
+    assert.ok(/Aposta cobrada/i.test(abrir.replies.join('\n')), 'avisa a cobrança');
+
+    // o mapa é do BOT: aqui lemos as posições só para escolher as casas do teste
+    const mapa = store.get(g.id).secret;
+    const tesouro = jogo.coordDeIdx(mapa.tesouros[0], 3);
+    const armadilha = jogo.coordDeIdx(mapa.armadilhas[0], 3);
+    const vazia = jogo.coordDeIdx(
+      [...Array(9).keys()].find((i) => !mapa.tesouros.includes(i) && !mapa.armadilhas.includes(i)),
+      3
+    );
+
+    const dVazia = fakeCtx({ args: ['cavar', g.id, vazia], sender: S, msgId: 'SEMCAD-2' });
+    await cmd.execute(dVazia);
+    const txtVazia = dVazia.replies.join('\n');
+    assert.ok(/vazia/i.test(txtVazia), 'casa vazia respondida em TEXTO');
+    assert.ok(/Pista: \d+ tesouro/i.test(txtVazia), 'a pista objetiva vem no texto');
+    assert.ok(/Tesouros: 0\/2/.test(txtVazia) && /escavações usadas: 1\/4/.test(txtVazia), 'progresso no texto');
+
+    const dTesouro = fakeCtx({ args: ['cavar', g.id, tesouro], sender: S, msgId: 'SEMCAD-3' });
+    await cmd.execute(dTesouro);
+    const txtTesouro = dTesouro.replies.join('\n');
+    assert.ok(/TESOURO na casa/i.test(txtTesouro), 'o tesouro aparece em TEXTO (não só no card)');
+    assert.ok(/Retorno acumulado:.*LC/.test(txtTesouro), 'mostra quanto já rendeu');
+    assert.ok(/Tesouros: 1\/2/.test(txtTesouro), 'contador de tesouros atualizado');
+    assert.ok(/cacatesouro cavar/.test(txtTesouro), 'ensina a próxima escavação');
+
+    const dArmadilha = fakeCtx({ args: ['cavar', g.id, armadilha], sender: S, msgId: 'SEMCAD-4' });
+    await cmd.execute(dArmadilha);
+    const txtArmadilha = dArmadilha.replies.join('\n');
+    assert.ok(/ARMADILHA/i.test(txtArmadilha), 'a armadilha aparece em TEXTO');
+    assert.ok(/escavações usadas: 4\/4/i.test(txtArmadilha), 'armadilha queima 2 escavações (1+1+2)');
+    // fim por escavações esgotadas: fechamento com aposta, retorno e saldo
+    const fechamento = dArmadilha.replies.join('\n');
+    assert.ok(/Fim das escavações|EXPEDIÇÃO COMPLETA/i.test(fechamento), 'fechamento anunciado');
+    assert.ok(/Lucro líquido/i.test(fechamento), 'lucro líquido no fechamento');
+    await cmd.execute(fakeCtx({ args: ['sair'], sender: S, msgId: 'SEMCAD-5' }));
+
+    ok('23: aposta sem personagem (carteira) + resultado de cada escavação em texto');
+  } catch (e) {
+    fail('23: sem personagem/texto por escavação', e);
+  }
+
+  /* ---------- 24) XP pelos serviços existentes (com personagem) ------------ */
+  try {
+    const X = '5511600000002@s.whatsapp.net';
+    comCarteira(life, X, 500);
+    const antes = life.getPlayer(X).xp || 0;
+    const abrir = fakeCtx({ args: ['jogar', '3', '100'], sender: X, msgId: 'XP-1' });
+    await cmd.execute(abrir);
+    const g = store.ativaDo(X);
+    const mapa = store.get(g.id).secret;
+    // acha TODOS os tesouros → fecha por vitória
+    let i = 0;
+    for (const idxTesouro of mapa.tesouros) {
+      i++;
+      await cmd.execute(
+        fakeCtx({ args: ['cavar', g.id, jogo.coordDeIdx(idxTesouro, 3)], sender: X, msgId: `XP-1-${i}` })
+      );
+    }
+    const fim = store.get(g.id);
+    assert.strictEqual(fim.status, store.STATUS.VITORIA, 'expedição completa');
+    const depois = life.getPlayer(X).xp || 0;
+    const esperadoXp = 5 * fim.treasuresFound + 20;
+    assert.strictEqual(
+      depois - antes,
+      esperadoXp,
+      `XP = 5/tesouro + 20 (${esperadoXp}) via Lua Life — veio ${depois - antes}`
+    );
+    assert.strictEqual(economy.get(X).wallet, 500 - 100 + fim.reward, 'moeda paga UMA vez (retorno exato)');
+
+    // sem personagem NÃO dá XP e também não dá erro
+    const Y = '5511600000003@s.whatsapp.net';
+    economy.setWallet(Y, 500);
+    await cmd.execute(fakeCtx({ args: ['jogar', '3', '100'], sender: Y, msgId: 'XP-2' }));
+    const gY = store.ativaDo(Y);
+    const mapaY = store.get(gY.id).secret;
+    let j = 0;
+    for (const idx of mapaY.tesouros) {
+      j++;
+      await cmd.execute(fakeCtx({ args: ['cavar', gY.id, jogo.coordDeIdx(idx, 3)], sender: Y, msgId: `XP-2-${j}` }));
+    }
+    assert.strictEqual(store.get(gY.id).status, store.STATUS.VITORIA, 'sem personagem também completa');
+    assert.ok(!life.getPlayer(Y).name, 'nenhum personagem foi criado à força');
+    assert.strictEqual(economy.get(Y).wallet, 500 - 100 + store.get(gY.id).reward, 'moeda paga normalmente');
+    ok('24: XP 5/tesouro + 20 na vitória (Lua Life) e nenhum XP/erro sem personagem');
+  } catch (e) {
+    fail('24: XP', e);
+  }
+
+  /* ---------- 25) moldura do card: altura FIXA em px + rolagem interna ---------- */
+  try {
+    const moldura = require('../menus/html/moldura');
+    const altura = moldura.alturaDoCard();
+    const Z = '5511700000001@s.whatsapp.net';
+    comCarteira(life, Z, 800);
+
+    const painelCtx = fakeCtx({ args: [], sender: Z, msgId: 'MOLD-1' });
+    await cmd.execute(painelCtx);
+    const hPainel = card(painelCtx);
+    assert.ok(
+      new RegExp(`html,body\\{margin:0;padding:0;height:${altura}px;max-height:${altura}px;overflow:hidden\\}`).test(hPainel),
+      `o painel do caça declara altura FIXA de ${altura}px (mesmo número do card do menu)`
+    );
+    assert.ok(/id="__wrap"/.test(hPainel), 'e usa a moldura #__wrap (a altura não depende do conteúdo)');
+    assert.ok(/overflow-y:auto/.test(hPainel), 'a rolagem fica DENTRO do card (a página não rola)');
+    assert.ok(!/\d+vh/.test(hPainel), 'nenhuma unidade de viewport no card (regressão do card de 1px)');
+
+    const jogoCtx = fakeCtx({ args: ['jogar', '3', '100'], sender: Z, msgId: 'MOLD-2' });
+    await cmd.execute(jogoCtx);
+    const hJogo = card(jogoCtx);
+    assert.ok(new RegExp(`height:${altura}px;max-height:${altura}px`).test(hJogo), 'o tabuleiro usa a MESMA altura declarada');
+    assert.ok(/id="__wrap"/.test(hJogo), 'tabuleiro também dentro da moldura');
+    // MENU_HTML_HEIGHT continua sendo o único botão de ajuste de altura
+    const antesEnv = process.env.MENU_HTML_HEIGHT;
+    process.env.MENU_HTML_HEIGHT = '700';
+    const envCtx = fakeCtx({ args: [], sender: Z, msgId: 'MOLD-3' });
+    await cmd.execute(envCtx);
+    assert.ok(/height:700px;max-height:700px/.test(card(envCtx)), 'MENU_HTML_HEIGHT muda o card do jogo também');
+    if (antesEnv === undefined) delete process.env.MENU_HTML_HEIGHT;
+    else process.env.MENU_HTML_HEIGHT = antesEnv;
+    ok('25: moldura do card — altura fixa em px compartilhada com o menu (fim do card minúsculo)');
+  } catch (e) {
+    fail('25: moldura do card', e);
   }
 
   console.log(`\n${feitos} ✅ · ${falhas} ❌`);

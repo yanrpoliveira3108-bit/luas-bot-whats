@@ -142,6 +142,14 @@ async function main() {
         if (payload) {
           const html = JSON.parse(payload.unifiedResponse.data.toString('utf8')).sections[0].view_model.primitive.payload;
           linha(`   card: ${(Buffer.byteLength(html) / 1024).toFixed(1)} KB`);
+          // MOLDURA: o card precisa declarar altura FIXA em px. Sem isso o host
+          // mede o conteúdo e o card pode sair minúsculo ("encolhido").
+          const m = /html,body\{margin:0;padding:0;height:(\d+)px;max-height:\d+px;overflow:hidden\}/.exec(html);
+          linha(
+            m
+              ? `   moldura: altura fixa ${m[1]}px + #__wrap ${/id="__wrap"/.test(html) ? 'ok' : 'AUSENTE'} ✅`
+              : '   moldura: ❌ SEM altura fixa — o card pode sair pequeno (ver menus/html/moldura.js)'
+          );
         }
       }
       const resposta = ctx.replies[ctx.replies.length - 1];
