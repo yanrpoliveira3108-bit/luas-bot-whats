@@ -65,7 +65,11 @@ async function ask({ chatId, userId, text, mode = 'chat', messages, remember = t
     logger.info({ provider: name, mode, messagesCount: requestMessages ? requestMessages.length : undefined }, '[AI_ROUTER] attempt');
     try {
       const r = await provider.handle({ chatId, userId, text: input, mode, messages: requestMessages, history: requestMessages ? undefined : memory.history(chatId) });
-      if (name === 'groq') logger.info({ ok: Boolean(r && r.ok), provider: r && r.provider, code: r && r.code, httpStatus: r && r.httpStatus, latencyMs: r && r.latencyMs }, '[AI_ROUTER] groq-result');
+      if (name === 'groq') {
+        logger.info({ type: typeof r, isNull: r === null, ok: r && r.ok, provider: r && r.provider, code: r && r.code, hasText: Boolean(r && r.text), textLength: r && typeof r.text === 'string' ? r.text.length : 0 }, '[AI_ROUTER] groq-return');
+        logger.info({ ok: Boolean(r && r.ok), provider: r && r.provider, code: r && r.code, httpStatus: r && r.httpStatus, latencyMs: r && r.latencyMs }, '[AI_ROUTER] groq-result');
+      }
+      if (name === 'local' && failedProvider === 'groq') logger.info({ reason: lastFailure ? `groq-${lastFailure.toLowerCase()}` : 'groq-returned-null' }, '[AI_ROUTER] local-decision');
       if (r && r.ok) {
         const latencyMs = Date.now() - started;
         if (remember) {
