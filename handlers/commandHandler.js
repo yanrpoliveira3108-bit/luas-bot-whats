@@ -504,7 +504,14 @@ async function handleMessage(sock, msg, type) {
     // CAPTCHA só consome uma DM quando existe desafio pending para este remetente.
     // Sem desafio, a mensagem segue o fluxo privado normal.
     if (!ctx.isGroup) {
-      const consumedCaptcha = await captchaManager.onResponse(sock, ctx.sender, ctx.text, (text) => ctx.reply(text, { quoted: false }));
+      const consumedCaptcha = await captchaManager.onResponse(sock, ctx.sender, ctx.text, (text) => ctx.reply(text, { quoted: false }), {
+        identities: ctx.identidades,
+        quotedKey: ctx.quotedKey,
+        quoted: ctx.quoted,
+        remoteJid: ctx.remoteJid,
+        fromMe: msg.key && msg.key.fromMe,
+        messageType: msg.message && Object.keys(msg.message)[0],
+      });
       if (consumedCaptcha) return;
       if (await handlePrivateAntiPv(sock, ctx)) return;
     }

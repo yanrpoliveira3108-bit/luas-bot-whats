@@ -797,6 +797,7 @@ const MIGRATIONS = [
     expires_at INTEGER NOT NULL,
     attempts INTEGER NOT NULL DEFAULT 0,
     delivery_status TEXT NOT NULL DEFAULT 'ok',
+    challenge_message_id TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'pending'
       CHECK(status IN ('pending','verified','expired','rejected','cancelled'))
   );

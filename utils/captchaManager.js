@@ -10,6 +10,7 @@ const MAX_ATTEMPTS = 3;
 const AMBIGUOUS = /[01IO]/g;
 const ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 const timers = new Map();
+const responseLocks = new Map();
 let socketRef = null;
 let clock = () => Date.now();
 function nowMs() { return clock(); }
@@ -32,7 +33,7 @@ function makeChallenge() {
 }
 function normalizeAnswer(v) { return String(v || '').trim().toUpperCase().replace(/\s+/g, ''); }
 function row(id) { return db.prepare('captcha_get', 'SELECT * FROM captcha_challenges WHERE challenge_id = ?').get(id) || null; }
-function publicRow(r) { return r && { challengeId: r.challenge_id, groupJid: r.group_jid, participantJid: r.participant_jid, type: r.type, expectedAnswer: r.expected_answer, createdAt: r.created_at, expiresAt: r.expires_at, attempts: r.attempts, status: r.status, deliveryStatus: r.delivery_status || 'ok' }; }
+function publicRow(r) { return r && { challengeId: r.challenge_id, groupJid: r.group_jid, participantJid: r.participant_jid, type: r.type, expectedAnswer: r.expected_answer, createdAt: r.created_at, expiresAt: r.expires_at, attempts: r.attempts, status: r.status, deliveryStatus: r.delivery_status || 'ok', challengeMessageId: r.challenge_message_id || '' }; }
 function namespace(jid) { return String(jid || '').endsWith('@lid') ? 'lid' : String(jid || '').endsWith('@s.whatsapp.net') ? 'pn' : 'other'; }
 function mappingStore(sock) {
   const repository = sock && sock.signalRepository;
@@ -100,23 +101,42 @@ function transition(id, from, to) {
   if (result.changes !== 1) return false;
   clearTimer(id); return true;
 }
+function normalizeIdentity(jid) { return String(jid || '').replace(/:\d+(?=@)/, ''); }
+async function sameParticipantIdentity(sock, a, b) {
+  if (!a || !b) return false;
+  if (normalizeIdentity(a) === normalizeIdentity(b)) return true;
+  const aNs = namespace(a); const bNs = namespace(b);
+  if (aNs === bNs) return false;
+  const source = aNs === 'lid' ? a : b;
+  const other = aNs === 'lid' ? b : a;
+  const resolved = await resolveLidInfo(sock, source);
+  return Boolean(resolved.value && normalizeIdentity(resolved.value) === normalizeIdentity(other));
+}
 async function stillPending(r) {
   const list = await listPending(socketRef, r.group_jid);
-  return list.some((p) => p.jid === r.participant_jid);
+  for (const p of list) if (await sameParticipantIdentity(socketRef, p.jid, r.participant_jid)) return true;
+  return false;
 }
 async function approve(id) {
-  const r = row(id); if (!r || r.status !== 'pending' || nowMs() > Number(r.expires_at)) return { ok: false, reason: 'not-pending' };
-  if (!(await stillPending(r))) { transition(id, 'pending', 'cancelled'); return { ok: false, reason: 'request-gone' }; }
-  if (!transition(id, 'pending', 'verified')) return { ok: false, reason: 'race' };
-  const result = await approveRequests(socketRef, r.group_jid, [{ jid: r.participant_jid }]);
-  if (!result.success) { db.prepare('captcha_reopen', `UPDATE captcha_challenges SET status = 'pending' WHERE challenge_id = ? AND status = 'verified'`).run(id); schedule(row(id)); return { ok: false, reason: 'approve-failed', result }; }
-  return { ok: true, result };
+  if (responseLocks.has(id)) return responseLocks.get(id);
+  const operation = (async () => {
+    const r = row(id); if (!r || r.status !== 'pending' || nowMs() >= Number(r.expires_at)) return { ok: false, reason: 'not-pending' };
+    if (!(await stillPending(r))) { transition(id, 'pending', 'cancelled'); return { ok: false, reason: 'request-gone' }; }
+    // A aprovação externa é a fonte de verdade; verified só vem depois de success=1.
+    const result = await approveRequests(socketRef, r.group_jid, [{ jid: r.participant_jid }]);
+    if (!result || Number(result.success) !== 1) return { ok: false, reason: 'approve-failed', result };
+    if (!transition(id, 'pending', 'verified')) return { ok: false, reason: 'race' };
+    return { ok: true, result };
+  })();
+  responseLocks.set(id, operation);
+  try { return await operation; } finally { responseLocks.delete(id); }
 }
 async function reject(id, finalStatus = 'rejected') {
   const r = row(id); if (!r || r.status !== 'pending') return { ok: false, reason: 'not-pending' };
+  // Nunca rejeitar no banco antes de confirmar que o pedido ainda está pending.
+  if (!(await stillPending(r))) return { ok: false, reason: 'request-gone' };
   if (!transition(id, 'pending', finalStatus)) return { ok: false, reason: 'race' };
-  if (await stillPending(r)) return { ok: true, result: await rejectRequests(socketRef, r.group_jid, [{ jid: r.participant_jid }]) };
-  return { ok: true, reason: 'request-gone' };
+  return { ok: true, result: await rejectRequests(socketRef, r.group_jid, [{ jid: r.participant_jid }]) };
 }
 async function expire(id) {
   const r = row(id); if (!r || r.status !== 'pending') return;
@@ -137,25 +157,79 @@ async function cancelFor(groupJid, participantJid, reason = 'manual') {
   return true;
 }
 async function cancelGroup(groupJid, participantJids, reason) { for (const jid of participantJids || []) await cancelFor(groupJid, jid, reason); }
-async function onResponse(sock, participantJid, text, send) {
+function quoteInfo(meta = {}) {
+  const key = meta.quotedKey || null;
+  const context = meta.contextInfo || null;
+  const quoted = meta.quoted || (context && context.quotedMessage) || null;
+  return {
+    stanzaId: key && key.id ? String(key.id) : (context && context.stanzaId ? String(context.stanzaId) : ''),
+    hasContextInfo: Boolean(key || quoted),
+    hasStanzaId: Boolean((key && key.id) || (context && context.stanzaId)),
+    hasQuotedMessage: Boolean(quoted),
+    quotedParticipantNamespace: namespace((key && key.participant) || (context && context.participant)),
+  };
+}
+async function onResponse(sock, participantJid, text, send, meta = {}) {
   socketRef = sock;
-  const rows = pendingForParticipant(participantJid);
-  if (!rows.length) return false;
-  // Resposta sem identificador só é aceita quando há um único desafio para evitar ambiguidade entre grupos.
-  const answer = normalizeAnswer(text); const candidates = rows.length === 1 ? rows : rows.filter((r) => answer.includes(r.challenge_id.slice(-6).toUpperCase()));
-  if (!candidates.length) { await send('🔐 Há mais de uma verificação pendente. Responda incluindo o código curto do desafio.'); return true; }
-  const r = candidates[0];
-  if (nowMs() > Number(r.expires_at)) { await expire(r.challenge_id); await send('⌛ O prazo de verificação expirou.'); return true; }
-  const expected = normalizeAnswer(r.expected_answer);
-  const supplied = answer.replace(r.challenge_id.slice(-6).toUpperCase(), '').trim();
-  if (supplied === expected) {
-    const result = await approve(r.challenge_id);
-    await send(result.ok ? '✅ Verificação confirmada. Seu pedido foi aprovado.' : '⚠️ O pedido não está mais pendente ou não pôde ser aprovado.');
+  const rawText = String(text || '').trim();
+  const quote = quoteInfo(meta);
+  const identities = [participantJid, ...(meta.identities || [])].filter(Boolean);
+  const incomingNamespace = namespace(participantJid);
+  const hasText = Boolean(rawText);
+  const explicit = rawText.match(/^([A-Za-z0-9]{6})(?:\s+(.+))?$/);
+  const explicitId = explicit ? explicit[1].toUpperCase() : '';
+  const explicitAnswer = explicit ? String(explicit[2] || '').trim() : '';
+  logger.info({ chatNamespace: namespace(meta.remoteJid), participantNamespace: incomingNamespace, fromMe: Boolean(meta.fromMe), messageType: meta.messageType || 'unknown', hasText, hasQuoted: quote.hasQuotedMessage, textLength: rawText.length, explicitChallengeId: Boolean(explicitId), quotedCaptchaCandidate: quote.hasStanzaId }, '[CAPTCHA_ANSWER] inbound');
+  logger.info(quote, '[CAPTCHA_ANSWER] quote');
+
+  const all = db.prepare('captcha_pending_all', `SELECT * FROM captcha_challenges WHERE status = 'pending' ORDER BY created_at ASC`).all();
+  const matchesIdentity = [];
+  for (const challenge of all) {
+    let matched = false;
+    for (const identity of identities) if (await sameParticipantIdentity(sock, identity, challenge.participant_jid)) { matched = true; break; }
+    if (matched) matchesIdentity.push(challenge);
+  }
+  const mappingAttempted = matchesIdentity.some((r) => namespace(r.participant_jid) !== incomingNamespace);
+  logger.info({ incomingNamespace, challengeNamespace: matchesIdentity[0] ? namespace(matchesIdentity[0].participant_jid) : 'none', directMatch: matchesIdentity.some((r) => normalizeIdentity(r.participant_jid) === normalizeIdentity(participantJid)), mappingAttempted, mappingFound: matchesIdentity.length > 0, mappedMatch: matchesIdentity.length > 0 }, '[CAPTCHA_ANSWER] identity');
+
+  let mode = 'none';
+  let challenge = null;
+  if (explicitId) {
+    mode = 'explicit_id';
+    challenge = matchesIdentity.find((r) => r.challenge_id.slice(-6).toUpperCase() === explicitId) || null;
+  } else if (quote.stanzaId) {
+    mode = 'quoted';
+    challenge = matchesIdentity.find((r) => r.challenge_message_id && r.challenge_message_id === quote.stanzaId) || null;
+  } else if (matchesIdentity.length === 1) {
+    mode = 'single_pending';
+    challenge = matchesIdentity[0];
+  }
+  logger.info({ mode, challengeFound: Boolean(challenge), pendingChallengesForIdentity: matchesIdentity.length, challengeStatus: challenge && challenge.status, expired: Boolean(challenge && nowMs() >= Number(challenge.expires_at)) }, '[CAPTCHA_ANSWER] lookup');
+  if (!challenge) {
+    if (matchesIdentity.length > 1 && !explicitId && !quote.stanzaId) {
+      await send('🔐 Há mais de uma verificação pendente. Responda com o código do desafio.');
+      return true;
+    }
+    return false;
+  }
+  const answer = normalizeAnswer(explicitId ? explicitAnswer : rawText);
+  const remainingMs = Number(challenge.expires_at) - nowMs();
+  if (remainingMs <= 0) {
+    await expire(challenge.challenge_id);
+    await send('⌛ O prazo de verificação expirou.');
     return true;
   }
-  const updated = db.prepare('captcha_attempt', `UPDATE captcha_challenges SET attempts = attempts + 1 WHERE challenge_id = ? AND status = 'pending' AND attempts < ?`).run(r.challenge_id, MAX_ATTEMPTS);
-  const attempts = (updated.changes ? row(r.challenge_id).attempts : MAX_ATTEMPTS);
-  if (attempts >= MAX_ATTEMPTS) { await reject(r.challenge_id); await send('❌ Três tentativas incorretas. O pedido foi rejeitado.'); }
+  const matched = answer === normalizeAnswer(challenge.expected_answer);
+  const before = Number(challenge.attempts);
+  logger.info({ challengeId: challenge.challenge_id, type: challenge.type, answerMatched: matched, attemptBefore: before, attemptAfter: matched ? before : Math.min(MAX_ATTEMPTS, before + 1), remainingMs }, '[CAPTCHA_ANSWER] validate');
+  if (matched) {
+    const result = await approve(challenge.challenge_id);
+    await send(result.ok ? '✅ Verificação concluída. Sua entrada foi aprovada.' : '⚠️ O pedido não está mais pendente ou não pôde ser aprovado.');
+    return true;
+  }
+  const updated = db.prepare('captcha_attempt', `UPDATE captcha_challenges SET attempts = attempts + 1 WHERE challenge_id = ? AND status = 'pending' AND attempts < ?`).run(challenge.challenge_id, MAX_ATTEMPTS);
+  const attempts = updated.changes ? row(challenge.challenge_id).attempts : MAX_ATTEMPTS;
+  if (attempts >= MAX_ATTEMPTS) { await reject(challenge.challenge_id); await send('❌ Três tentativas incorretas. O pedido foi rejeitado.'); }
   else await send(`❌ Resposta incorreta. Tentativa ${attempts} de ${MAX_ATTEMPTS}.`);
   return true;
 }
@@ -205,7 +279,9 @@ async function handleCreated(sock, groupJid, participantJid, groupName = 'este g
   try {
     const result = await sock.sendMessage(privateJid, { text });
     const resultNamespace = namespace(result && result.key && result.key.remoteJid);
-    logger.info({ hasResult: Boolean(result), messageIdPresent: Boolean(result && result.key && result.key.id), destinationNamespace: resolvedNamespace, resultRemoteJidNamespace: resultNamespace, sameDestination: resultNamespace === resolvedNamespace }, '[CAPTCHA_DM] send-result');
+    const messageId = result && result.key && result.key.id;
+    if (messageId) db.prepare('captcha_message_id', `UPDATE captcha_challenges SET challenge_message_id = ? WHERE challenge_id = ? AND status = 'pending'`).run(messageId, challenge.challengeId);
+    logger.info({ hasResult: Boolean(result), messageIdPresent: Boolean(messageId), destinationNamespace: resolvedNamespace, resultRemoteJidNamespace: resultNamespace, sameDestination: resultNamespace === resolvedNamespace }, '[CAPTCHA_DM] send-result');
     logger.info({ group: maskedGroup(groupJid), challengeId: challenge.challengeId }, '[CAPTCHA] DM enviada');
   } catch (err) {
     markDeliveryFailed(challenge.challengeId, err, { destinationNamespace: resolvedNamespace, mappingFound });
