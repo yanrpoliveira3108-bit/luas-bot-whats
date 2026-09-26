@@ -52,7 +52,7 @@ async function ask({ chatId, userId, text, mode = 'chat', messages, remember = t
 
   const started = Date.now();
   const configuredProvider = String(CONFIG.ai.provider || 'auto').toLowerCase();
-  logger.info({ configuredProvider, hasGroqKey: groq.isConfigured() }, '[AI_ROUTER] request');
+  logger.info({ configuredProvider, hasGroqKey: groq.isConfigured(), mode }, '[AI_ROUTER] select');
   const explicitGroq = configuredProvider === 'groq';
   let lastFailure = null;
   let failedProvider = null;

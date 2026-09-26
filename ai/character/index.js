@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const logger = require('../../utils/logger').child('ai:character');
 const router = require('../router');
 const state = require('./state');
@@ -19,8 +20,10 @@ function setEnabled(chatId, on) { return state.setEnabled(chatId, on); }
 function clearMemory(chatId) { return state.clearMemory(chatId); }
 function memoryStatus(chatId) { const s = state.get(chatId); return { enabled: s.memoryEnabled, recentCount: s.recent.length, memoryCount: s.memories.length, styleLearningEnabled: s.styleLearningEnabled }; }
 
-async function ask({ chatId, userId, text, mode = 'chat', participant }) {
+async function ask({ chatId, userId, text, mode = 'chat', participant, diagnosticId = crypto.randomUUID() }) {
+  logger.info({ chatId, id: diagnosticId }, '[AI_CHARACTER] queued');
   return withChatLock(chatId, async () => {
+    logger.info({ chatId, id: diagnosticId }, '[AI_CHARACTER] start');
     const clean = state.scrub(text);
     const current = state.get(chatId);
     const recent = current.memoryEnabled ? current.recent.map((m) => ({ role: m.role, content: m.content })) : [];
@@ -35,14 +38,17 @@ async function ask({ chatId, userId, text, mode = 'chat', participant }) {
       s.lastProvider = result && result.provider ? result.provider : null;
       s.lastProviderAt = new Date().toISOString();
       s.lastErrorCode = result && result.ok ? null : (result && result.code) || null;
+      s.lastHttpStatus = result && result.httpStatus ? result.httpStatus : null;
+      s.lastLatencyMs = result && result.latencyMs ? result.latencyMs : null;
+      s.lastFallbackReason = result && result.fallbackReason ? result.fallbackReason : null;
     });
-    logger.info({ chatId, provider: result && result.provider, ok: Boolean(result && result.ok), code: result && result.code, fallbackFrom: result && result.fallbackFrom }, '[AI_CHARACTER] provider-result');
+    logger.info({ chatId, id: diagnosticId, provider: result && result.provider, ok: Boolean(result && result.ok), code: result && result.code, httpStatus: result && result.httpStatus, latencyMs: result && result.latencyMs, fallbackFrom: result && result.fallbackFrom, fallbackReason: result && result.fallbackReason }, '[AI_CHARACTER] provider-result');
     if (result && result.ok) {
       state.addRecent(chatId, 'user', clean, participant || userId);
       state.addRecent(chatId, 'assistant', result.text, 'bot');
       state.learn(chatId, clean);
       if (clean.length > 80 && !/ignore|revele|mostre|api[_ -]?key|token|senha/i.test(clean)) state.addMemory(chatId, `Assunto recorrente: ${clean.slice(0, 180)}`);
-      logger.info({ chatId, mode, provider: result.provider, latencyMs: result.latencyMs }, '[AI_CHARACTER] response');
+      logger.info({ chatId, id: diagnosticId, mode, provider: result.provider, latencyMs: result.latencyMs }, '[AI_CHARACTER] response');
     }
     return result;
   });
@@ -65,12 +71,15 @@ async function handleAutomatic(ctx) {
   const last = autoLast.get(ctx.remoteJid) || 0;
   if (Date.now() - last < cooldownMs) return false;
   autoLast.set(ctx.remoteJid, Date.now());
-  logger.info({ chatId: ctx.remoteJid, triggerType: ctx.isGroup ? (ctx.botAddressed ? 'mention-or-reply' : 'name') : 'private' }, '[AI_CHARACTER] trigger');
-  const result = await ask({ chatId: ctx.remoteJid, userId: ctx.sender, participant: ctx.sender, text: ctx.text, mode: 'chat' });
+  const diagnosticId = crypto.randomUUID();
+  logger.info({ chatId: ctx.remoteJid, id: diagnosticId, triggerType: ctx.isGroup ? (ctx.botAddressed ? 'mention-or-reply' : 'name') : 'private' }, '[AI_CHARACTER] trigger');
+  const result = await ask({ chatId: ctx.remoteJid, userId: ctx.sender, participant: ctx.sender, text: ctx.text, mode: 'chat', diagnosticId });
   if (!result || !result.ok) { if (result && result.message) await ctx.reply(result.message); return true; }
   const antiBan = require('../../utils/antiBan');
   await antiBan.simulateTyping(ctx.socket, ctx.remoteJid, result.text, 'composing');
+  logger.info({ chatId: ctx.remoteJid, id: diagnosticId }, '[AI_CHARACTER] send');
   await ctx.reply(result.text);
+  logger.info({ chatId: ctx.remoteJid, id: diagnosticId }, '[AI_CHARACTER] done');
   return true;
 }
 

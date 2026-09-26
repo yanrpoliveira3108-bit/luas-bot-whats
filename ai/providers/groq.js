@@ -48,11 +48,14 @@ async function handle({ messages, text, mode, history, temperature = 0.7, maxTok
     let json;
     try { json = await response.json(); } catch (_) { return { ok: false, code: 'GROQ_INVALID_RESPONSE', message: '⚠️ A Groq retornou uma resposta inválida.', latencyMs: Date.now() - started }; }
     const output = json && json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content;
-    if (typeof output !== 'string' || !output.trim()) return { ok: false, code: 'GROQ_INVALID_RESPONSE', message: '⚠️ A Groq retornou uma resposta vazia.', latencyMs: Date.now() - started };
+    if (typeof output !== 'string' || !output.trim()) {
+      logger.warn({ hasChoices: Boolean(json && json.choices), choicesLength: Array.isArray(json && json.choices) ? json.choices.length : null, hasMessage: Boolean(json && json.choices && json.choices[0] && json.choices[0].message), hasContent: Boolean(json && json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content), contentType: typeof (json && json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content) }, '[AI_RUNTIME] groq-invalid-response');
+      return { ok: false, code: 'GROQ_INVALID_RESPONSE', message: '⚠️ A Groq retornou uma resposta vazia.', latencyMs: Date.now() - started };
+    }
     return { ok: true, provider: 'groq', model: selectedModel, text: output.trim(), latencyMs: Date.now() - started };
   } catch (err) {
     if (err && err.name === 'AbortError') return { ok: false, code: 'GROQ_TIMEOUT', message: '⚠️ A IA demorou demais para responder.', latencyMs: Date.now() - started };
-    logger.warn({ errorName: err && err.name, errorCode: err && err.code, errorMessage: err && err.message }, 'falha de rede Groq');
+    logger.warn({ errorName: err && err.name, errorCode: err && err.code, causeCode: err && err.cause && err.cause.code }, '[AI_RUNTIME] groq-network-error');
     return { ok: false, code: 'GROQ_NETWORK_ERROR', message: '⚠️ O serviço de IA está temporariamente indisponível.' };
   } finally { clearTimeout(timer); }
 }
