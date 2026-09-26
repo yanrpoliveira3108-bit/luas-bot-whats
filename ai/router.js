@@ -60,9 +60,10 @@ async function ask({ chatId, userId, text, mode = 'chat', messages, remember = t
   for (const name of providerOrder()) {
     const provider = PROVIDERS[name];
     if (!provider) continue;
-    logger.info({ provider: name }, '[AI_ROUTER] selected');
+    const requestMessages = Array.isArray(messages) ? messages : undefined;
+    logger.info({ provider: name, mode, messagesCount: requestMessages ? requestMessages.length : undefined }, '[AI_ROUTER] attempt');
     try {
-      const r = await provider.handle({ chatId, userId, text: input, mode, messages, history: messages ? undefined : memory.history(chatId) });
+      const r = await provider.handle({ chatId, userId, text: input, mode, messages: requestMessages, history: requestMessages ? undefined : memory.history(chatId) });
       if (r && r.ok) {
         const latencyMs = Date.now() - started;
         if (remember) {
@@ -78,13 +79,17 @@ async function ask({ chatId, userId, text, mode = 'chat', messages, remember = t
         logger.info({ provider: result.provider || name, ok: true, fallbackFrom: result.fallbackFrom || null }, '[AI_ROUTER] result');
         return result;
       }
-      lastFailure = r && r.code;
+      const failure = { ...(r || { ok: false, code: 'PROVIDER_EMPTY_RESULT' }), latencyMs: Date.now() - started };
+      logger.warn({ provider: name, ok: false, code: failure.code, httpStatus: failure.httpStatus, latencyMs: failure.latencyMs }, '[AI_ROUTER] result');
+      lastFailure = failure.code;
       failedProvider = name;
-      if (name === 'groq') logger.warn({ code: r && r.code, fallbackAllowed: !explicitGroq && !NON_FALLBACK_ERRORS.has(r && r.code) }, '[AI_ROUTER] groq-failed');
-      if (r && (explicitGroq || NON_FALLBACK_ERRORS.has(r.code))) return r;
+      if (name === 'groq') logger.warn({ code: failure.code, httpStatus: failure.httpStatus, fallbackAllowed: !explicitGroq && !NON_FALLBACK_ERRORS.has(failure.code) }, '[AI_ROUTER] groq-failed');
+      if (failure && (explicitGroq || NON_FALLBACK_ERRORS.has(failure.code))) return failure;
     } catch (err) {
-      lastFailure = err && err.message;
-      logger.warn({ provider: name, err: err.message }, 'provider de IA falhou');
+      lastFailure = err && err.code ? err.code : 'PROVIDER_EXCEPTION';
+      failedProvider = name;
+      logger.warn({ provider: name, code: lastFailure }, '[AI_ROUTER] result');
+      if (name === 'groq') logger.warn({ code: lastFailure, fallbackAllowed: !explicitGroq }, '[AI_ROUTER] groq-failed');
     }
   }
 
