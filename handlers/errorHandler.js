@@ -53,16 +53,17 @@ function createError(message, code) {
  */
 async function handle(ctx, err, command) {
   const code = (err && err.code) || 'GENERIC';
-  logger.error(
-    {
-      command: (command && command.name) || (ctx && ctx.command),
-      name: err && err.name,
-      code,
-      message: err && err.message,
-      stack: err && err.stack,
-    },
-    '[COMMAND_ERROR]'
-  );
+  const commandName = (command && command.name) || (ctx && ctx.command);
+  const commandError = {
+    command: commandName,
+    name: err && err.name,
+    code,
+    message: err && err.message,
+    stack: err && err.stack,
+  };
+  logger.error(commandError, '[COMMAND_ERROR]');
+  // Mantém uma saída inequívoca mesmo quando o logger estruturado está filtrado.
+  console.error('[COMMAND_ERROR]', commandError);
 
   if (!ctx || typeof ctx.reply !== 'function') return;
 

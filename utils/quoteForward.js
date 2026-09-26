@@ -57,6 +57,7 @@ function buildForwardContent(ctx, mentions = []) {
 }
 
 async function forwardQuoted({ ctx, command, mentions: mentionList = [] }) {
+  logger.info({ command }, '[QUOTE_FORWARD] stage=entry');
   const quoted = quotedContent(ctx);
   const normalized = quoted && unwrapMessage(quoted);
   const quotedType = normalized ? Object.keys(normalized)[0] || 'unknown' : 'none';
@@ -69,7 +70,8 @@ async function forwardQuoted({ ctx, command, mentions: mentionList = [] }) {
     quotedMessageKeys: quoted && typeof quoted === 'object' ? Object.keys(quoted) : [],
     hasContextInfo: Boolean(context),
   };
-  logger.info(input, '[QUOTE_FORWARD] input');
+  logger.info(input, '[QUOTE_FORWARD] quoted-shape');
+  logger.info({ command, hasQuoted: Boolean(quoted) }, '[QUOTE_FORWARD] stage=quoted-resolved');
   const hasNewsletterInfo = Boolean(context && context.forwardedNewsletterMessageInfo);
   logger.info({ command, quotedType, hasContextInfo: Boolean(context), hasNewsletterInfo }, '[QUOTE_FORWARD] prepare');
   if (!quoted) return { sent: false, mode: 'none' };
@@ -77,13 +79,18 @@ async function forwardQuoted({ ctx, command, mentions: mentionList = [] }) {
   let content;
   try {
     content = buildForwardContent(ctx, mentions);
+    logger.info({ command, mode: 'forward' }, '[QUOTE_FORWARD] stage=content-generated');
+    logger.info({ command, hasContextInfo: Boolean(content && content.contextInfo), mentionsCount: mentions.length }, '[QUOTE_FORWARD] stage=context-merged');
+    logger.info({ command, contentKeys: content ? Object.keys(content) : [] }, '[QUOTE_FORWARD] stage=message-generated');
   } catch (err) {
     logger.error({ command, stage: 'prepare', quotedType, errorName: err && err.name, errorCode: err && err.code, errorMessage: err && err.message, stack: err && err.stack }, '[QUOTE_FORWARD_ERROR]');
     throw err;
   }
   try {
+    logger.info({ command, mode: 'forward' }, '[QUOTE_FORWARD] stage=relay-start');
     await ctx.socket.sendMessage(ctx.remoteJid, content);
     logger.info({ command, mode: 'forward', mentionsCount: mentions.length }, '[QUOTE_FORWARD] send');
+    logger.info({ command }, '[QUOTE_FORWARD] stage=relay-success');
     logger.info({ success: true }, '[QUOTE_FORWARD] result');
     return { sent: true, mode: 'forward' };
   } catch (err) {
