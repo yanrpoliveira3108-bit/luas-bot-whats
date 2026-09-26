@@ -51,12 +51,16 @@ async function ask({ chatId, userId, text, mode = 'chat', messages, remember = t
   }
 
   const started = Date.now();
-  const explicitGroq = String(CONFIG.ai.provider || '').toLowerCase() === 'groq';
+  const configuredProvider = String(CONFIG.ai.provider || 'auto').toLowerCase();
+  logger.info({ configuredProvider, hasGroqKey: groq.isConfigured() }, '[AI_ROUTER] request');
+  const explicitGroq = configuredProvider === 'groq';
   let lastFailure = null;
+  let failedProvider = null;
 
   for (const name of providerOrder()) {
     const provider = PROVIDERS[name];
     if (!provider) continue;
+    logger.info({ provider: name }, '[AI_ROUTER] selected');
     try {
       const r = await provider.handle({ chatId, userId, text: input, mode, messages, history: messages ? undefined : memory.history(chatId) });
       if (r && r.ok) {
@@ -65,9 +69,18 @@ async function ask({ chatId, userId, text, mode = 'chat', messages, remember = t
           memory.remember(chatId, 'user', input);
           memory.remember(chatId, 'assistant', r.text);
         }
-        return { ...r, latencyMs, usedFallback: name !== 'groq' && name !== 'api' };
+        const result = { ...r, latencyMs, usedFallback: name !== 'groq' && name !== 'api' };
+        if (failedProvider && name !== failedProvider) {
+          result.fallbackFrom = failedProvider;
+          result.fallbackReason = lastFailure;
+          logger.info({ from: failedProvider, to: name, reason: lastFailure }, '[AI_ROUTER] fallback');
+        }
+        logger.info({ provider: result.provider || name, ok: true, fallbackFrom: result.fallbackFrom || null }, '[AI_ROUTER] result');
+        return result;
       }
       lastFailure = r && r.code;
+      failedProvider = name;
+      if (name === 'groq') logger.warn({ code: r && r.code, fallbackAllowed: !explicitGroq && !NON_FALLBACK_ERRORS.has(r && r.code) }, '[AI_ROUTER] groq-failed');
       if (r && (explicitGroq || NON_FALLBACK_ERRORS.has(r.code))) return r;
     } catch (err) {
       lastFailure = err && err.message;

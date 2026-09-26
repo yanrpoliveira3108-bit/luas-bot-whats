@@ -1,6 +1,9 @@
 'use strict';
 
 const logger = require('../../utils/logger').child('ai:groq');
+const fs = require('fs');
+const path = require('path');
+const CONFIG = require('../../config');
 
 const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 const DEFAULT_MODEL = 'llama-3.1-8b-instant';
@@ -20,6 +23,9 @@ function errorForStatus(status) {
 async function handle({ messages, text, mode, history, temperature = 0.7, maxTokens = 800, timeoutMs = 45000 }) {
   const key = apiKey();
   const selectedModel = model();
+  const envPath = path.join(CONFIG.paths.root, '.env');
+  logger.info({ hasGroqKey: Boolean(key), keyLength: key.length, model: selectedModel, configuredProvider: process.env.AI_PROVIDER || 'auto' }, '[AI_RUNTIME] groq-config');
+  logger.info({ path: envPath, exists: fs.existsSync(envPath), hasGroqKey: Boolean(key), hasGroqModel: Boolean(process.env.GROQ_MODEL) }, '[AI_RUNTIME] env-path');
   if (!key) return { ok: false, code: 'GROQ_NOT_CONFIGURED', message: '❌ A IA ainda não foi configurada.' };
   const normalizedMessages = Array.isArray(messages) ? messages : [
     { role: 'system', content: mode === 'code' ? 'Você é um assistente de programação em português do Brasil.' : 'Você é um assistente útil em português do Brasil.' },

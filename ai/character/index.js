@@ -14,7 +14,7 @@ function withChatLock(chatId, task) {
   keyed.set(chatId, tail);
   return current.finally(() => { if (keyed.get(chatId) === tail) keyed.delete(chatId); });
 }
-function status(chatId) { const s = state.get(chatId); const r = router.status(); return { enabled: s.enabled, memoryEnabled: s.memoryEnabled, styleLearningEnabled: s.styleLearningEnabled, provider: r.active === 'local (offline)' ? 'local' : 'groq', model: r.model, recentCount: s.recent.length, memoryCount: s.memories.length }; }
+function status(chatId) { const s = state.get(chatId); const r = router.status(); return { enabled: s.enabled, memoryEnabled: s.memoryEnabled, styleLearningEnabled: s.styleLearningEnabled, configuredProvider: r.provider, providerConfigured: r.groqConfigured ? 'groq' : 'local', model: r.groqModel || r.model, lastProvider: s.lastProvider, lastProviderAt: s.lastProviderAt, lastErrorCode: s.lastErrorCode, recentCount: s.recent.length, memoryCount: s.memories.length }; }
 function setEnabled(chatId, on) { return state.setEnabled(chatId, on); }
 function clearMemory(chatId) { return state.clearMemory(chatId); }
 function memoryStatus(chatId) { const s = state.get(chatId); return { enabled: s.memoryEnabled, recentCount: s.recent.length, memoryCount: s.memories.length, styleLearningEnabled: s.styleLearningEnabled }; }
@@ -31,6 +31,12 @@ async function ask({ chatId, userId, text, mode = 'chat', participant }) {
     ];
     logger.info({ chatId, mode, recentCount: recent.length, memoryCount: current.memories.length }, '[AI_CHARACTER] context-built');
     const result = await router.ask({ chatId, userId, text: clean, mode, messages, remember: false });
+    state.update(chatId, (s) => {
+      s.lastProvider = result && result.provider ? result.provider : null;
+      s.lastProviderAt = new Date().toISOString();
+      s.lastErrorCode = result && result.ok ? null : (result && result.code) || null;
+    });
+    logger.info({ chatId, provider: result && result.provider, ok: Boolean(result && result.ok), code: result && result.code, fallbackFrom: result && result.fallbackFrom }, '[AI_CHARACTER] provider-result');
     if (result && result.ok) {
       state.addRecent(chatId, 'user', clean, participant || userId);
       state.addRecent(chatId, 'assistant', result.text, 'bot');

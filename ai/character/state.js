@@ -14,7 +14,7 @@ function defaultState() {
 }
 function normalize(raw) {
   const d = defaultState(); const r = raw && typeof raw === 'object' ? raw : {};
-  return { ...d, ...r, recent: Array.isArray(r.recent) ? r.recent.slice(-MAX_RECENT) : [], memories: Array.isArray(r.memories) ? r.memories.slice(-MAX_MEMORY) : [], style: { ...d.style, ...(r.style || {}) } };
+  return { ...d, ...r, lastProvider: r.lastProvider || null, lastProviderAt: r.lastProviderAt || null, lastErrorCode: r.lastErrorCode || null, recent: Array.isArray(r.recent) ? r.recent.slice(-MAX_RECENT) : [], memories: Array.isArray(r.memories) ? r.memories.slice(-MAX_MEMORY) : [], style: { ...d.style, ...(r.style || {}) } };
 }
 function get(chatId) {
   try { return normalize(groups.getSettings(chatId).aiCharacter); } catch (_) { return defaultState(); }

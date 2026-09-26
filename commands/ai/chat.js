@@ -21,7 +21,7 @@ module.exports = [
       if (['on', 'off', 'status'].includes(sub) && ctx.args.length === 1) {
         if (sub === 'status') {
           const s = ai.character.status(ctx.remoteJid);
-          return ctx.reply(`🤖 *IA*\n▸ Estado: ${s.enabled ? 'ativa' : 'desativada'}\n▸ Provider: ${s.provider}\n▸ Modelo: ${s.model}\n▸ Memória: ${s.memoryEnabled ? 'ativa' : 'inativa'}\n▸ Aprendizado de estilo: ${s.styleLearningEnabled ? 'ativo' : 'inativo'}`);
+          return ctx.reply(`🤖 *IA*\n▸ Estado: ${s.enabled ? 'ativa' : 'desativada'}\n▸ Provider configurado: ${s.configuredProvider}\n▸ Groq: ${s.providerConfigured === 'groq' ? 'configurada' : 'não configurada'}\n▸ Último provider: ${s.lastProvider || '—'}\n▸ Modelo: ${s.model}\n▸ Memória: ${s.memoryEnabled ? 'ativa' : 'inativa'}\n▸ Aprendizado de estilo: ${s.styleLearningEnabled ? 'ativo' : 'inativo'}`);
         }
         if (ctx.isGroup && !ctx.isOwner && !ctx.isAdmin) return ctx.reply('⛔ Apenas owner ou administrador pode alterar a IA do grupo.');
         ai.character.setEnabled(ctx.remoteJid, sub === 'on');
