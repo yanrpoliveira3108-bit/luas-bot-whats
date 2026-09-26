@@ -100,6 +100,31 @@ function _setDeps(over = {}) {
   Object.assign(deps, over);
 }
 
+const socketIds = new WeakMap();
+let nextSocketId = 1;
+function socketDiagnostic(contextSocket = null) {
+  const current = deps.getSocket();
+  const id = (s) => {
+    if (!s || (typeof s !== 'object' && typeof s !== 'function')) return null;
+    if (!socketIds.has(s)) socketIds.set(s, nextSocketId++);
+    return socketIds.get(s);
+  };
+  const connectionState = (() => {
+    try { return deps.isConnected() ? 'open' : 'not-open'; } catch (_) { return 'unknown'; }
+  })();
+  const result = {
+    hasContextSocket: !!contextSocket,
+    hasCurrentSocket: !!current,
+    sameSocket: !!contextSocket && contextSocket === current,
+    hasSocketUser: !!(current && current.user),
+    connectionState,
+    contextSocketId: id(contextSocket),
+    currentSocketId: id(current),
+  };
+  logger.info(result, '[GROUP_SCHEDULE_RUNTIME] connection-check');
+  return result;
+}
+
 /* ------------------------------- utilidades ------------------------------- */
 
 function groupsDb() {
@@ -490,12 +515,16 @@ async function reconcileAgora(jid, opts) {
   }
 
   const ajuste = esperado === 'closed' ? 'announcement' : 'not_announcement';
+  const action = esperado === 'closed' ? 'close' : 'open';
+  logger.info({ group: String(jid).slice(-12), action }, '[GROUP_SCHEDULE] transition');
   try {
     await comPrazo(insp.sock.groupSettingUpdate(jid, ajuste), deps.prazoMs, 'groupSettingUpdate');
+    logger.info({ action, success: true }, '[GROUP_SCHEDULE] transition-result');
     return finalizar(jid, cfg, { ...base, ok: true, code: 'ok', current: esperado, changed: true }, opts);
   } catch (err) {
     const code = classificar(err, 'update');
-    logger.warn({ grupo: jid, code, err: err && err.message }, 'falha ao alterar o grupo — conferindo o estado real');
+    logger.warn({ action, success: false, code, errorMessage: err && err.message }, '[GROUP_SCHEDULE_ERROR]');
+    logger.warn({ group: String(jid).slice(-12), code }, 'falha ao alterar o grupo — conferindo o estado real');
     // a alteração pode ter sido aplicada mesmo com erro/timeout: CONFERE antes de repetir
     const conf = await inspecionar(jid);
     if (conf.ok && conf.current === esperado) {
@@ -659,6 +688,7 @@ module.exports = {
   classificar,
   dispararEvento,
   _setDeps,
+  socketDiagnostic,
   _reset,
   _STATE: STATE,
 };

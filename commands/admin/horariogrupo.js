@@ -178,6 +178,15 @@ module.exports = [
     cooldown: 3000,
     execute: async (ctx) => {
       const p = ctx.prefix;
+      if (typeof schedule.socketDiagnostic === 'function') {
+        const d = schedule.socketDiagnostic(ctx.socket);
+        // Mantém o diagnóstico focado apenas em presença/identidade de instância.
+        require('../../utils/logger').child('horarioGrupo').info({
+          ctxSocketPresent: d.hasContextSocket,
+          currentSocketPresent: d.hasCurrentSocket,
+          sameSocket: d.sameSocket,
+        }, '[GROUP_SCHEDULE_RUNTIME] command-socket');
+      }
       const args = (ctx.args || []).map((a) => String(a).trim()).filter(Boolean);
       const a0 = (args[0] || '').toLowerCase();
 

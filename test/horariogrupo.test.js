@@ -495,6 +495,25 @@ async function main() {
     assert.strictEqual(recarregado._STATE.timers.size, antes);
   });
 
+  await caso('reconnect: scheduler troca socket A pelo socket B sem perder configuração ativa', async () => {
+    const jid = G1;
+    const socketA = sock;
+    const socketB = novoSock();
+    grupo(socketB, jid, { announce: true });
+    let atual = socketA;
+    schedule._setDeps({ getSocket: () => atual, isConnected: () => !!(atual && atual.conectado) });
+    const antes = schedule.getConfig(jid);
+    assert.strictEqual(antes.enabled, true);
+    atual = socketB;
+    const result = await schedule.reconcile(jid, { reason: 'reconexão-teste' });
+    assert.strictEqual(result.ok, true);
+    assert.deepStrictEqual(socketA.updates.filter((x) => x.jid === jid), []);
+    const expectedSetting = schedule.estadoEsperado(antes, clock.t) === 'closed' ? 'announcement' : 'not_announcement';
+    assert.deepStrictEqual(socketB.updates.filter((x) => x.jid === jid), [{ jid, s: expectedSetting }]);
+    assert.strictEqual(schedule.getConfig(jid).enabled, true);
+    sock = socketB;
+  });
+
   await caso('evento duplicado (mesma versão e horário) executa uma vez só', async () => {
     const jid = '120363000000000004@g.us';
     const cfg = schedule.getConfig(jid);

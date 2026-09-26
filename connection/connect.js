@@ -32,6 +32,7 @@ const sessionRecovery = require('./sessionRecovery');
 const sendGuard = require('../utils/sendGuard');
 
 let sock = null;
+let lifecycleOpen = false;
 let connecting = false;
 let reconnectAttempts = 0;
 let reconnectTimer = null;
@@ -145,7 +146,9 @@ function getSocket() {
 }
 
 function isConnected() {
-  return !!(sock && sock.user && sock.ws && sock.ws.readyState === 1);
+  // O lifecycle `connection.update` é a fonte canônica. Alguns builds do fork
+  // não expõem `ws.readyState` de forma confiável mesmo enquanto processam DMs.
+  return !!(sock && lifecycleOpen && sock.user && (!sock.ws || sock.ws.readyState === undefined || sock.ws.readyState === 1));
 }
 
 function markShutdown() {
@@ -527,6 +530,7 @@ function handleConnectionUpdate(update, sockRef) {
   }
 
   if (connection === 'open') {
+    lifecycleOpen = true;
     resetReconnect();
     sessionWasRegistered = true;
     pendingPhone = null;
@@ -554,6 +558,7 @@ function handleConnectionUpdate(update, sockRef) {
   }
 
   if (connection === 'close') {
+    lifecycleOpen = false;
     const statusCode = lastDisconnect && lastDisconnect.error
       ? lastDisconnect.error.output && lastDisconnect.error.output.statusCode
       : null;
