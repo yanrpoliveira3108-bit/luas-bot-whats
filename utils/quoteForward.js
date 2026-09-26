@@ -47,7 +47,10 @@ function buildForwardContent(ctx, mentions = []) {
   const quoted = quotedContent(ctx);
   if (!quoted) return null;
   const content = {
-    forward: { message: { message: quoted } },
+    // O fork espera `forward.message` diretamente como IMessage. O wrapper
+    // extra `{ message: { message: ... } }` fazia normalizeMessageContent()
+    // receber um objeto sem tipo de mensagem e quebrava até para conversation.
+    forward: { message: quoted },
     force: false,
   };
   const contextInfo = safeForwardContext(quoted);
