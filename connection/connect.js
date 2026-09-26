@@ -436,7 +436,7 @@ function wireEvents(sockRef, saveCreds) {
             participant,
             keyRemoteJid: jid,
           },
-          '[MEMBERSHIP_DEBUG] stub recebido'
+          '[WA_RUNTIME] messages.upsert stub'
         );
       }
       if (lidGroup || isStub) {
@@ -450,6 +450,21 @@ function wireEvents(sockRef, saveCreds) {
       }
     }
     if (listeners.message) listeners.message(sockRef, messages, type);
+  });
+
+  // Instrumentação runtime: o fork também expõe pedidos como group.join-request
+  // em process-message.js. Neste estágio apenas observamos; não redirecionamos
+  // o fluxo automático antes de confirmar o evento real no Termux.
+  sockRef.ev.on('group.join-request', (request) => {
+    logger.info(
+      {
+        groupJid: request && request.id,
+        participant: request && request.participant,
+        action: request && request.action,
+        method: request && request.method,
+      },
+      '[WA_RUNTIME] group.join-request'
+    );
   });
 
   sockRef.ev.on('group-participants.update', (ev) => {
