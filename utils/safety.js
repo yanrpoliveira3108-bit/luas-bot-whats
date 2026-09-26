@@ -37,6 +37,7 @@
 'use strict';
 
 const CONFIG = require('../config');
+const logger = require('./logger').child('safety');
 
 // cache curto: as flags são lidas a cada envio (menu, resposta, card…).
 const CACHE_MS = 5000;
@@ -97,6 +98,22 @@ function blocksColdPv() {
   return !!CONFIG.safety.send.blockColdPv;
 }
 
+function antiPvEnabled() {
+  try {
+    return require('../database/settings').antiPvEnabled();
+  } catch (_) {
+    // Falha de leitura não deve desativar silenciosamente uma proteção existente.
+    return true;
+  }
+}
+
+function setAntiPvEnabled(enabled) {
+  const value = !!enabled;
+  require('../database/settings').setAntiPvEnabled(value);
+  logger.info({ enabled: value }, '[FREIO] anti-pv atualizado');
+  return value;
+}
+
 /**
  * Resumo legível (usado no boot, no !freio e nos logs).
  */
@@ -127,5 +144,7 @@ module.exports = {
   blocksRichCards,
   blocksPaymentTest,
   blocksColdPv,
+  antiPvEnabled,
+  setAntiPvEnabled,
   summary,
 };

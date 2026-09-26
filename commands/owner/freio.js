@@ -5,6 +5,7 @@
  *   !freio pausar [min]     → para TODOS os envios agora (emergência)
  *   !freio retomar          → retoma os envios
  *   !freio seguro on|off    → liga/desliga o modo seguro (payloads de risco)
+ *   !freio pv on|off|status → liga/desliga/status do bloqueio de PV
  *   !freio bloqueios [jid] → o que o freio barrou, por conversa e por motivo
  *   !freio warmup reset     → REINICIA o aquecimento (limites duros de novo)
  *   !freio warmup off       → ENCERRA o aquecimento (número já é antigo)
@@ -111,6 +112,7 @@ function statusText() {
       ? `▸ Mesma mensagem: máx. ${limits.dupMaxChats} conversas/${limits.dupWindowMin} min`
       : `▸ Mesma mensagem em vários chats: 🚫 desligado (SEND_DUP_MAX_CHATS=0)`,
     `▸ PV frio (bot iniciar conversa): ${limits.blockColdPv ? '🚫 bloqueado' : '⚠️ liberado'}`,
+    `${safety.antiPvEnabled() ? '🔒' : '🔓'} Bloqueio de PV: ${safety.antiPvEnabled() ? 'ativado' : 'desativado'}`,
     `▸ Sinal de restrição → pausa automática de ${limits.pauseMinutes} min`,
     '',
     '*Warmup (número novo)*',
@@ -159,11 +161,31 @@ module.exports = [
     commands: ['freio', 'anti-ban', 'seguranca', 'risco'],
     category: 'owner',
     ownerOnly: true,
-    description: 'Painel do freio de envio: pausa, limites, warmup e modo seguro.',
-    usage: '!freio [bloqueios [jid]|pausar|retomar|seguro on/off|warmup reset]',
+    description: 'Painel do freio de envio: pausa, limites, warmup, Anti-PV e modo seguro.',
+    usage: '!freio [pv on/off/status|bloqueios [jid]|pausar|retomar|seguro on/off|warmup reset]',
     cooldown: 2000,
     execute: async (ctx) => {
       const sub = String(ctx.args[0] || 'status').toLowerCase();
+
+      if (sub === 'pv' || sub === 'antipv') {
+        const arg = String(ctx.args[1] || 'status').toLowerCase();
+        if (['status', 'estado', 'info'].includes(arg)) {
+          const enabled = safety.antiPvEnabled();
+          await ctx.reply(`${enabled ? '🔒' : '🔓'} *Bloqueio de PV: ${enabled ? 'ativado' : 'desativado'}*`);
+          return;
+        }
+        if (!['on', 'off', 'ligar', 'desligar', '1', '0', 'true', 'false'].includes(arg)) {
+          await ctx.reply('⚠️ Use: `!freio pv on`, `!freio pv off` ou `!freio pv status`');
+          return;
+        }
+        const enabled = ['on', 'ligar', '1', 'true'].includes(arg);
+        const previous = safety.antiPvEnabled();
+        safety.setAntiPvEnabled(enabled);
+        await ctx.reply(enabled
+          ? (previous ? '🔒 O bloqueio de PV já está ativado.' : '🔒 Bloqueio de PV ativado.')
+          : (previous ? '🔓 Bloqueio de PV desativado.' : '🔓 O bloqueio de PV já está desativado.'));
+        return;
+      }
 
       if (sub === 'pausar' || sub === 'parar' || sub === 'pause') {
         const min = parseInt(ctx.args[1], 10);
@@ -236,7 +258,7 @@ module.exports = [
       }
 
       await ctx.reply(
-        '⚠️ Subcomando inválido.\n▸ `!freio` — estado\n▸ `!freio bloqueios [jid]` — o que o freio barrou e por quê\n▸ `!freio pausar [min]`\n▸ `!freio retomar`\n▸ `!freio seguro on|off`\n▸ `!freio warmup reset`'
+        '⚠️ Subcomando inválido.\n▸ `!freio` — estado\n▸ `!freio pv on|off|status`\n▸ `!freio bloqueios [jid]` — o que o freio barrou e por quê\n▸ `!freio pausar [min]`\n▸ `!freio retomar`\n▸ `!freio seguro on|off`\n▸ `!freio warmup reset`'
       );
     },
   },

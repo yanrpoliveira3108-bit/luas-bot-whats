@@ -84,6 +84,15 @@ function setMenuHtmlEnabled(enabled) {
   set('menu_html', enabled ? 'true' : 'false');
 }
 
+/** Bloqueio global de mensagens privadas pelo Anti-PV. Padrão ON para preservar a proteção existente. */
+function antiPvEnabled() {
+  return getBool('anti_pv_enabled', true);
+}
+
+function setAntiPvEnabled(enabled) {
+  set('anti_pv_enabled', enabled ? 'true' : 'false');
+}
+
 module.exports = {
   get,
   set,
@@ -96,4 +105,6 @@ module.exports = {
   setHtmlPlayEnabled,
   menuHtmlEnabled,
   setMenuHtmlEnabled,
+  antiPvEnabled,
+  setAntiPvEnabled,
 };
