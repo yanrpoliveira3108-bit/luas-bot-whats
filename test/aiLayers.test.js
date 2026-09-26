@@ -6,7 +6,7 @@ const dbFile = tmpFile('ai-layers.test.db');
 rm(dbFile); rm(`${dbFile}-wal`); rm(`${dbFile}-shm`);
 process.env.DATABASE_FILE = dbFile;
 process.env.GROQ_API_KEY = 'TEST_ONLY_NOT_A_REAL_KEY';
-process.env.GROQ_MODEL = 'llama-3.1-8b-instant';
+process.env.GROQ_MODEL = 'openai/gpt-oss-20b';
 process.env.AI_PROVIDER = 'auto';
 
 (async () => {

@@ -38,7 +38,6 @@ if (INTERACTIVE) {
   }
 }
 
-console.log('[AI_BOOT_PROBE] character-runtime-v1', JSON.stringify({ cwd: process.cwd(), pid: process.pid, node: process.version, router: require.resolve('./ai/router'), character: require.resolve('./ai/character'), groq: require.resolve('./ai/providers/groq'), local: require.resolve('./ai/providers/local') }));
 
 const ui = require('./connection/connectionUI');
 ui.splash();
