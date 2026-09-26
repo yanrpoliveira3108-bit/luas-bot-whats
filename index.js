@@ -145,6 +145,7 @@ autoBackup.startAutoBackup();
 /* ------------------------- roteamento de eventos ------------------------ */
 
 const membershipRequests = require('./utils/membershipRequests');
+const membershipMonitor = require('./utils/membershipMonitor');
 
 connection.onMessage((sock, messages, type) => {
   for (const msg of messages) {
@@ -222,6 +223,8 @@ if (policy.safeMode) {
 
 // UM timer para todas as limpezas de memória (utils/janitor).
 janitor.start();
+// Um único monitor lógico; após reconnect ele consulta connection.getSocket().
+membershipMonitor.start(() => connection.getSocket());
 
 /* --------------------------- limpeza de tmp ----------------------------- */
 

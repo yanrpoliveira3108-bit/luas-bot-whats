@@ -46,6 +46,67 @@ async function groupName(sock, jid) {
   }
 }
 
+const processedRequests = new Map(); // groupJid -> [{ jid }]
+const inFlight = new Map();
+
+async function wasProcessed(sock, groupJid, participantJid) {
+  const entries = processedRequests.get(groupJid) || [];
+  for (const entry of entries) if (await participantMatches(sock, entry.jid, participantJid)) return true;
+  return false;
+}
+function rememberProcessed(groupJid, participantJid) {
+  const entries = processedRequests.get(groupJid) || [];
+  if (!entries.some((entry) => entry.jid === participantJid)) entries.push({ jid: participantJid });
+  processedRequests.set(groupJid, entries);
+}
+async function forgetProcessed(sock, groupJid, pending) {
+  const entries = processedRequests.get(groupJid) || [];
+  const kept = [];
+  for (const entry of entries) if (await findParticipant(sock, pending, entry.jid)) kept.push(entry);
+  if (kept.length) processedRequests.set(groupJid, kept);
+  else processedRequests.delete(groupJid);
+}
+async function forgetParticipant(sock, groupJid, participantJid) {
+  const entries = processedRequests.get(groupJid) || [];
+  const kept = [];
+  for (const entry of entries) if (!(await participantMatches(sock, entry.jid, participantJid))) kept.push(entry);
+  if (kept.length) processedRequests.set(groupJid, kept);
+  else processedRequests.delete(groupJid);
+}
+
+async function processMembershipRequest({ sock, groupJid, participantJid, pendingEntry, source = 'event' }) {
+  const key = `${groupJid}|${participantJid}`;
+  if (inFlight.has(key)) return inFlight.get(key);
+  const work = (async () => {
+    if (await wasProcessed(sock, groupJid, participantJid)) return { skipped: true, reason: 'deduplicated' };
+    const settings = groups.getSettings(groupJid) || {};
+    const captchaEnabled = settings.captcha === true;
+    const autoAcceptEnabled = settings.autoaceitar === true;
+    logger.info({ groupJid: safeJid(groupJid), autoaceitar: autoAcceptEnabled, captcha: captchaEnabled, source }, '[MEMBERSHIP_RUNTIME] settings');
+    if (captchaEnabled) {
+      logger.info({ group: safeJid(groupJid), participant: safeJid(participantJid), source }, '[MEMBERSHIP] decision captcha');
+      logger.info({ group: safeJid(groupJid), participant: safeJid(participantJid) }, '[CAPTCHA] criando desafio');
+      const challenge = await captcha.handleCreated(sock, groupJid, pendingEntry ? pendingEntry.jid : participantJid, await groupName(sock, groupJid));
+      if (challenge) logger.info({ group: safeJid(groupJid), challengeId: challenge.challengeId }, '[CAPTCHA] desafio persistido');
+      rememberProcessed(groupJid, participantJid);
+      return { decision: 'captcha', challenge };
+    }
+    if (autoAcceptEnabled) {
+      logger.info({ group: safeJid(groupJid), participant: safeJid(participantJid), source }, '[MEMBERSHIP] decision autoaccept');
+      logger.info({ group: safeJid(groupJid), participant: safeJid(participantJid) }, '[AUTO_ACCEPT] iniciando');
+      const result = await approveRequests(sock, groupJid, [{ jid: pendingEntry ? pendingEntry.jid : participantJid }]);
+      logger.info({ requested: result.requested, success: result.success, failed: result.failed }, '[AUTO_ACCEPT] result');
+      rememberProcessed(groupJid, participantJid);
+      return { decision: 'autoaccept', result };
+    }
+    logger.info({ group: safeJid(groupJid), participant: safeJid(participantJid), source }, '[MEMBERSHIP] decision manual');
+    rememberProcessed(groupJid, participantJid);
+    return { decision: 'manual' };
+  })();
+  inFlight.set(key, work);
+  try { return await work; } finally { inFlight.delete(key); }
+}
+
 async function handleMessage(sock, msg, type) {
   if (!sock || !msg || !msg.key) return false;
   if (type && type !== 'notify') return false;
@@ -70,37 +131,19 @@ async function handleMessage(sock, msg, type) {
   if (!String(groupJid || '').endsWith('@g.us') || typeof participantJid !== 'string') return true;
   if (action === 'revoked' || action === 'rejected') {
     await captcha.cancelFor(groupJid, participantJid, action);
+    await forgetParticipant(sock, groupJid, participantJid);
     return true;
   }
   if (action !== 'created') return true;
 
-  const settings = groups.getSettings(groupJid) || {};
-  const captchaEnabled = settings.captcha === true;
-  const autoAcceptEnabled = settings.autoaceitar === true;
-  logger.info({ groupJid: safeJid(groupJid), autoaceitar: autoAcceptEnabled, captcha: captchaEnabled }, '[MEMBERSHIP_DEBUG] settings');
   logger.info({ groupJid: safeJid(groupJid), participant: safeJid(participantJid) }, '[MEMBERSHIP_DEBUG] confirmando pedido');
   const pending = await listPending(sock, groupJid);
   logger.info({ groupJid: safeJid(groupJid), count: pending.length }, '[MEMBERSHIP_DEBUG] pending count');
   const match = await findParticipant(sock, pending, participantJid);
   logger.info({ stubType: suffix(participantJid), pendingCount: pending.length, matched: Boolean(match), stubParticipant: safeJid(participantJid), pendingParticipant: safeJid(match && match.jid) }, '[MEMBERSHIP_DEBUG] participant match');
   if (!match) return true;
-
-  if (captchaEnabled) {
-    logger.info({ group: safeJid(groupJid), participant: safeJid(participantJid) }, '[MEMBERSHIP] decision captcha');
-    logger.info({ group: safeJid(groupJid), participant: safeJid(participantJid) }, '[CAPTCHA] criando desafio');
-    const challenge = await captcha.handleCreated(sock, groupJid, match.jid, await groupName(sock, groupJid));
-    if (challenge) logger.info({ group: safeJid(groupJid), challengeId: challenge.challengeId }, '[CAPTCHA] desafio persistido');
-    return true;
-  }
-  if (autoAcceptEnabled) {
-    logger.info({ group: safeJid(groupJid), participant: safeJid(match.jid) }, '[MEMBERSHIP] decision autoaccept');
-    logger.info({ group: safeJid(groupJid), participant: safeJid(match.jid) }, '[AUTO_ACCEPT] iniciando');
-    const result = await approveRequests(sock, groupJid, [{ jid: match.jid }]);
-    logger.info({ requested: result.requested, success: result.success, failed: result.failed }, '[AUTO_ACCEPT] result');
-    return true;
-  }
-  logger.info({ group: safeJid(groupJid), participant: safeJid(match.jid) }, '[MEMBERSHIP] decision manual');
+  await processMembershipRequest({ sock, groupJid, participantJid: match.jid, pendingEntry: match, source: 'event' });
   return true;
 }
 
-module.exports = { REQUEST_STUB, handleMessage, participantMatches };
+module.exports = { REQUEST_STUB, handleMessage, processMembershipRequest, participantMatches, forgetProcessed };
