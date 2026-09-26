@@ -413,8 +413,10 @@ async function executeCommand(ctx, cmd, args) {
   }
   ctx.command = cmd.name;
   ctx.args = args;
+  const sensitiveArgs = cmd.name === 'api' && String(args[0] || '').toLowerCase() === 'ia';
+  const argsForLog = sensitiveArgs ? ['ia', '[REDACTED]'] : args.slice(0, 6);
   logger.info(
-    { tag: 'COMMAND', user: ctx.sender, chat: ctx.remoteJid, cmd: cmd.name, fromMe: !!(ctx.message && ctx.message.key && ctx.message.key.fromMe), args: args.slice(0, 6) },
+    { tag: 'COMMAND', user: ctx.sender, chat: ctx.remoteJid, cmd: cmd.name, fromMe: !!(ctx.message && ctx.message.key && ctx.message.key.fromMe), args: argsForLog },
     `[LUA][COMMAND] Executando: ${cmd.name}`
   );
   perf.add('commands');
@@ -425,7 +427,7 @@ async function executeCommand(ctx, cmd, args) {
       chat: ctx.remoteJid,
       isGroup: ctx.isGroup,
       command: cmd.name,
-      args,
+      args: sensitiveArgs ? ['ia', '[REDACTED]'] : args,
       prefix: ctx.prefix,
       name: (u && u.name) || null,
     });
@@ -681,11 +683,15 @@ async function handleMessage(sock, msg, type) {
           return;
         }
       }
+      const sensitiveCommand = String(parsed.command || '').toLowerCase() === 'api' && String(parsed.args && parsed.args[0] || '').toLowerCase() === 'ia';
+      const loggedCommand = sensitiveCommand
+        ? `${settings.effectivePrefix()}api ia [REDACTED]`
+        : parsed.raw.split('\n')[0].slice(0, 80);
       logger.info(
         // `chat` no log é o que permite responder "por que não falou NESTE chat?":
         // sem ele, o relatório do dispositivo não sabia separar as conversas
         { tag: 'COMMAND', chat: ctx.remoteJid, sender: ctx.sender, fromMe: !!(msg.key && msg.key.fromMe) },
-        `[LUA][COMMAND] Comando recebido: ${parsed.raw.split('\n')[0].slice(0, 80)}`
+        `[LUA][COMMAND] Comando recebido: ${loggedCommand}`
       );
       // reação temática (não bloqueia e não significa sucesso do comando)
       contextReact.reagirComando(ctx, cmd);

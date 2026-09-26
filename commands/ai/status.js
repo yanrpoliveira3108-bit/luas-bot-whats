@@ -19,9 +19,11 @@ module.exports = [
       await ctx.reply(
         [
           '🤖 *STATUS DA IA*',
+          `▸ Provider configurado: ${s.provider}`,
+          `▸ Provider remoto: Groq`,
+          `▸ Groq: ${s.groqConfigured ? '✅ configurada' : '❌ não configurada'}`,
+          `▸ Modelo: ${s.groqModel}`,
           `▸ Provider ativo: ${s.active}`,
-          `▸ Modelo: ${s.model}`,
-          `▸ API externa: ${s.apiConfigured ? '✅ configurada' : '❌ não configurada (modo local)'}`,
           `▸ Cadeia de fallback: ${s.order.join(' → ')}`,
           `▸ Memória: ${s.memory}`,
           '',

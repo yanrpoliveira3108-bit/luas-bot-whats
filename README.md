@@ -317,10 +317,10 @@ Todas as variáveis ficam em `.env` (nunca versionado). Veja `.env.example` comp
 | Variável | Descrição |
 |----------|-----------|
 | `OPENWEATHER_API_KEY` | Clima (`!clima`) |
-| `AI_PROVIDER` | `auto`, `local`, `api` |
-| `AI_API_URL` | URL compatível OpenAI |
-| `AI_API_KEY` | Chave API IA |
-| `AI_MODEL` | Modelo (`gpt-4o-mini`) |
+| `AI_PROVIDER` | `auto`, `groq`, `local` (`api` é legacy) |
+| `GROQ_API_KEY` | Chave Groq (somente no `.env`) |
+| `GROQ_MODEL` | Modelo Groq (padrão `llama-3.1-8b-instant`) |
+| `AI_API_URL` / `AI_API_KEY` | Configuração legacy compatível com OpenAI, somente com `AI_PROVIDER=api` |
 
 ---
 

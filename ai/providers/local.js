@@ -3,7 +3,7 @@
  *
  * NÃO é um LLM: é um assistente determinístico e honesto que resolve tarefas
  * concretas sem depender de rede. Para respostas livres em linguagem natural,
- * configure AI_API_URL (provider remoto). O bot NUNCA finge ser mais do que é.
+ * configure GROQ_API_KEY (provider remoto). O bot NUNCA finge ser mais do que é.
  */
 
 'use strict';
@@ -138,10 +138,10 @@ function chatResponse(input) {
       '▸ traduzir palavras comuns PT⇄EN\n' +
       '▸ gerar trechos de código (use !codigo)\n' +
       '▸ contar piadas, fatos e conselhos\n' +
-      'Para conversa livre (LLM), configure AI_API_URL no .env.';
+      'Para conversa livre (LLM), configure GROQ_API_KEY no .env.';
   }
   if (t.includes('quem é você') || t.includes('quem e voce') || t.includes('o que você é') || t.includes('o que voce e')) {
-    return `Eu sou o *${require('../../config').bot.name}* 🌙, um bot de WhatsApp. Meu modo de IA atual é o *assistente local* (offline, sem LLM) — resolve contas, traduções básicas, código e curiosidades. Configure AI_API_URL para habilitar um modelo externo.`;
+    return `Eu sou o *${require('../../config').bot.name}* 🌙, um bot de WhatsApp. Meu modo de IA atual é o *assistente local* (offline, sem LLM) — resolve contas, traduções básicas, código e curiosidades. Configure GROQ_API_KEY para habilitar um modelo externo.`;
   }
   if (t.includes('piada')) return pick(JOKES);
   if (t.includes('fato') || t.includes('curiosidade')) return pick(FACTS);
@@ -170,13 +170,13 @@ function chatResponse(input) {
     if (hit) return `🌎 Tradução local: *${hit}*`;
   }
 
-  return '🤖 Sou o assistente *local* (offline): sei fazer contas, traduzir palavras comuns, gerar código simples, piadas, fatos e conselhos. Para conversa livre, configure AI_API_URL no .env (provider externo).';
+  return '🤖 Sou o assistente *local* (offline): sei fazer contas, traduzir palavras comuns, gerar código simples, piadas, fatos e conselhos. Para conversa livre, configure GROQ_API_KEY no .env (provider externo).';
 }
 
 function codeResponse(input) {
   const s = codeSnippet(input);
   if (s) return `\`\`\`${s.lang}\n${s.code}\n\`\`\``;
-  return '💻 Não tenho um snippet pronto para isso. Sou um assistente local; para código livre, configure AI_API_URL. Peça algo como "função JS", "fibonacci", "servidor http" ou "ordenar array".';
+  return '💻 Não tenho um snippet pronto para isso. Sou um assistente local; para código livre, configure GROQ_API_KEY. Peça algo como "função JS", "fibonacci", "servidor http" ou "ordenar array".';
 }
 
 function translateResponse(input) {
@@ -194,7 +194,7 @@ function translateResponse(input) {
 
   const hit = DICT[text] || (text.split(' ').map((w) => DICT[w]).filter(Boolean).join(' '));
   if (hit) return `🌎 Tradução (${lang || 'auto'}): *${hit}*`;
-  return '🌎 Não conheço esse texto no modo local (dicionário limitado PT⇄EN). Configure AI_API_URL para tradução completa, ou peça palavras simples como "hello", "água", "cachorro".';
+  return '🌎 Não conheço esse texto no modo local (dicionário limitado PT⇄EN). Configure GROQ_API_KEY para tradução completa, ou peça palavras simples como "hello", "água", "cachorro".';
 }
 
 function summarizeResponse(input) {
