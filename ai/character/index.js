@@ -15,7 +15,7 @@ function withChatLock(chatId, task) {
   keyed.set(chatId, tail);
   return current.finally(() => { if (keyed.get(chatId) === tail) keyed.delete(chatId); });
 }
-function status(chatId) { const s = state.get(chatId); const r = router.status(); return { enabled: s.enabled, memoryEnabled: s.memoryEnabled, styleLearningEnabled: s.styleLearningEnabled, configuredProvider: r.provider, providerConfigured: r.groqConfigured ? 'groq' : 'local', model: r.groqModel || r.model, lastProvider: s.lastProvider, lastProviderAt: s.lastProviderAt, lastErrorCode: s.lastErrorCode, recentCount: s.recent.length, memoryCount: s.memories.length }; }
+function status(chatId) { const s = state.get(chatId); const r = router.status(); return { enabled: s.enabled, memoryEnabled: s.memoryEnabled, styleLearningEnabled: s.styleLearningEnabled, provider: 'groq', groqConfigured: r.groqConfigured, model: r.groqModel, lastAiStatus: s.lastAiStatus, lastRequestAt: s.lastRequestAt, lastErrorCode: s.lastErrorCode, recentCount: s.recent.length, memoryCount: s.memories.length }; }
 function setEnabled(chatId, on) { return state.setEnabled(chatId, on); }
 function clearMemory(chatId) { return state.clearMemory(chatId); }
 function memoryStatus(chatId) { const s = state.get(chatId); return { enabled: s.memoryEnabled, recentCount: s.recent.length, memoryCount: s.memories.length, styleLearningEnabled: s.styleLearningEnabled }; }
@@ -35,14 +35,13 @@ async function ask({ chatId, userId, text, mode = 'chat', participant, diagnosti
     logger.info({ chatId, mode, recentCount: recent.length, memoryCount: current.memories.length }, '[AI_CHARACTER] context-built');
     const result = await router.ask({ chatId, userId, text: clean, mode, messages, remember: false });
     state.update(chatId, (s) => {
-      s.lastProvider = result && result.provider ? result.provider : null;
-      s.lastProviderAt = new Date().toISOString();
+      s.lastAiStatus = result && result.ok ? 'success' : 'error';
+      s.lastRequestAt = new Date().toISOString();
       s.lastErrorCode = result && result.ok ? null : (result && result.code) || null;
       s.lastHttpStatus = result && result.httpStatus ? result.httpStatus : null;
       s.lastLatencyMs = result && result.latencyMs ? result.latencyMs : null;
-      s.lastFallbackReason = result && result.fallbackReason ? result.fallbackReason : null;
     });
-    logger.info({ chatId, id: diagnosticId, provider: result && result.provider, ok: Boolean(result && result.ok), code: result && result.code, httpStatus: result && result.httpStatus, latencyMs: result && result.latencyMs, fallbackFrom: result && result.fallbackFrom, fallbackReason: result && result.fallbackReason }, '[AI_CHARACTER] provider-result');
+    logger.info({ chatId, id: diagnosticId, provider: result && result.provider, ok: Boolean(result && result.ok), code: result && result.code, httpStatus: result && result.httpStatus, latencyMs: result && result.latencyMs }, '[AI_CHARACTER] provider-result');
     if (result && result.ok) {
       state.addRecent(chatId, 'user', clean, participant || userId);
       state.addRecent(chatId, 'assistant', result.text, 'bot');

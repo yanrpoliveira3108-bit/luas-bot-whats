@@ -444,14 +444,7 @@ const CONFIG = {
 
   /* ------------------ IA (assistente) ----------------------------- */
   ai: {
-    // provider ativo: 'auto' tenta API externa e cai no local; 'local' força o
-    // assistente embutido (offline); 'api' exige API externa configurada.
-    provider: envStr('AI_PROVIDER', 'auto'),
-    // API externa compatível com OpenAI (chat/completions). Deixe em branco
-    // para usar apenas o assistente local (offline).
-    apiUrl: envStr('AI_API_URL', ''), // ex.: https://api.openai.com/v1/chat/completions
-    apiKey: envStr('AI_API_KEY', ''),
-    model: envStr('AI_MODEL', 'gpt-4o-mini'),
+    // A IA operacional é exclusivamente Groq. O modelo vem de GROQ_MODEL.
     systemPrompt: envStr('AI_SYSTEM_PROMPT', ''),
     memory: envBool('AI_MEMORY', true),
     maxInput: envInt('AI_MAX_INPUT', 500),

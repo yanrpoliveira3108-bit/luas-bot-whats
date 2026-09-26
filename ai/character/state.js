@@ -1,7 +1,7 @@
 'use strict';
 
 const groups = require('../../database/groups');
-const SECRET = /(gsk_[a-z0-9_-]+|bearer\s+[a-z0-9._-]+|(?:GROQ_API_KEY|OPENAI_API_KEY|AI_API_KEY)|(?:api[_ -]?key|token|senha|password|cookie)\s*[:=]\s*\S+)/ig;
+const SECRET = /(gsk_[a-z0-9_-]+|bearer\s+[a-z0-9._-]+|(?:[a-z0-9_]+api[_ -]?key)|(?:api[_ -]?key|token|senha|password|cookie)\s*[:=]\s*\S+)/ig;
 const UNSAFE_MEMORY = /ignore\s+(?:tudo|todas|as regras)|(?:revele|mostre|exiba).*(?:api[_ -]?key|token|senha|password|\.env)/i;
 const MAX_RECENT = 12;
 const MAX_MEMORY = 30;
@@ -14,7 +14,7 @@ function defaultState() {
 }
 function normalize(raw) {
   const d = defaultState(); const r = raw && typeof raw === 'object' ? raw : {};
-  return { ...d, ...r, lastProvider: r.lastProvider || null, lastProviderAt: r.lastProviderAt || null, lastErrorCode: r.lastErrorCode || null, lastHttpStatus: r.lastHttpStatus || null, lastLatencyMs: r.lastLatencyMs || null, lastFallbackReason: r.lastFallbackReason || null, recent: Array.isArray(r.recent) ? r.recent.slice(-MAX_RECENT) : [], memories: Array.isArray(r.memories) ? r.memories.slice(-MAX_MEMORY) : [], style: { ...d.style, ...(r.style || {}) } };
+  return { ...d, ...r, lastAiStatus: r.lastAiStatus || null, lastRequestAt: r.lastRequestAt || null, lastErrorCode: r.lastErrorCode || null, lastHttpStatus: r.lastHttpStatus || null, lastLatencyMs: r.lastLatencyMs || null, recent: Array.isArray(r.recent) ? r.recent.slice(-MAX_RECENT) : [], memories: Array.isArray(r.memories) ? r.memories.slice(-MAX_MEMORY) : [], style: { ...d.style, ...(r.style || {}) } };
 }
 function get(chatId) {
   try { return normalize(groups.getSettings(chatId).aiCharacter); } catch (_) { return defaultState(); }

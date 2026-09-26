@@ -7,7 +7,6 @@ rm(dbFile); rm(`${dbFile}-wal`); rm(`${dbFile}-shm`);
 process.env.DATABASE_FILE = dbFile;
 process.env.GROQ_API_KEY = 'TEST_ONLY_NOT_A_REAL_KEY';
 process.env.GROQ_MODEL = 'openai/gpt-oss-20b';
-process.env.AI_PROVIDER = 'auto';
 
 (async () => {
   const oldFetch = global.fetch;
@@ -24,7 +23,7 @@ process.env.AI_PROVIDER = 'auto';
   assert.strictEqual(routed.provider, 'groq');
   const result = await character.ask({ chatId: 'layer-character@g.us', userId: 'user@s.whatsapp.net', text: 'Responda OK' });
   assert.strictEqual(result.provider, 'groq');
-  assert.strictEqual(character.status('layer-character@g.us').lastProvider, 'groq');
+  assert.strictEqual(character.status('layer-character@g.us').lastAiStatus, 'success');
   global.fetch = oldFetch;
   database.close();
   rm(dbFile); rm(`${dbFile}-wal`); rm(`${dbFile}-shm`);

@@ -1,7 +1,7 @@
 /**
  * test/platform.test.js — regressão dos módulos da plataforma.
  *
- * Cobre: IA (local/router/status/memória), router de downloads, providers
+ * Cobre: IA Groq-only/status/memória, router de downloads, providers
  * Twitter/Reddit, stickers (texto com cor), e os novos comandos
  * (utilidades, diversão, membros) via pipeline real de comando.
  */
@@ -26,8 +26,6 @@ async function main() {
   process.env.OWNER_NUMBER = '5511999999999';
   process.env.DATABASE_FILE = DB;
   process.env.BUTTONS_ENABLED = 'true';
-  delete process.env.AI_API_URL;
-  delete process.env.AI_API_KEY;
 
   const database = require('../database/database');
   database.open();
@@ -40,66 +38,36 @@ async function main() {
   const reddit = require('../downloaders/reddit');
   const stickerEngine = require('../utils/stickerEngine');
 
-  /* ------------------------- IA (local/router) ------------------------ */
+  /* ------------------------- IA Groq-only ---------------------------- */
   try {
-    const r = await ai.ask({ chatId: 'g', userId: 'u', text: '2+2*3', mode: 'chat' });
-    assert.strictEqual(r.ok, true, 'responde');
-    assert.ok(/8/.test(r.text), 'matemática: 2+2*3=8 → ' + r.text);
-    assert.strictEqual(r.provider, 'local', 'provider local (sem API)');
-    ok('IA: matemática local');
-  } catch (e) { fail('IA matemática', e); }
-
-  try {
-    const r = await ai.ask({ chatId: 'g', userId: 'u', text: 'função JS que soma', mode: 'code' });
-    assert.ok(r.ok && /```/.test(r.text), 'código com bloco markdown');
-    ok('IA: snippet de código');
-  } catch (e) { fail('IA código', e); }
-
-  try {
-    const r = await ai.ask({ chatId: 'g', userId: 'u', text: 'inglês bom dia', mode: 'translate' });
-    assert.ok(r.ok && /good morning/i.test(r.text), 'tradução local');
-    ok('IA: tradução local');
-  } catch (e) { fail('IA tradução', e); }
-
-  try {
-    const r = await ai.ask({ chatId: 'g', userId: 'u', text: 'Hoje foi um dia bom. Aprendi coisas. Fiz exercícios.', mode: 'summarize' });
-    assert.ok(r.ok && /resumo/i.test(r.text), 'resumo');
-    ok('IA: resumo local');
-  } catch (e) { fail('IA resumo', e); }
+    const r = await ai.ask({ chatId: 'g', userId: 'u', text: 'teste', mode: 'chat' });
+    assert.strictEqual(r.ok, false, 'sem Groq deve falhar controladamente');
+    assert.strictEqual(r.provider, 'groq');
+    assert.ok(/^GROQ_/.test(r.code));
+    ok('IA: sem Groq falha sem gerar resposta');
+  } catch (e) { fail('IA Groq-only', e); }
 
   try {
     const r = await ai.ask({ chatId: 'g', userId: 'u', text: '', mode: 'chat' });
     assert.strictEqual(r.ok, false, 'entrada vazia rejeitada');
-    assert.strictEqual(r.code, 'EMPTY_INPUT', 'código EMPTY_INPUT');
+    assert.strictEqual(r.code, 'EMPTY_INPUT');
     ok('IA: entrada vazia rejeitada');
   } catch (e) { fail('IA entrada vazia', e); }
 
   try {
     const r = await ai.ask({ chatId: 'g', userId: 'u', text: 'x'.repeat(600), mode: 'chat' });
     assert.strictEqual(r.ok, false, 'prompt gigante rejeitado');
-    assert.strictEqual(r.code, 'INPUT_TOO_BIG', 'código INPUT_TOO_BIG');
+    assert.strictEqual(r.code, 'INPUT_TOO_BIG');
     ok('IA: prompt gigante rejeitado');
   } catch (e) { fail('IA prompt gigante', e); }
 
   try {
     const s = ai.status();
-    assert.strictEqual(s.apiConfigured, false, 'sem API configurada');
+    assert.strictEqual(s.provider, 'groq');
+    assert.deepStrictEqual(s.order, ['groq']);
     assert.ok(!/key|token|secret/i.test(JSON.stringify(s)), 'sem segredos no status');
-    assert.ok(Array.isArray(s.order), 'cadeia de fallback');
-    ok('IA: status sem segredos');
+    ok('IA: status Groq-only sem segredos');
   } catch (e) { fail('IA status', e); }
-
-  try {
-    ai.memory.setEnabled(false);
-    ai.memory.remember('mem', 'user', 'segredo');
-    assert.strictEqual(ai.memory.history('mem').length, 0, 'memória desligada não grava');
-    ai.memory.setEnabled(true);
-    ai.memory.remember('mem', 'user', 'oi');
-    assert.strictEqual(ai.memory.history('mem').length, 1, 'memória ligada grava');
-    ai.memory.clear('mem');
-    assert.strictEqual(ai.memory.history('mem').length, 0, 'clear limpa');
-    ok('IA: memória on/off/clear');
-  } catch (e) { fail('IA memória', e); }
 
   /* ------------------------- downloads router ------------------------- */
   try {
@@ -477,7 +445,7 @@ async function main() {
   await expectReply('cmd: !botinfo', 'botinfo', [], /Comandos:/);
   await expectReply('cmd: !aistatus', 'aistatus', [], /STATUS DA IA/);
   await expectReply('cmd: !userinfo', 'userinfo', [], /^👤/);
-  await expectReply('cmd: !ia (conta)', 'ia', ['quanto é 15% de 80'], /12/);
+  await expectReply('cmd: !ia (indisponível sem Groq)', 'ia', ['quanto é 15% de 80'], /IA indisponível/);
 
   /* -------------------- telas de menu registradas --------------------- */
   try {

@@ -7,7 +7,7 @@
  * Verifica, com saída clara ✅/❌/⚠️, tudo o que o Lua precisa para:
  *   - stickers (sharp/ffmpeg/node-webpmux)
  *   - downloads (Node, fetch, rede, YouTube/TikTok/…)
- *   - IA (Node, fetch, provider local)
+ *   - IA (Node, fetch, provider Groq)
  * No final imprime um resumo com os comandos exatos a instalar.
  */
 
@@ -275,12 +275,10 @@ async function netTest(name, fn, ms = 10000) {
     else bad('categoria ia VAZIA (atualize o código: git pull ou novo zip)');
     database.close();
 
-    delete process.env.AI_API_URL;
-    delete process.env.AI_API_KEY;
     const aiMod = require('../ai');
-    const r = await aiMod.ask({ chatId: 'diag', userId: 'u', text: '2+2*3', mode: 'chat' });
-    if (r.ok) ok('IA local respondeu: "' + r.text.slice(0, 50) + '"');
-    else bad('IA local falhou: ' + (r.code || r.message));
+    const r = await aiMod.ask({ chatId: 'diag', userId: 'u', text: 'teste Groq', mode: 'chat' });
+    if (r.ok && r.provider === 'groq') ok('IA Groq respondeu');
+    else warn('IA Groq indisponível: ' + (r.code || r.message));
   } catch (e) {
     bad('falha ao carregar comandos/IA → ' + e.message.split('\n')[0]);
   }

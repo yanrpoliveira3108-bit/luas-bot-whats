@@ -36,7 +36,7 @@ Lua é um bot WhatsApp completo com:
 
 - **273+ comandos reais** organizados em 14 categorias (admin, downloads, stickers, IA, RPG, games, anime, utilidades etc.)
 - **Lua Life** — simulador de vida + economia (trabalho, banco, loja, fazenda, missões, conquistas)
-- **IA** — assistente local offline + API externa opcional (OpenAI compatível) com fallback honesto
+- **IA** — assistente Groq com indisponibilidade controlada
 - **Pairing code** — sem QR Code, com parser internacional de números (libphonenumber-js)
 - **Banco SQLite** — via better-sqlite3, com migrações versionadas e backup automático
 - **Arquitetura de plugins** — cada pasta em `commands/` é um plugin com enable/disable
@@ -81,7 +81,7 @@ lua/  (raiz do repositório = ~/lua no Termux)
 │   └── seed/                # dados iniciais
 ├── utils/                   # logger, permissões, cache, cooldown, etc.
 ├── menus/                   # menus interativos
-├── ai/                      # provedores de IA (local, api, fallback)
+├── ai/                      # provider Groq e Character Engine
 ├── anime/                   # provedores anime (jikan)
 ├── assets/                  # imagens (menu.jpg, actions, welcome/goodbye)
 ├── scripts/
@@ -317,10 +317,8 @@ Todas as variáveis ficam em `.env` (nunca versionado). Veja `.env.example` comp
 | Variável | Descrição |
 |----------|-----------|
 | `OPENWEATHER_API_KEY` | Clima (`!clima`) |
-| `AI_PROVIDER` | `auto`, `groq`, `local` (`api` é legacy) |
 | `GROQ_API_KEY` | Chave Groq (somente no `.env`) |
 | `GROQ_MODEL` | Modelo Groq (padrão `openai/gpt-oss-20b`) |
-| `AI_API_URL` / `AI_API_KEY` | Configuração legacy compatível com OpenAI, somente com `AI_PROVIDER=api` |
 
 ---
 

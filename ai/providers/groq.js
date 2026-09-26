@@ -30,7 +30,7 @@ async function handle({ messages, text, mode, history, temperature = 0.7, maxTok
   const selectedModel = model();
   const effectiveTimeoutMs = Math.max(1000, Number(timeoutMs) || 45000);
   const envPath = path.join(CONFIG.paths.root, '.env');
-  logger.info({ hasGroqKey: Boolean(key), keyLength: key.length, model: selectedModel, configuredProvider: process.env.AI_PROVIDER || 'auto' }, '[AI_RUNTIME] groq-config');
+  logger.info({ hasGroqKey: Boolean(key), keyLength: key.length, model: selectedModel }, '[AI_RUNTIME] groq-config');
   logger.info({ path: envPath, exists: fs.existsSync(envPath), hasGroqKey: Boolean(key), hasGroqModel: Boolean(process.env.GROQ_MODEL) }, '[AI_RUNTIME] env-path');
   if (!key) {
     return { ok: false, provider: 'groq', code: 'GROQ_NOT_CONFIGURED', message: '❌ A IA ainda não foi configurada.' };

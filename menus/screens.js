@@ -127,7 +127,7 @@ categoryScreen('lua_rankings_all', 'RANKINGS — TODOS', '🏆', 'rankings');
 nav.registerScreen('lua_ia_menu', () => ({
   id: 'lua_ia_menu',
   title: '🤖 MENU IA',
-  body: 'Assistente do Lua — local (offline) ou API externa, com fallback automático.',
+  body: 'Assistente do Lua — powered by Groq. Se a Groq estiver indisponível, a IA ficará indisponível.',
   buttons: [
     { id: 'chat', text: '💬 Chat (exemplo)', run: run('ia', ['oi']) },
     { id: 'ask', text: '🧠 Perguntar (conta)', run: run('ia', ['quanto é 15% de 80']) },
