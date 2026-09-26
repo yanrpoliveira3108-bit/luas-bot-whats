@@ -51,6 +51,7 @@ async function ask({ chatId, userId, text, mode = 'chat' }) {
   }
 
   const started = Date.now();
+  const explicitGroq = String(CONFIG.ai.provider || '').toLowerCase() === 'groq';
   let lastFailure = null;
 
   for (const name of providerOrder()) {
@@ -65,7 +66,7 @@ async function ask({ chatId, userId, text, mode = 'chat' }) {
         return { ...r, latencyMs, usedFallback: name !== 'groq' && name !== 'api' };
       }
       lastFailure = r && r.code;
-      if (r && NON_FALLBACK_ERRORS.has(r.code)) return r;
+      if (r && (explicitGroq || NON_FALLBACK_ERRORS.has(r.code))) return r;
     } catch (err) {
       lastFailure = err && err.message;
       logger.warn({ provider: name, err: err.message }, 'provider de IA falhou');
