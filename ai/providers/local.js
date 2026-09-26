@@ -229,7 +229,6 @@ function summarizeResponse(input) {
  * @returns {Promise<{ ok:true, text, provider:'local', model:'assistente-local' }>}
  */
 async function handle({ text, mode }) {
-  console.log('[AI_PATH_PROBE] local-enter', JSON.stringify({ pid: process.pid, mode }));
   const input = String(text || '').trim();
   let out;
   switch (mode) {
