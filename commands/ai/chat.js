@@ -7,6 +7,7 @@
 const CONFIG = require('../../config');
 const ai = require('../../ai');
 const errorHandler = require('../../handlers/errorHandler');
+const { sendLongMessage } = require('../../utils/aiResponse');
 
 module.exports = [
   {
@@ -41,7 +42,7 @@ module.exports = [
         const r = await ai.character.ask({ chatId: ctx.remoteJid, userId: ctx.sender, text, mode: 'chat', participant: ctx.sender });
         if (!r.ok) return ctx.reply(r.message);
         const meta = r.provider === 'groq' ? `\n\n_${r.model} · ${r.latencyMs}ms_` : '';
-        await ctx.reply(r.text + meta);
+        await sendLongMessage(ctx, r.text + meta);
       } catch (err) {
         await errorHandler.handle(ctx, err, { name: 'ia' });
       }

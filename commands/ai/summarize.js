@@ -9,6 +9,7 @@
 const CONFIG = require('../../config');
 const ai = require('../../ai');
 const errorHandler = require('../../handlers/errorHandler');
+const { sendLongMessage } = require('../../utils/aiResponse');
 
 function quotedText(msg) {
   const m = msg && msg.message ? msg.message : msg;
@@ -46,7 +47,7 @@ module.exports = [
       try {
         const r = await ai.character.ask({ chatId: ctx.remoteJid, userId: ctx.sender, text, mode: 'summarize', participant: ctx.sender });
         if (!r.ok) return ctx.reply(r.message);
-        await ctx.reply(r.text);
+        await sendLongMessage(ctx, r.text);
       } catch (err) {
         await errorHandler.handle(ctx, err, { name: 'resumir' });
       }

@@ -5,6 +5,7 @@ const logger = require('../../utils/logger').child('ai:character');
 const router = require('../router');
 const state = require('./state');
 const persona = require('./persona');
+const { sendLongMessage } = require('../../utils/aiResponse');
 const keyed = new Map();
 const autoLast = new Map();
 
@@ -77,7 +78,7 @@ async function handleAutomatic(ctx) {
   const antiBan = require('../../utils/antiBan');
   await antiBan.simulateTyping(ctx.socket, ctx.remoteJid, result.text, 'composing');
   logger.info({ chatId: ctx.remoteJid, id: diagnosticId }, '[AI_CHARACTER] send');
-  await ctx.reply(result.text);
+  await sendLongMessage(ctx, result.text);
   logger.info({ chatId: ctx.remoteJid, id: diagnosticId }, '[AI_CHARACTER] done');
   return true;
 }

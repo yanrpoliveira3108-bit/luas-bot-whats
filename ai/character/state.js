@@ -7,7 +7,11 @@ const MAX_RECENT = 12;
 const MAX_MEMORY = 30;
 
 function scrub(value) {
-  return String(value || '').replace(SECRET, '[REDACTED]').slice(0, 1200);
+  return String(value || '').replace(SECRET, '[REDACTED]');
+}
+
+function persistable(value) {
+  return scrub(value).slice(0, 1200);
 }
 function defaultState() {
   return { enabled: false, memoryEnabled: true, styleLearningEnabled: true, recent: [], memories: [], style: { formality: 0.5, verbosity: 0.5, humor: 0.2, emojiUsage: 0.1, slangAffinity: 0.1, technicalLevel: 0.5, updatedAt: null } };
@@ -28,7 +32,7 @@ function setEnabled(chatId, enabled) { return update(chatId, (s) => { s.enabled 
 function setMemoryEnabled(chatId, enabled) { return update(chatId, (s) => { s.memoryEnabled = !!enabled; }); }
 function clearMemory(chatId) { return update(chatId, (s) => { s.recent = []; s.memories = []; }); }
 function addRecent(chatId, role, content, participant) {
-  const text = scrub(content); if (!text) return get(chatId);
+  const text = persistable(content); if (!text) return get(chatId);
   return update(chatId, (s) => { if (s.memoryEnabled) { s.recent.push({ role, content: text, participant: participant || null, timestamp: new Date().toISOString() }); s.recent = s.recent.slice(-MAX_RECENT); } });
 }
 function learn(chatId, text) {
@@ -45,7 +49,7 @@ function learn(chatId, text) {
 }
 function addMemory(chatId, text) {
   if (UNSAFE_MEMORY.test(String(text || ''))) return;
-  const clean = scrub(text); if (!clean) return;
+  const clean = persistable(text); if (!clean) return;
   return update(chatId, (s) => { if (s.memoryEnabled && !s.memories.some((m) => m.text === clean)) s.memories.push({ text: clean, confidence: 0.5, updatedAt: new Date().toISOString() }); s.memories = s.memories.slice(-MAX_MEMORY); });
 }
 function memoryText(chatId) {

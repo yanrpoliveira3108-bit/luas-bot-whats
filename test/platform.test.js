@@ -57,8 +57,8 @@ async function main() {
   try {
     const r = await ai.ask({ chatId: 'g', userId: 'u', text: 'x'.repeat(600), mode: 'chat' });
     assert.strictEqual(r.ok, false, 'prompt gigante rejeitado');
-    assert.strictEqual(r.code, 'INPUT_TOO_BIG');
-    ok('IA: prompt gigante rejeitado');
+    assert.strictEqual(r.code, 'GROQ_NOT_CONFIGURED');
+    ok('IA: prompt grande preservado até a política da Groq');
   } catch (e) { fail('IA prompt gigante', e); }
 
   try {

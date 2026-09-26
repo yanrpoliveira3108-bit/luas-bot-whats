@@ -16,7 +16,6 @@ function providerOrder() { return ['groq']; }
 async function ask({ chatId, userId, text, mode = 'chat', messages, remember = true }) {
   const input = String(text || '').trim();
   if (!input) return { ok: false, provider: 'groq', code: 'EMPTY_INPUT', message: '⚠️ Envie um texto para a IA.' };
-  if (input.length > CONFIG.ai.maxInput) return { ok: false, provider: 'groq', code: 'INPUT_TOO_BIG', message: `📏 Texto muito longo (limite ${CONFIG.ai.maxInput} caracteres).` };
 
   const started = Date.now();
   logger.info({ configuredProvider: 'groq', hasGroqKey: groq.isConfigured(), mode }, '[AI_ROUTER] request');
@@ -59,7 +58,7 @@ function status() {
     apiConfigured: groq.isConfigured(),
     apiUrl: 'Groq',
     memory: memory.enabled() ? `ativo (${memory.size()} conversas)` : 'desativado',
-    limits: { maxInput: CONFIG.ai.maxInput, timeoutMs: CONFIG.ai.timeoutMs, cooldownMs: CONFIG.ai.cooldownMs },
+    limits: { timeoutMs: CONFIG.ai.timeoutMs, cooldownMs: CONFIG.ai.cooldownMs },
   };
 }
 

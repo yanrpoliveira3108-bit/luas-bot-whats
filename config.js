@@ -447,7 +447,6 @@ const CONFIG = {
     // A IA operacional é exclusivamente Groq. O modelo vem de GROQ_MODEL.
     systemPrompt: envStr('AI_SYSTEM_PROMPT', ''),
     memory: envBool('AI_MEMORY', true),
-    maxInput: envInt('AI_MAX_INPUT', 500),
     maxHistory: envInt('AI_HISTORY', 8),
     timeoutMs: envInt('AI_TIMEOUT', 45000),
     cooldownMs: envInt('AI_COOLDOWN', 6000),

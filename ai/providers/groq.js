@@ -25,7 +25,7 @@ function errorForStatus(status) {
   return { code: `GROQ_HTTP_${httpStatus}`, httpStatus, message: '⚠️ A Groq recusou a solicitação.' };
 }
 
-async function handle({ messages, text, mode, history, temperature = 0.7, maxTokens = 800, timeoutMs = 45000 }) {
+async function handle({ messages, text, mode, history, temperature = 0.7, maxTokens, timeoutMs = 45000 }) {
   const key = apiKey();
   const selectedModel = model();
   const effectiveTimeoutMs = Math.max(1000, Number(timeoutMs) || 45000);
@@ -51,7 +51,12 @@ async function handle({ messages, text, mode, history, temperature = 0.7, maxTok
       method: 'POST',
       signal: controller.signal,
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model: selectedModel, messages: normalizedMessages, temperature, max_tokens: maxTokens }),
+      body: JSON.stringify({
+        model: selectedModel,
+        messages: normalizedMessages,
+        temperature,
+        ...(Number.isFinite(Number(maxTokens)) && Number(maxTokens) > 0 ? { max_tokens: Number(maxTokens) } : {}),
+      }),
     });
     const responseLatencyMs = Date.now() - started;
     logger.info({ status: response.status, ok: response.ok, latencyMs: responseLatencyMs, contentType: response.headers && response.headers.get ? response.headers.get('content-type') : null }, '[GROQ_TRACE] http-response');
@@ -68,7 +73,10 @@ async function handle({ messages, text, mode, history, temperature = 0.7, maxTok
       logger.warn({ ok: false, provider: 'groq', code: failure.code, latencyMs: failure.latencyMs }, '[GROQ_TRACE] provider-result');
       return failure;
     }
-    const output = json && json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content;
+    const choice = json && json.choices && json.choices[0];
+    const finishReason = choice && choice.finish_reason;
+    if (finishReason === 'length') logger.warn({ reason: finishReason, model: selectedModel }, '[GROQ] completion-truncated');
+    const output = choice && choice.message && choice.message.content;
     logger.info({ hasChoices: Boolean(json && json.choices), choicesLength: Array.isArray(json && json.choices) ? json.choices.length : null, hasMessage: Boolean(json && json.choices && json.choices[0] && json.choices[0].message), contentType: typeof output, textLength: typeof output === 'string' ? output.length : 0 }, '[GROQ_TRACE] parsed');
     if (typeof output !== 'string' || !output.trim()) {
       logger.warn({ hasChoices: Boolean(json && json.choices), choicesLength: Array.isArray(json && json.choices) ? json.choices.length : null, hasMessage: Boolean(json && json.choices && json.choices[0] && json.choices[0].message), hasContent: Boolean(json && json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content), contentType: typeof (json && json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content) }, '[AI_RUNTIME] groq-invalid-response');
