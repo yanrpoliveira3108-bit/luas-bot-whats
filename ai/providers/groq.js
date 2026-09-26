@@ -16,6 +16,10 @@ function errorForStatus(status) {
   const httpStatus = Number(status);
   if (httpStatus === 401) return { code: 'GROQ_UNAUTHORIZED', httpStatus, message: '❌ A chave da Groq foi rejeitada.' };
   if (httpStatus === 403) return { code: 'GROQ_FORBIDDEN', httpStatus, message: '❌ A Groq recusou o acesso para esta chave.' };
+  if (httpStatus === 400) return { code: 'GROQ_BAD_REQUEST', httpStatus, message: '⚠️ A Groq recusou o formato da solicitação.' };
+  if (httpStatus === 404) return { code: 'GROQ_NOT_FOUND', httpStatus, message: '⚠️ Endpoint ou modelo da Groq não encontrado.' };
+  if (httpStatus === 413) return { code: 'GROQ_PAYLOAD_TOO_LARGE', httpStatus, message: '⚠️ Solicitação grande demais para a Groq.' };
+  if (httpStatus === 422) return { code: 'GROQ_INVALID_REQUEST', httpStatus, message: '⚠️ Solicitação inválida para a Groq.' };
   if (httpStatus === 429) return { code: 'GROQ_RATE_LIMIT', httpStatus, message: '⏳ A Groq atingiu o limite temporário. Tente novamente em instantes.' };
   if (httpStatus >= 500) return { code: 'GROQ_SERVER_ERROR', httpStatus, message: '⚠️ A Groq está temporariamente indisponível.' };
   return { code: `GROQ_HTTP_${httpStatus}`, httpStatus, message: '⚠️ A Groq recusou a solicitação.' };
