@@ -55,13 +55,13 @@ async function handle(ctx, err, command) {
   const code = (err && err.code) || 'GENERIC';
   logger.error(
     {
-      user: ctx && ctx.sender,
-      chat: ctx && ctx.remoteJid,
       command: (command && command.name) || (ctx && ctx.command),
+      name: err && err.name,
       code,
-      err: err && err.message,
+      message: err && err.message,
+      stack: err && err.stack,
     },
-    'erro em comando'
+    '[COMMAND_ERROR]'
   );
 
   if (!ctx || typeof ctx.reply !== 'function') return;

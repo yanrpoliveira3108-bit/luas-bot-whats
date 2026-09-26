@@ -36,7 +36,11 @@ function safeForwardContext(message) {
 }
 
 function quotedContent(ctx) {
-  return ctx && ctx.quoted && typeof ctx.quoted === 'object' ? ctx.quoted : null;
+  const raw = ctx && ctx.quoted;
+  if (!raw || typeof raw !== 'object') return null;
+  // buildContext normally exposes quotedMessage (IMessage). Accept a complete
+  // WAMessage too, because some fork paths attach the key around it.
+  return raw.key && raw.message ? raw.message : raw;
 }
 
 function buildForwardContent(ctx, mentions = []) {
@@ -54,19 +58,36 @@ function buildForwardContent(ctx, mentions = []) {
 
 async function forwardQuoted({ ctx, command, mentions: mentionList = [] }) {
   const quoted = quotedContent(ctx);
-  const hasContextInfo = Boolean(quoted && findContextInfo(quoted));
+  const normalized = quoted && unwrapMessage(quoted);
+  const quotedType = normalized ? Object.keys(normalized)[0] || 'unknown' : 'none';
   const context = quoted && findContextInfo(quoted);
+  const input = {
+    command,
+    hasQuoted: Boolean(quoted),
+    quotedType,
+    hasQuotedMessage: Boolean(quoted),
+    quotedMessageKeys: quoted && typeof quoted === 'object' ? Object.keys(quoted) : [],
+    hasContextInfo: Boolean(context),
+  };
+  logger.info(input, '[QUOTE_FORWARD] input');
   const hasNewsletterInfo = Boolean(context && context.forwardedNewsletterMessageInfo);
-  logger.info({ command, quotedType: quoted ? Object.keys(unwrapMessage(quoted) || {})[0] || 'unknown' : 'none', hasContextInfo, hasNewsletterInfo }, '[QUOTE_FORWARD] prepare');
+  logger.info({ command, quotedType, hasContextInfo: Boolean(context), hasNewsletterInfo }, '[QUOTE_FORWARD] prepare');
   if (!quoted) return { sent: false, mode: 'none' };
   const mentions = Array.isArray(mentionList) ? mentionList.filter(Boolean) : [];
-  const content = buildForwardContent(ctx, mentions);
+  let content;
+  try {
+    content = buildForwardContent(ctx, mentions);
+  } catch (err) {
+    logger.error({ command, stage: 'prepare', quotedType, errorName: err && err.name, errorCode: err && err.code, errorMessage: err && err.message, stack: err && err.stack }, '[QUOTE_FORWARD_ERROR]');
+    throw err;
+  }
   try {
     await ctx.socket.sendMessage(ctx.remoteJid, content);
     logger.info({ command, mode: 'forward', mentionsCount: mentions.length }, '[QUOTE_FORWARD] send');
     logger.info({ success: true }, '[QUOTE_FORWARD] result');
     return { sent: true, mode: 'forward' };
   } catch (err) {
+    logger.error({ command, stage: 'send', quotedType, errorName: err && err.name, errorCode: err && err.code, errorMessage: err && err.message, stack: err && err.stack }, '[QUOTE_FORWARD_ERROR]');
     logger.warn({ command, mode: 'forward', success: false, errorCode: err && err.code, errorMessage: err && err.message }, '[QUOTE_FORWARD] result');
     throw err;
   }
