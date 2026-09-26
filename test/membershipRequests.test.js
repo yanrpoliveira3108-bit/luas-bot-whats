@@ -30,5 +30,11 @@ const sock = {
   assert.strictEqual(captcha.pendingFor(B, U).length, 1);
   await membership.handleMessage(sock, { key: { remoteJid: B }, messageStubType: 172, messageStubParameters: [U, 'revoked'] });
   assert.strictEqual(captcha.pendingFor(B, U).length, 0);
+  // O stub pode trazer LID enquanto listPending retorna PN: o match usa o mapa real.
+  groups.setSetting(B, 'captcha', true);
+  const lid = '1234567890@lid';
+  await membership.handleMessage(sock, { key: { remoteJid: B }, messageStubType: 172, messageStubParameters: [lid, 'created', 'invite'] });
+  assert.ok(calls.some((x) => x.jid === U && x.body && x.body.text.includes('Verificação')));
+  await captcha.cancelFor(B, U, 'test-cleanup-lid');
   database.close(); rm(file); rm(`${file}-wal`); rm(`${file}-shm`); console.log('membershipRequests.test.js: OK');
 })().catch((e) => { try { database.close(); } catch (_) {} console.error(e); process.exitCode = 1; });

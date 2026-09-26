@@ -426,7 +426,19 @@ function wireEvents(sockRef, saveCreds) {
         String(participant || '').endsWith('@lid') ||
         String(participantAlt || '').endsWith('@lid')
       );
-      const isStub = typeof m.messageStubType === 'number' && m.messageStubType !== 0;
+      const isStub = m && m.messageStubType !== undefined && m.messageStubType !== null && m.messageStubType !== 0;
+      if (isStub) {
+        logger.info(
+          {
+            remoteJid: jid,
+            messageStubType: m.messageStubType,
+            messageStubParameters: Array.isArray(m.messageStubParameters) ? m.messageStubParameters : [],
+            participant,
+            keyRemoteJid: jid,
+          },
+          '[MEMBERSHIP_DEBUG] stub recebido'
+        );
+      }
       if (lidGroup || isStub) {
         logger.info(
           { chat: jid, participant, participantAlt, type, stub: m.messageStubType },

@@ -35,7 +35,9 @@ function schedule(r) {
   if (!r || r.status !== 'pending') return;
   clearTimer(r.challenge_id);
   const delay = Math.max(0, Number(r.expires_at) - Date.now());
-  timers.set(r.challenge_id, setTimeout(() => expire(r.challenge_id).catch(() => {}), delay));
+  timers.set(r.challenge_id, setTimeout(() => expire(r.challenge_id).catch((err) => {
+    logger.error({ challengeId: r.challenge_id, err: err.message, stack: err.stack }, '[CAPTCHA_ERROR] falha no timeout');
+  }), delay));
 }
 function clearTimer(id) { const t = timers.get(id); if (t) clearTimeout(t); timers.delete(id); }
 function pendingFor(groupJid, participantJid) {
@@ -59,7 +61,10 @@ function create(groupJid, participantJid, meta = {}) {
     }
     throw err;
   }
-  const r = row(id); schedule(r); return { ...publicRow(r), prompt: challenge.prompt };
+  const r = row(id);
+  schedule(r);
+  logger.info({ group: groupJid, challengeId: id }, '[CAPTCHA] desafio persistido');
+  return { ...publicRow(r), prompt: challenge.prompt };
 }
 function transition(id, from, to) {
   const result = db.prepare('captcha_transition', `UPDATE captcha_challenges SET status = ? WHERE challenge_id = ? AND status = ?`).run(to, id, from);
@@ -129,15 +134,35 @@ async function handleCreated(sock, groupJid, participantJid, groupName = 'este g
   const challenge = create(groupJid, participantJid);
   // Stub duplicado não dispara nova DM nem reinicia o TTL.
   if (!challenge.prompt) return challenge;
+  logger.info({ group: groupJid, challengeId: challenge.challengeId }, '[CAPTCHA] resolvendo destinatário privado');
   const privateJid = participantJid.endsWith('@lid') ? await resolveLid(sock, participantJid) : participantJid;
-  if (!privateJid) { await reject(challenge.challengeId); logger.error({ group: groupJid }, '[CAPTCHA_DELIVERY_ERROR] LID/PN não resolvido'); return null; }
+  if (!privateJid) {
+    await reject(challenge.challengeId);
+    logger.error({ group: groupJid, participant: participantJid }, '[CAPTCHA_DELIVERY_ERROR] LID/PN não resolvido');
+    return null;
+  }
   const shortId = challenge.challengeId.slice(-6).toUpperCase();
   const text = `🔐 *Verificação de entrada*\n\nVocê solicitou entrada em *${groupName}*.\n\n[${shortId}] ${challenge.prompt}\n\nSe tiver mais de uma verificação, responda: ${shortId} sua resposta\n⏱ Você tem 3 minutos.`;
-  try { await sock.sendMessage(privateJid, { text }); } catch (err) { logger.error({ group: groupJid, err: err.message }, '[CAPTCHA_DELIVERY_ERROR] falha ao enviar DM'); await reject(challenge.challengeId); return null; }
+  logger.info({ group: groupJid, challengeId: challenge.challengeId }, '[CAPTCHA] enviando DM');
+  try {
+    await sock.sendMessage(privateJid, { text });
+    logger.info({ group: groupJid, challengeId: challenge.challengeId }, '[CAPTCHA] DM enviada');
+  } catch (err) {
+    logger.error({ group: groupJid, err: err.message, stack: err.stack }, '[CAPTCHA_DELIVERY_ERROR] falha ao enviar DM');
+    await reject(challenge.challengeId);
+    return null;
+  }
   return challenge;
 }
 async function resolveLid(sock, lid) {
-  try { const map = sock && sock.signalRepository && sock.signalRepository.lidMapping; const value = map && typeof map.getPNForLID === 'function' ? await map.getPNForLID(lid) : null; return value && !String(value).endsWith('@lid') ? String(value).replace(/:\d+(?=@)/, '') : null; } catch (_) { return null; }
+  try {
+    const map = sock && sock.signalRepository && sock.signalRepository.lidMapping;
+    const value = map && typeof map.getPNForLID === 'function' ? await map.getPNForLID(lid) : null;
+    return value && !String(value).endsWith('@lid') ? String(value).replace(/:\d+(?=@)/, '') : null;
+  } catch (err) {
+    logger.error({ lid: String(lid).slice(0, 8), err: err.message, stack: err.stack }, '[CAPTCHA_DELIVERY_ERROR] falha na resolução LID/PN');
+    return null;
+  }
 }
 function setSocket(sock) { socketRef = sock; }
 function makeCode() { return `${randomCode(4)}-${randomCode(4)}`; }

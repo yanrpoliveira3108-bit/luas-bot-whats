@@ -156,7 +156,7 @@ connection.onMessage((sock, messages, type) => {
       commandHandler.handleMessage(sock, msg, type).catch((err) => {
         logger.error({ err: err.message }, 'erro não tratado em mensagem');
       });
-    }).catch((err) => logger.error({ err: err.message }, 'erro no fluxo de pedidos'));
+    }).catch((err) => logger.error({ err: err.message, stack: err.stack }, '[MEMBERSHIP_ERROR] erro no fluxo de pedidos'));
   }
 });
 
