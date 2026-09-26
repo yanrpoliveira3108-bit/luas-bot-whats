@@ -144,19 +144,19 @@ autoBackup.startAutoBackup();
 
 /* ------------------------- roteamento de eventos ------------------------ */
 
+const membershipRequests = require('./utils/membershipRequests');
+
 connection.onMessage((sock, messages, type) => {
   for (const msg of messages) {
-    // Freio de envio: saber QUEM falou com o bot é o que autoriza responder no
-    // privado. Sem isso, o freio trata o PV como "conversa fria" e não deixa o
-    // bot iniciar conversa com estranho (gatilho clássico de restrição).
-    try {
-      if (msg && msg.key && msg.key.remoteJid) sendGuard.noteInbound(msg.key.remoteJid);
-    } catch (_) {
-      /* o freio nunca pode atrapalhar o pipeline */
-    }
-    commandHandler.handleMessage(sock, msg, type).catch((err) => {
-      logger.error({ err: err.message }, 'erro não tratado em mensagem');
-    });
+    try { if (msg && msg.key && msg.key.remoteJid) sendGuard.noteInbound(msg.key.remoteJid); } catch (_) {}
+    // O vendor entrega pedidos como stubs no mesmo pipeline de messages.upsert.
+    // Consome somente esses stubs; mensagens normais seguem intactas.
+    membershipRequests.handleMessage(sock, msg, type).then((consumed) => {
+      if (consumed) return;
+      commandHandler.handleMessage(sock, msg, type).catch((err) => {
+        logger.error({ err: err.message }, 'erro não tratado em mensagem');
+      });
+    }).catch((err) => logger.error({ err: err.message }, 'erro no fluxo de pedidos'));
   }
 });
 

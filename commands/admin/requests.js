@@ -6,6 +6,7 @@ const buttonHandler = require('../../handlers/buttonHandler');
 const logger = require('../../utils/logger').child('requests');
 const { resolveTarget } = require('../_shared/admin');
 const { listPending, approveRequests, rejectRequests } = require('../../utils/groupRequests');
+const captcha = require('../../utils/captchaManager');
 
 function enc(jid) {
   return jid.replace(/@/g, ':').replace(/\./g, '-');
@@ -21,11 +22,19 @@ function resumo(acao, result) {
 }
 
 async function approveOne(ctx, jid) {
-  return approveRequests(ctx.socket, ctx.remoteJid, [{ jid }]);
+  const result = await approveRequests(ctx.socket, ctx.remoteJid, [{ jid }]);
+  if (result.success) await captcha.cancelFor(ctx.remoteJid, jid, 'manual-approve');
+  return result;
 }
 
 async function rejectOne(ctx, jid) {
-  return rejectRequests(ctx.socket, ctx.remoteJid, [{ jid }]);
+  const result = await rejectRequests(ctx.socket, ctx.remoteJid, [{ jid }]);
+  if (result.success) await captcha.cancelFor(ctx.remoteJid, jid, 'manual-reject');
+  return result;
+}
+
+async function cancelSuccessful(ctx, result, reason) {
+  for (const item of result.results || []) if (item.ok) await captcha.cancelFor(ctx.remoteJid, item.jid, reason);
 }
 
 module.exports = [
@@ -133,6 +142,7 @@ module.exports = [
       const pending = await listPending(ctx.socket, ctx.remoteJid);
       if (!pending.length) return ctx.reply('✅ Nenhum pedido pendente.');
       const result = await approveRequests(ctx.socket, ctx.remoteJid, pending);
+      await cancelSuccessful(ctx, result, 'manual-approve-all');
       await ctx.reply(resumo('approve', result));
     },
   },
@@ -150,6 +160,7 @@ module.exports = [
       const pending = await listPending(ctx.socket, ctx.remoteJid);
       if (!pending.length) return ctx.reply('✅ Nenhum pedido pendente.');
       const result = await rejectRequests(ctx.socket, ctx.remoteJid, pending);
+      await cancelSuccessful(ctx, result, 'manual-reject-all');
       await ctx.reply(resumo('reject', result));
     },
   },

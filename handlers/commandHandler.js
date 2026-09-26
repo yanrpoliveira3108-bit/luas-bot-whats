@@ -33,6 +33,7 @@ const perf = require('../utils/perf');
 const antiBan = require('../utils/antiBan');
 const contextReact = require('../utils/contextReact');
 const prefixReply = require('../utils/prefixReply');
+const captchaManager = require('../utils/captchaManager');
 const {
   extractText,
   getQuoted,
@@ -500,8 +501,13 @@ async function handleMessage(sock, msg, type) {
 
     perf.add('messages');
 
-    // Anti-PV (recursos globais): trata o privado antes de qualquer coisa
-    if (!ctx.isGroup && (await handlePrivateAntiPv(sock, ctx))) return;
+    // CAPTCHA só consome uma DM quando existe desafio pending para este remetente.
+    // Sem desafio, a mensagem segue o fluxo privado normal.
+    if (!ctx.isGroup) {
+      const consumedCaptcha = await captchaManager.onResponse(sock, ctx.sender, ctx.text, (text) => ctx.reply(text, { quoted: false }));
+      if (consumedCaptcha) return;
+      if (await handlePrivateAntiPv(sock, ctx)) return;
+    }
 
     const lidAddressed = ctx.isGroup && (
       String(msg.key.participant || '').endsWith('@lid') ||

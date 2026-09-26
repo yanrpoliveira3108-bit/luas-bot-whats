@@ -785,6 +785,24 @@ const MIGRATIONS = [
     conversions_to_media INTEGER NOT NULL DEFAULT 0,
     last_operation TEXT DEFAULT ''
   );`,
+
+  // 46 — desafios CAPTCHA de pedidos de entrada
+  `CREATE TABLE IF NOT EXISTS captcha_challenges (
+    challenge_id TEXT PRIMARY KEY,
+    group_jid TEXT NOT NULL,
+    participant_jid TEXT NOT NULL,
+    type TEXT NOT NULL,
+    expected_answer TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending'
+      CHECK(status IN ('pending','verified','expired','rejected','cancelled'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_captcha_pair ON captcha_challenges(group_jid, participant_jid, status);
+  CREATE INDEX IF NOT EXISTS idx_captcha_person ON captcha_challenges(participant_jid, status);
+  CREATE INDEX IF NOT EXISTS idx_captcha_expiry ON captcha_challenges(status, expires_at);
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_captcha_pending_pair ON captcha_challenges(group_jid, participant_jid) WHERE status = 'pending';`,
 ];
 
 /* ----------------------------- core ------------------------------ */
