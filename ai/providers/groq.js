@@ -35,9 +35,11 @@ async function handle({ messages, text, mode, history, temperature = 0.7, maxTok
     { role: 'user', content: String(text || '') },
   ];
   logger.info({ messagesCount: normalizedMessages.length, roles: normalizedMessages.map((m) => m && m.role), contentTypes: normalizedMessages.map((m) => typeof (m && m.content)), totalChars: normalizedMessages.reduce((n, m) => n + String((m && m.content) || '').length, 0), model: selectedModel, maxTokens, temperature }, '[AI_RUNTIME] groq-request-shape');
+  const effectiveTimeoutMs = Math.max(1000, Number(timeoutMs) || 45000);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs) || 45000));
+  const timer = setTimeout(() => controller.abort(), effectiveTimeoutMs);
   const started = Date.now();
+  logger.info({ model: selectedModel, hasKey: Boolean(key), messagesCount: normalizedMessages.length, timeoutMs: effectiveTimeoutMs }, '[GROQ_TRACE] request-start');
   try {
     const response = await fetch(ENDPOINT, {
       method: 'POST',
@@ -45,19 +47,43 @@ async function handle({ messages, text, mode, history, temperature = 0.7, maxTok
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body: JSON.stringify({ model: selectedModel, messages: normalizedMessages, temperature, max_tokens: maxTokens }),
     });
-    if (!response.ok) return { ok: false, ...errorForStatus(response.status), latencyMs: Date.now() - started };
+    const responseLatencyMs = Date.now() - started;
+    logger.info({ status: response.status, ok: response.ok, latencyMs: responseLatencyMs, contentType: response.headers && response.headers.get ? response.headers.get('content-type') : null }, '[GROQ_TRACE] http-response');
+    if (!response.ok) {
+      const failure = { ok: false, provider: 'groq', ...errorForStatus(response.status), latencyMs: responseLatencyMs };
+      logger.warn({ ok: false, provider: 'groq', code: failure.code, httpStatus: failure.httpStatus, latencyMs: failure.latencyMs }, '[GROQ_TRACE] provider-result');
+      return failure;
+    }
     let json;
-    try { json = await response.json(); } catch (_) { return { ok: false, code: 'GROQ_INVALID_RESPONSE', message: '⚠️ A Groq retornou uma resposta inválida.', latencyMs: Date.now() - started }; }
+    try { json = await response.json(); } catch (_) {
+      logger.warn({ hasChoices: false, choicesLength: null, hasMessage: false, contentType: null, textLength: 0 }, '[GROQ_TRACE] parsed');
+      const failure = { ok: false, provider: 'groq', code: 'GROQ_INVALID_RESPONSE', message: '⚠️ A Groq retornou uma resposta inválida.', latencyMs: Date.now() - started };
+      logger.warn({ ok: false, provider: 'groq', code: failure.code, latencyMs: failure.latencyMs }, '[GROQ_TRACE] provider-result');
+      return failure;
+    }
     const output = json && json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content;
+    logger.info({ hasChoices: Boolean(json && json.choices), choicesLength: Array.isArray(json && json.choices) ? json.choices.length : null, hasMessage: Boolean(json && json.choices && json.choices[0] && json.choices[0].message), contentType: typeof output, textLength: typeof output === 'string' ? output.length : 0 }, '[GROQ_TRACE] parsed');
     if (typeof output !== 'string' || !output.trim()) {
       logger.warn({ hasChoices: Boolean(json && json.choices), choicesLength: Array.isArray(json && json.choices) ? json.choices.length : null, hasMessage: Boolean(json && json.choices && json.choices[0] && json.choices[0].message), hasContent: Boolean(json && json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content), contentType: typeof (json && json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content) }, '[AI_RUNTIME] groq-invalid-response');
-      return { ok: false, code: 'GROQ_INVALID_RESPONSE', message: '⚠️ A Groq retornou uma resposta vazia.', latencyMs: Date.now() - started };
+      const failure = { ok: false, provider: 'groq', code: 'GROQ_INVALID_RESPONSE', message: '⚠️ A Groq retornou uma resposta vazia.', latencyMs: Date.now() - started };
+      logger.warn({ ok: false, provider: 'groq', code: failure.code, latencyMs: failure.latencyMs }, '[GROQ_TRACE] provider-result');
+      return failure;
     }
-    return { ok: true, provider: 'groq', model: selectedModel, text: output.trim(), latencyMs: Date.now() - started };
+    const result = { ok: true, provider: 'groq', model: selectedModel, text: output.trim(), latencyMs: Date.now() - started };
+    logger.info({ ok: true, provider: 'groq', textLength: output.trim().length, latencyMs: result.latencyMs }, '[GROQ_TRACE] provider-result');
+    return result;
   } catch (err) {
-    if (err && err.name === 'AbortError') return { ok: false, code: 'GROQ_TIMEOUT', message: '⚠️ A IA demorou demais para responder.', latencyMs: Date.now() - started };
-    logger.warn({ errorName: err && err.name, errorCode: err && err.code, causeCode: err && err.cause && err.cause.code }, '[AI_RUNTIME] groq-network-error');
-    return { ok: false, code: 'GROQ_NETWORK_ERROR', message: '⚠️ O serviço de IA está temporariamente indisponível.' };
+    const elapsedMs = Date.now() - started;
+    if (err && err.name === 'AbortError') {
+      logger.warn({ timeoutMs: effectiveTimeoutMs, elapsedMs }, '[GROQ_TRACE] timeout');
+      const failure = { ok: false, provider: 'groq', code: 'GROQ_TIMEOUT', message: '⚠️ A IA demorou demais para responder.', latencyMs: elapsedMs };
+      logger.warn({ ok: false, provider: 'groq', code: failure.code, latencyMs: elapsedMs }, '[GROQ_TRACE] provider-result');
+      return failure;
+    }
+    logger.warn({ name: err && err.name, message: err && err.message, code: err && err.code, causeName: err && err.cause && err.cause.name, causeCode: err && err.cause && err.cause.code, latencyMs: elapsedMs }, '[GROQ_TRACE] fetch-error');
+    const failure = { ok: false, provider: 'groq', code: 'GROQ_NETWORK_ERROR', message: '⚠️ O serviço de IA está temporariamente indisponível.', latencyMs: elapsedMs };
+    logger.warn({ ok: false, provider: 'groq', code: failure.code, latencyMs: elapsedMs }, '[GROQ_TRACE] provider-result');
+    return failure;
   } finally { clearTimeout(timer); }
 }
 

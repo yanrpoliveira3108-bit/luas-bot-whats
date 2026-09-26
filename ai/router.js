@@ -65,6 +65,7 @@ async function ask({ chatId, userId, text, mode = 'chat', messages, remember = t
     logger.info({ provider: name, mode, messagesCount: requestMessages ? requestMessages.length : undefined }, '[AI_ROUTER] attempt');
     try {
       const r = await provider.handle({ chatId, userId, text: input, mode, messages: requestMessages, history: requestMessages ? undefined : memory.history(chatId) });
+      if (name === 'groq') logger.info({ ok: Boolean(r && r.ok), provider: r && r.provider, code: r && r.code, httpStatus: r && r.httpStatus, latencyMs: r && r.latencyMs }, '[AI_ROUTER] groq-result');
       if (r && r.ok) {
         const latencyMs = Date.now() - started;
         if (remember) {
