@@ -3,6 +3,7 @@
 const groups = require('../../database/groups');
 const { getParticipants, resolveTarget, removeBan, mudarParticipante } = require('../_shared/admin');
 const alvoUtil = require('../../utils/alvo');
+const { forwardQuoted } = require('../../utils/quoteForward');
 
 module.exports = [
   {
@@ -109,14 +110,39 @@ module.exports = [
     category: 'admin',
     adminOnly: true,
     groupOnly: true,
-    description: 'Marca todos sem mostrar os nomes.',
-    usage: '!hidetag <mensagem>',
+    description: 'Marca todos sem mostrar os nomes; pode republicar a mensagem respondida.',
+    usage: '!hidetag <mensagem> (ou responda a uma mensagem)',
     cooldown: 5000,
     execute: async (ctx) => {
       const parts = await getParticipants(ctx);
-      const mentions = parts.map((p) => p.id).filter((id) => id !== ctx.socket.user.id);
-      const text = ctx.args.join(' ') || '📢';
+      const botIds = new Set([ctx.socket.user && ctx.socket.user.id, ctx.socket.user && ctx.socket.user.lid].filter(Boolean));
+      const mentions = parts.map((p) => p.id || p.lid || p.phoneNumber).filter((id) => id && !botIds.has(id));
+      if (ctx.quoted) {
+        await forwardQuoted({ ctx, command: 'hidetag', mentions });
+        return;
+      }
+      const text = ctx.args.join(' ');
+      if (!text) return ctx.reply('⚠️ Responda a uma mensagem ou use: `,hidetag texto`');
       await ctx.socket.sendMessage(ctx.remoteJid, { text, mentions });
+    },
+  },
+  {
+    name: 'cita',
+    commands: ['cita'],
+    category: 'admin',
+    adminOnly: true,
+    groupOnly: true,
+    description: 'Republica a mensagem respondida preservando seu conteúdo.',
+    usage: '!cita <mensagem> (ou responda a uma mensagem)',
+    cooldown: 5000,
+    execute: async (ctx) => {
+      if (ctx.quoted) {
+        await forwardQuoted({ ctx, command: 'cita' });
+        return;
+      }
+      const text = ctx.args.join(' ');
+      if (!text) return ctx.reply('⚠️ Responda a uma mensagem ou use: `,cita texto`');
+      await ctx.socket.sendMessage(ctx.remoteJid, { text });
     },
   },
   {
