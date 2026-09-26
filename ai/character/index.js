@@ -81,6 +81,7 @@ async function handleAutomatic(ctx) {
   if (Date.now() - last < cooldownMs) return false;
   autoLast.set(ctx.remoteJid, Date.now());
   const diagnosticId = crypto.randomUUID();
+  logger.info({ chatJid: ctx.remoteJid, senderJid: ctx.sender, isGroup: Boolean(ctx.isGroup), stateKey: ctx.remoteJid, trigger: ctx.botAddressed ? 'addressed' : 'name-or-private', id: diagnosticId }, '[AI_IDENTITY]');
   logger.info({ chatId: ctx.remoteJid, id: diagnosticId, triggerType: ctx.isGroup ? (ctx.botAddressed ? 'mention-or-reply' : 'name') : 'private' }, '[AI_CHARACTER] trigger');
   const result = await ask({ chatId: ctx.remoteJid, userId: ctx.sender, participant: ctx.sender, text: ctx.text, mode: 'chat', diagnosticId });
   if (!result || !result.ok) { if (result && result.message) await ctx.reply(result.message); return true; }

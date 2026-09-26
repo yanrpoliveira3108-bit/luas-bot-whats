@@ -53,8 +53,9 @@ function renderPanel(data) {
     ['DATA/HORA', stamp(data.time)],
     ['TIPO', data.isGroup ? 'GRUPO' : 'PV'],
     ...(data.isGroup ? [['CHAT', data.chatName || data.chat || 'GRUPO']] : []),
+    ['CHAT JID', data.chat || data.jid || '-'],
     ['REMETENTE', maskJid(data.sender || data.jid)],
-    ['JID/LID', data.jid || data.chat || '-'],
+    ['JID/LID', data.sender || data.jid || '-'],
     ['FONTE', 'WhatsApp'],
     ['RUNTIME', RUNTIME],
   ];

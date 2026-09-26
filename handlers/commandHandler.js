@@ -193,6 +193,15 @@ async function buildContext(sock, msg) {
   }
 
   const text = extractText(msg);
+  logger.info({
+    keyRemoteJid: remoteJid,
+    keyParticipant: msg.key.participant || null,
+    participant: msg.key.participant || null,
+    sender,
+    chat: remoteJid,
+    resolvedSender: sender,
+    isGroup,
+  }, '[MSG_IDENTITY]');
   const quoted = getQuoted(msg);
   let mentionedJid = getMentionedJids(msg);
   if (mentionedJid.length && participants.length) {

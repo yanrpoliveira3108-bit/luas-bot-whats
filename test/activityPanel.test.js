@@ -12,6 +12,7 @@ for (const data of [
   const panel = renderPanel({ ...data, time: Date.now() });
   const lines = panel.split('\n');
   assert.ok(lines[0].startsWith('╔') && lines.at(-1).startsWith('╚'));
+  assert.ok(panel.includes('CHAT JID'));
   assert.ok(lines.every((line) => width(line) === width(lines[0])), 'bordas alinhadas');
   assert.ok(!panel.includes('gsk_secret'), 'segredo não aparece');
   if (data.input.includes('gsk_')) assert.ok(panel.includes('[REDACTED]'));
