@@ -34,6 +34,7 @@ const antiBan = require('../utils/antiBan');
 const contextReact = require('../utils/contextReact');
 const prefixReply = require('../utils/prefixReply');
 const captchaManager = require('../utils/captchaManager');
+const safety = require('../utils/safety');
 const {
   extractText,
   getQuoted,
@@ -765,6 +766,9 @@ janitor.register(
  */
 async function handlePrivateAntiPv(sock, ctx) {
   if (ctx.isOwner) return false; // dono fala com o bot no PV sempre
+  // O CAPTCHA é processado antes desta função. OFF apenas desliga o gate
+  // Anti-PV; o restante do pipeline continua normalmente.
+  if (!safety.antiPvEnabled()) return false;
   const pv3 = autobot.isEnabled(null, 'antipv3');
   const pv2 = autobot.isEnabled(null, 'antipv2');
   const pv1 = autobot.isEnabled(null, 'antipv');
