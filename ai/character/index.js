@@ -21,6 +21,7 @@ function clearMemory(chatId) { return state.clearMemory(chatId); }
 function memoryStatus(chatId) { const s = state.get(chatId); return { enabled: s.memoryEnabled, recentCount: s.recent.length, memoryCount: s.memories.length, styleLearningEnabled: s.styleLearningEnabled }; }
 
 async function ask({ chatId, userId, text, mode = 'chat', participant, diagnosticId = crypto.randomUUID() }) {
+  console.log('[AI_PATH_PROBE] character-enter', JSON.stringify({ pid: process.pid, mode }));
   logger.info({ chatId, id: diagnosticId }, '[AI_CHARACTER] queued');
   return withChatLock(chatId, async () => {
     logger.info({ chatId, id: diagnosticId }, '[AI_CHARACTER] start');

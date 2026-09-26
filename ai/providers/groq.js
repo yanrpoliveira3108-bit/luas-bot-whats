@@ -22,6 +22,7 @@ function errorForStatus(status) {
 }
 
 async function handle({ messages, text, mode, history, temperature = 0.7, maxTokens = 800, timeoutMs = 45000 }) {
+  console.log('[AI_PATH_PROBE] groq-enter', JSON.stringify({ pid: process.pid, mode }));
   const key = apiKey();
   const selectedModel = model();
   const envPath = path.join(CONFIG.paths.root, '.env');

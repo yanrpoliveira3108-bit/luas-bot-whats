@@ -38,6 +38,7 @@ function providerOrder() {
  * @returns {Promise<{ ok:true, text, provider, model, latencyMs, usedFallback?:boolean } | { ok:false, code, message }>}
  */
 async function ask({ chatId, userId, text, mode = 'chat', messages, remember = true }) {
+  console.log('[AI_PATH_PROBE] router-enter', JSON.stringify({ pid: process.pid, mode }));
   const input = String(text || '').trim();
   if (!input) {
     return { ok: false, code: 'EMPTY_INPUT', message: '⚠️ Envie um texto para a IA.' };
