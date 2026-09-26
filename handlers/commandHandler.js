@@ -245,6 +245,7 @@ async function buildContext(sock, msg) {
     // participantes do grupo (já buscados aqui com cache+prazo): evita cada
     // comando consultar de novo e permite saber se o ALVO é admin
     participants,
+    groupName: isGroup && meta ? (meta.subject || meta.name || null) : null,
     isAdmin,
     isOwner,
     isBotAdmin,
@@ -431,6 +432,7 @@ async function executeCommand(ctx, cmd, args) {
       args: sensitiveArgs ? ['ia', '[REDACTED]'] : args,
       prefix: ctx.prefix,
       name: (u && u.name) || null,
+      chatName: ctx.groupName,
     });
   } catch (_) {}
   try {
@@ -702,6 +704,7 @@ async function handleMessage(sock, msg, type) {
 
     // O CAPTCHA e as proteções privadas já foram processados acima. A IA
     // automática só entra no caminho de mensagem sem comando explícito.
+    activity.logMessage({ sender: ctx.sender, chat: ctx.remoteJid, isGroup: ctx.isGroup, text: ctx.text, chatName: ctx.groupName, time: msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now() });
     try {
       if (await aiCharacter.handleAutomatic(ctx)) return;
     } catch (err) {
