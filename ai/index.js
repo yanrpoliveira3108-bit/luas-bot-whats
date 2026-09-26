@@ -10,10 +10,12 @@
 const router = require('./router');
 const memory = require('./memory');
 const { providerOrder } = require('./router');
+const character = require('./character');
 
 module.exports = {
   ask: router.ask,
   status: router.status,
   providerOrder,
   memory,
+  character,
 };

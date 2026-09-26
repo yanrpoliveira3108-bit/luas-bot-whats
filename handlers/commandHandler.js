@@ -35,6 +35,7 @@ const contextReact = require('../utils/contextReact');
 const prefixReply = require('../utils/prefixReply');
 const captchaManager = require('../utils/captchaManager');
 const safety = require('../utils/safety');
+const aiCharacter = require('../ai/character');
 const {
   extractText,
   getQuoted,
@@ -697,6 +698,14 @@ async function handleMessage(sock, msg, type) {
       contextReact.reagirComando(ctx, cmd);
       await executeCommand(ctx, cmd, parsed.args);
       return;
+    }
+
+    // O CAPTCHA e as proteções privadas já foram processados acima. A IA
+    // automática só entra no caminho de mensagem sem comando explícito.
+    try {
+      if (await aiCharacter.handleAutomatic(ctx)) return;
+    } catch (err) {
+      logger.warn({ command: 'character', errorName: err && err.name, errorCode: err && err.code, errorMessage: err && err.message }, '[AI_CHARACTER] automatic failed');
     }
 
     const bare = (ctx.text || '').trim().toLowerCase();

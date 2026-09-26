@@ -17,18 +17,18 @@ module.exports = [
     execute: async (ctx) => {
       const arg = String(ctx.args[0] || 'status').toLowerCase();
       if (arg === 'on' || arg === 'ligar') {
-        ai.memory.setEnabled(true);
+        ai.character.state.setMemoryEnabled(ctx.remoteJid, true);
         return ctx.reply('🧠 Memória da IA: *ATIVADA* para esta conversa.');
       }
       if (arg === 'off' || arg === 'desligar') {
-        ai.memory.setEnabled(false);
+        ai.character.state.setMemoryEnabled(ctx.remoteJid, false);
         return ctx.reply('🧠 Memória da IA: *DESATIVADA* para esta conversa.');
       }
       if (arg === 'clear' || arg === 'limpar') {
-        ai.memory.clear(ctx.remoteJid);
-        return ctx.reply('🧹 Histórico da conversa com a IA *apagado*.');
+        ai.character.clearMemory(ctx.remoteJid);
+        return ctx.reply('🧹 Memória da conversa com a IA *apagada*.');
       }
-      const on = ai.memory.enabled();
+      const on = ai.character.memoryStatus(ctx.remoteJid).enabled;
       await ctx.reply(`🧠 Memória da IA: ${on ? 'ATIVADA' : 'DESATIVADA'}.\nUse ${ctx.prefix}aimemory on|off|clear.`);
     },
   },

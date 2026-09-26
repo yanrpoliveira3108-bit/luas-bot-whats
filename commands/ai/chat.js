@@ -17,6 +17,16 @@ module.exports = [
     usage: '!ia <pergunta>',
     cooldown: CONFIG.ai.cooldownMs,
     execute: async (ctx) => {
+      const sub = String(ctx.args[0] || '').toLowerCase();
+      if (['on', 'off', 'status'].includes(sub) && ctx.args.length === 1) {
+        if (sub === 'status') {
+          const s = ai.character.status(ctx.remoteJid);
+          return ctx.reply(`🤖 *IA*\n▸ Estado: ${s.enabled ? 'ativa' : 'desativada'}\n▸ Provider: ${s.provider}\n▸ Modelo: ${s.model}\n▸ Memória: ${s.memoryEnabled ? 'ativa' : 'inativa'}\n▸ Aprendizado de estilo: ${s.styleLearningEnabled ? 'ativo' : 'inativo'}`);
+        }
+        if (ctx.isGroup && !ctx.isOwner && !ctx.isAdmin) return ctx.reply('⛔ Apenas owner ou administrador pode alterar a IA do grupo.');
+        ai.character.setEnabled(ctx.remoteJid, sub === 'on');
+        return ctx.reply(sub === 'on' ? '🤖 IA ativada neste chat.' : '🤖 IA desativada neste chat.');
+      }
       const text = ctx.args.join(' ').trim();
 
       // visão: se responder a uma imagem e não houver provider com visão, seja honesto
@@ -28,7 +38,7 @@ module.exports = [
 
       await ctx.reply('🤖 Pensando...');
       try {
-        const r = await ai.ask({ chatId: ctx.remoteJid, userId: ctx.sender, text, mode: 'chat' });
+        const r = await ai.character.ask({ chatId: ctx.remoteJid, userId: ctx.sender, text, mode: 'chat', participant: ctx.sender });
         if (!r.ok) return ctx.reply(r.message);
         const meta = r.provider === 'api' ? `\n\n_${r.model} · ${r.latencyMs}ms_` : '';
         await ctx.reply(r.text + meta);

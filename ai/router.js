@@ -37,7 +37,7 @@ function providerOrder() {
  * @param {{ chatId, userId, text, mode }} params mode ∈ chat|code|translate|summarize
  * @returns {Promise<{ ok:true, text, provider, model, latencyMs, usedFallback?:boolean } | { ok:false, code, message }>}
  */
-async function ask({ chatId, userId, text, mode = 'chat' }) {
+async function ask({ chatId, userId, text, mode = 'chat', messages, remember = true }) {
   const input = String(text || '').trim();
   if (!input) {
     return { ok: false, code: 'EMPTY_INPUT', message: '⚠️ Envie um texto para a IA.' };
@@ -58,11 +58,13 @@ async function ask({ chatId, userId, text, mode = 'chat' }) {
     const provider = PROVIDERS[name];
     if (!provider) continue;
     try {
-      const r = await provider.handle({ chatId, userId, text: input, mode, history: memory.history(chatId) });
+      const r = await provider.handle({ chatId, userId, text: input, mode, messages, history: messages ? undefined : memory.history(chatId) });
       if (r && r.ok) {
         const latencyMs = Date.now() - started;
-        memory.remember(chatId, 'user', input);
-        memory.remember(chatId, 'assistant', r.text);
+        if (remember) {
+          memory.remember(chatId, 'user', input);
+          memory.remember(chatId, 'assistant', r.text);
+        }
         return { ...r, latencyMs, usedFallback: name !== 'groq' && name !== 'api' };
       }
       lastFailure = r && r.code;

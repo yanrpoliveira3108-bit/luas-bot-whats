@@ -44,7 +44,7 @@ module.exports = [
       if (!text) return ctx.reply('📄 Responda a uma mensagem de texto com !resumir (ou envie o texto junto).');
       await ctx.reply('📄 Resumindo...');
       try {
-        const r = await ai.ask({ chatId: ctx.remoteJid, userId: ctx.sender, text, mode: 'summarize' });
+        const r = await ai.character.ask({ chatId: ctx.remoteJid, userId: ctx.sender, text, mode: 'summarize', participant: ctx.sender });
         if (!r.ok) return ctx.reply(r.message);
         await ctx.reply(r.text);
       } catch (err) {

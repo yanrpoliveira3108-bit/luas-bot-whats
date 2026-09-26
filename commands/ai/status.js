@@ -16,6 +16,7 @@ module.exports = [
     cooldown: 2000,
     execute: async (ctx) => {
       const s = ai.status();
+      const c = ai.character.status(ctx.remoteJid);
       await ctx.reply(
         [
           '🤖 *STATUS DA IA*',
@@ -25,7 +26,9 @@ module.exports = [
           `▸ Modelo: ${s.groqModel}`,
           `▸ Provider ativo: ${s.active}`,
           `▸ Cadeia de fallback: ${s.order.join(' → ')}`,
-          `▸ Memória: ${s.memory}`,
+          `▸ Estado neste chat: ${c.enabled ? 'ativa' : 'desativada'}`,
+          `▸ Memória deste chat: ${c.memoryEnabled ? 'ativa' : 'inativa'} (${c.recentCount} recentes, ${c.memoryCount} memórias)`,
+          `▸ Aprendizado de estilo: ${c.styleLearningEnabled ? 'ativo' : 'inativo'}`,
           '',
           '📏 *Limites*',
           `▸ Prompt máx.: ${s.limits.maxInput} caracteres`,

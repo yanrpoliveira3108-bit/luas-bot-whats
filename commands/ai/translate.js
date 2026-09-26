@@ -21,7 +21,7 @@ module.exports = [
       if (!text) return ctx.reply(`🌎 Use: ${ctx.prefix}traduzir <idioma> <texto>\nEx.: ${ctx.prefix}traduzir inglês bom dia`);
       await ctx.reply('🌎 Traduzindo...');
       try {
-        const r = await ai.ask({ chatId: ctx.remoteJid, userId: ctx.sender, text, mode: 'translate' });
+        const r = await ai.character.ask({ chatId: ctx.remoteJid, userId: ctx.sender, text, mode: 'translate', participant: ctx.sender });
         if (!r.ok) return ctx.reply(r.message);
         await ctx.reply(r.text);
       } catch (err) {

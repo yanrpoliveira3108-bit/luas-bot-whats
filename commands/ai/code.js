@@ -21,7 +21,7 @@ module.exports = [
       if (!text) return ctx.reply(`💻 Envie o pedido: ${ctx.prefix}codigo <pedido>\nEx.: ${ctx.prefix}codigo função JS que soma dois números`);
       await ctx.reply('💻 Gerando código...');
       try {
-        const r = await ai.ask({ chatId: ctx.remoteJid, userId: ctx.sender, text, mode: 'code' });
+        const r = await ai.character.ask({ chatId: ctx.remoteJid, userId: ctx.sender, text, mode: 'code', participant: ctx.sender });
         if (!r.ok) return ctx.reply(r.message);
         await ctx.reply(r.text);
       } catch (err) {
