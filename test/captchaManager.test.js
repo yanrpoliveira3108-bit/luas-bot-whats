@@ -50,6 +50,33 @@ const socket = {
   assert.strictEqual(database.prepare('captcha_d', 'SELECT status FROM captcha_challenges WHERE challenge_id = ?').get(d.challengeId).status, 'cancelled');
   await captcha.reconcile(socket);
   await captcha.cancelFor(G2, U, 'test-cleanup');
+
+  // Relógio controlado: 10s e 179999ms não expiram; 180000ms expira.
+  let fakeNow = 1000000;
+  captcha.setClockForTests(() => fakeNow);
+  const ttl = captcha.create(G1, '5511666666666@s.whatsapp.net');
+  assert.strictEqual(ttl.createdAt, 1000000);
+  assert.strictEqual(ttl.expiresAt, 1180000);
+  fakeNow = 1010000;
+  await captcha.onCaptchaTimeout(ttl.challengeId);
+  assert.strictEqual(database.prepare('captcha_t10', 'SELECT status FROM captcha_challenges WHERE challenge_id = ?').get(ttl.challengeId).status, 'pending');
+  fakeNow = 1179999;
+  await captcha.onCaptchaTimeout(ttl.challengeId);
+  assert.strictEqual(database.prepare('captcha_t179', 'SELECT status FROM captcha_challenges WHERE challenge_id = ?').get(ttl.challengeId).status, 'pending');
+  fakeNow = 1180000;
+  await captcha.onCaptchaTimeout(ttl.challengeId);
+  assert.strictEqual(database.prepare('captcha_t180', 'SELECT status FROM captcha_challenges WHERE challenge_id = ?').get(ttl.challengeId).status, 'expired');
+  let requestClock = 2000000;
+  captcha.setClockForTests(() => requestClock);
+  const oldChallenge = captcha.create(G2, '5511555555555@s.whatsapp.net');
+  await captcha.cancelFor(G2, '5511555555555@s.whatsapp.net', 'request-gone');
+  requestClock += 1;
+  const newChallenge = captcha.create(G2, '5511555555555@s.whatsapp.net');
+  assert.notStrictEqual(oldChallenge.challengeId, newChallenge.challengeId);
+  assert.ok(newChallenge.createdAt > oldChallenge.createdAt);
+  assert.ok(newChallenge.expiresAt > oldChallenge.expiresAt);
+  await captcha.cancelFor(G2, '5511555555555@s.whatsapp.net', 'test-cleanup-new');
+  captcha.resetClockForTests();
   database.close();
   rm(file); rm(`${file}-wal`); rm(`${file}-shm`);
   console.log('captchaManager.test.js: OK');

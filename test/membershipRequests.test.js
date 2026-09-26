@@ -36,5 +36,15 @@ const sock = {
   await membership.handleMessage(sock, { key: { remoteJid: B }, messageStubType: 172, messageStubParameters: [lid, 'created', 'invite'] });
   assert.ok(calls.some((x) => x.jid === U && x.body && x.body.text.includes('Verificação')));
   await captcha.cancelFor(B, U, 'test-cleanup-lid');
+  const C = '120363000000003@g.us';
+  groups.setSetting(C, 'captcha', true);
+  sock.sendMessage = async () => { throw Object.assign(new Error('dm unavailable'), { code: 'DM_TEST_FAILURE' }); };
+  await membership.handleMessage(sock, { key: { remoteJid: C }, messageStubType: 172, messageStubParameters: [U, 'created', 'invite'] });
+  const failed = database.prepare('delivery_status', 'SELECT status, delivery_status FROM captcha_challenges WHERE group_jid = ? AND participant_jid = ?').get(C, U);
+  assert.strictEqual(failed.status, 'pending');
+  assert.strictEqual(failed.delivery_status, 'delivery_failed');
+  assert.strictEqual(calls.some((x) => x.action === 'approve'), false);
+  assert.strictEqual(captcha.pendingFor(C, U).length, 1);
+  await captcha.cancelFor(C, U, 'test-cleanup-delivery');
   database.close(); rm(file); rm(`${file}-wal`); rm(`${file}-shm`); console.log('membershipRequests.test.js: OK');
 })().catch((e) => { try { database.close(); } catch (_) {} console.error(e); process.exitCode = 1; });

@@ -4,6 +4,7 @@ const groups = require('../database/groups');
 const connection = require('../connection/connect');
 const { listPending } = require('./groupRequests');
 const membership = require('./membershipRequests');
+const captcha = require('./captchaManager');
 const logger = require('./logger').child('membership-monitor');
 
 const MEMBERSHIP_MONITOR_INTERVAL_MS = 10 * 1000;
@@ -40,6 +41,11 @@ async function contains(sock, entries, jid) {
 async function newEntries(sock, groupJid, pending) {
   const old = knownPending.get(groupJid) || [];
   await membership.forgetProcessed(sock, groupJid, pending);
+  for (const entry of old) {
+    if (!(await contains(sock, pending, entry.jid))) {
+      await captcha.cancelFor(groupJid, entry.jid, 'request-gone');
+    }
+  }
   const fresh = [];
   for (const entry of pending) if (!(await contains(sock, old, entry.jid))) fresh.push(entry);
   knownPending.set(groupJid, pending.map((entry) => ({ jid: entry.jid })));
