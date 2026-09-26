@@ -44,7 +44,7 @@ async function handle({ messages, text, mode, history, temperature = 0.7, maxTok
   const shape = { array: Array.isArray(normalizedMessages), messagesCount: normalizedMessages.length, roles: normalizedMessages.map((m) => m && m.role), contentTypes: normalizedMessages.map((m) => typeof (m && m.content)) };
   const currentUser = [...normalizedMessages].reverse().find((m) => m && m.role === 'user');
   const currentUserText = String((currentUser && currentUser.content) || '');
-  logger.info({ messagesCount: normalizedMessages.length, roles: shape.roles, contentTypes: shape.contentTypes, totalChars: normalizedMessages.reduce((n, m) => n + String((m && m.content) || '').length, 0), currentUserLength: currentUserText.length, currentUserHash: crypto.createHash('sha256').update(currentUserText).digest('hex').slice(0, 16), lastRole: currentUser && currentUser.role, model: selectedModel, maxTokens, temperature }, '[GROQ_INPUT]');
+  logger.info({ messagesCount: normalizedMessages.length, roles: shape.roles, contentTypes: shape.contentTypes, totalChars: normalizedMessages.reduce((n, m) => n + String((m && m.content) || '').length, 0), currentUserLength: currentUserText.length, currentUserHash: crypto.createHash('sha256').update(currentUserText).digest('hex').slice(0, 16), lastRole: currentUser && currentUser.role, startsWithLuaRequest: /^lua[, ]/i.test(currentUserText), containsAnalysisSection: /1\.\s*análise/i.test(currentUserText), containsCodeSection: /4\.\s*código/i.test(currentUserText), containsSeparadorJs: /separador\.js/i.test(currentUserText), model: selectedModel, maxTokens, temperature }, '[GROQ_INPUT]');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), effectiveTimeoutMs);
   const started = Date.now();
@@ -88,7 +88,7 @@ async function handle({ messages, text, mode, history, temperature = 0.7, maxTok
       return failure;
     }
     const rawText = output;
-    logger.info({ status: response.status, finishReason: finishReason || null, rawTextLength: rawText.length, rawHash: crypto.createHash('sha256').update(rawText).digest('hex').slice(0, 16), rawEqualsNoChange: rawText.trim() === 'Nenhuma alteração necessária.' }, '[GROQ_OUTPUT]');
+    logger.info({ status: response.status, finishReason: finishReason || null, rawTextLength: rawText.length, rawHash: crypto.createHash('sha256').update(rawText).digest('hex').slice(0, 16), rawEqualsNoChange: rawText.trim() === 'Nenhuma alteração necessária.', rawRefusal: /i['’]?m sorry,?\s+but I can['’]?t help with that/i.test(rawText) }, '[GROQ_OUTPUT]');
     const result = { ok: true, provider: 'groq', model: selectedModel, text: rawText.trim(), latencyMs: Date.now() - started };
     logger.info({ ok: true, provider: 'groq', textLength: output.trim().length, latencyMs: result.latencyMs }, '[GROQ_TRACE] provider-result');
     return result;

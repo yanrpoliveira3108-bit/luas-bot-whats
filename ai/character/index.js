@@ -30,13 +30,18 @@ async function ask({ chatId, userId, text, mode = 'chat', participant, diagnosti
     const fingerprint = (value) => crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 16);
     logger.info({ originalLength: original.length, characterInputLength: clean.length, originalHash: fingerprint(original), characterInputHash: fingerprint(clean) }, '[AI_INPUT]');
     const current = state.get(chatId);
+    const memoryText = current.memoryEnabled ? state.memoryText(chatId) : '';
+    const system = persona.systemPrompt(mode, memoryText);
     const recent = current.memoryEnabled ? current.recent.map((m) => ({ role: m.role, content: m.content })) : [];
     const messages = [
-      { role: 'system', content: persona.systemPrompt(mode, state.memoryText(chatId)) },
+      { role: 'system', content: system },
       ...recent,
       { role: 'user', content: clean },
     ];
-    logger.info({ chatId, mode, recentCount: recent.length, memoryCount: current.memories.length }, '[AI_CHARACTER] context-built');
+    const hash = (value) => crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 16);
+    const refusalMemory = [...current.memories.map((m) => m.text), ...current.recent.map((m) => m.content)]
+      .some((value) => /(?:can.?t help|não posso ajudar|não ajudar|recus|não fornecer código)/i.test(String(value)));
+    logger.info({ chatType: chatId.endsWith('@g.us') ? 'group' : 'pv', messagesCount: messages.length, systemLength: system.length, systemHash: hash(system), currentUserLength: clean.length, currentUserHash: hash(clean), historyCount: recent.length, memoryCount: current.memories.length, totalChars: messages.reduce((n, m) => n + String(m.content || '').length, 0), roles: messages.map((m) => m.role), groupAuthorMetadataAdded: false, styleProfilePresent: Boolean(current.style), refusalLikeMemory: refusalMemory }, '[AI_CONTEXT]');
     const result = await router.ask({ chatId, userId, text: clean, mode, messages, remember: false });
     state.update(chatId, (s) => {
       s.lastAiStatus = result && result.ok ? 'success' : 'error';
