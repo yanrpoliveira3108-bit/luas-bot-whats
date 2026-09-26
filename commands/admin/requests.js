@@ -5,26 +5,27 @@ const alvoUtil = require('../../utils/alvo');
 const buttonHandler = require('../../handlers/buttonHandler');
 const logger = require('../../utils/logger').child('requests');
 const { resolveTarget } = require('../_shared/admin');
+const { listPending, approveRequests, rejectRequests } = require('../../utils/groupRequests');
 
 function enc(jid) {
   return jid.replace(/@/g, ':').replace(/\./g, '-');
 }
 
-async function listPending(ctx) {
-  const sock = ctx.socket;
-  if (typeof sock.groupRequestParticipantsList !== 'function') {
-    return null;
-  }
-  const res = await sock.groupRequestParticipantsList(ctx.remoteJid);
-  return (res && res.participants) || [];
+function resumo(acao, result) {
+  const verbo = acao === 'approve' ? 'aprovados' : 'rejeitados';
+  const falha = acao === 'approve' ? 'não puderam ser aprovados' : 'não puderam ser rejeitados';
+  if (!result.success && !result.failed) return 'Nenhum pedido processado.';
+  if (!result.failed) return `✅ ${result.success} pedidos ${verbo}.`;
+  if (!result.success) return `⚠️ Nenhum pedido foi ${acao === 'approve' ? 'aprovado' : 'rejeitado'}; ${result.failed} falharam.`;
+  return `✅ ${result.success} pedidos ${verbo}. ⚠️ ${result.failed} ${falha}.`;
 }
 
 async function approveOne(ctx, jid) {
-  await ctx.socket.groupRequestParticipantsUpdate(ctx.remoteJid, [jid], 'approve');
+  return approveRequests(ctx.socket, ctx.remoteJid, [{ jid }]);
 }
 
 async function rejectOne(ctx, jid) {
-  await ctx.socket.groupRequestParticipantsUpdate(ctx.remoteJid, [jid], 'reject');
+  return rejectRequests(ctx.socket, ctx.remoteJid, [{ jid }]);
 }
 
 module.exports = [
@@ -33,15 +34,13 @@ module.exports = [
     commands: ['pedidos', 'solicitacoes'],
     category: 'admin',
     adminOnly: true,
+    botAdmin: true,
     groupOnly: true,
     description: 'Mostra pedidos pendentes para entrar no grupo.',
     usage: '!pedidos',
     cooldown: 5000,
     execute: async (ctx) => {
-      const pending = await listPending(ctx);
-      if (pending === null) {
-        return ctx.reply('ℹ️ Este recurso não está disponível nesta versão do WhatsApp/Baileys.');
-      }
+      const pending = await listPending(ctx.socket, ctx.remoteJid);
       if (!pending.length) {
         return ctx.reply('✅ Nenhum pedido pendente.');
       }
@@ -53,12 +52,12 @@ module.exports = [
         const idApprove = `lua:req:approve:${enc(jid)}`;
         const idReject = `lua:req:reject:${enc(jid)}`;
         buttonHandler.register(idApprove, async (c) => {
-          await approveOne(c, jid);
-          await c.reply(`✅ @${jid.split('@')[0]} aprovado.`, { mentions: [jid] });
+          const result = await approveOne(c, jid);
+          await c.reply(resumo('approve', result), { mentions: [jid] });
         });
         buttonHandler.register(idReject, async (c) => {
-          await rejectOne(c, jid);
-          await c.reply(`❌ @${jid.split('@')[0]} rejeitado.`, { mentions: [jid] });
+          const result = await rejectOne(c, jid);
+          await c.reply(resumo('reject', result), { mentions: [jid] });
         });
         try {
           await ctx.sendList({
@@ -91,6 +90,7 @@ module.exports = [
     commands: ['aprovar', 'aceitar'],
     category: 'admin',
     adminOnly: true,
+    botAdmin: true,
     groupOnly: true,
     description: 'Aprova um pedido de entrada.',
     usage: '!aprovar @usuario',
@@ -98,8 +98,8 @@ module.exports = [
     execute: async (ctx) => {
       const target = resolveTarget(ctx);
       if (!target) return ctx.reply(alvoUtil.dica(ctx.prefix, 'aprovar', ''));
-      await approveOne(ctx, target);
-      await ctx.reply(`✅ @${target.split('@')[0]} aprovado.`, { mentions: [target] });
+      const result = await approveOne(ctx, target);
+      await ctx.reply(resumo('approve', result), { mentions: [target] });
     },
   },
   {
@@ -107,6 +107,7 @@ module.exports = [
     commands: ['rejeitar', 'recusar'],
     category: 'admin',
     adminOnly: true,
+    botAdmin: true,
     groupOnly: true,
     description: 'Rejeita um pedido de entrada.',
     usage: '!rejeitar @usuario',
@@ -114,8 +115,8 @@ module.exports = [
     execute: async (ctx) => {
       const target = resolveTarget(ctx);
       if (!target) return ctx.reply(alvoUtil.dica(ctx.prefix, 'rejeitar', ''));
-      await rejectOne(ctx, target);
-      await ctx.reply(`❌ @${target.split('@')[0]} rejeitado.`, { mentions: [target] });
+      const result = await rejectOne(ctx, target);
+      await ctx.reply(resumo('reject', result), { mentions: [target] });
     },
   },
   {
@@ -123,17 +124,16 @@ module.exports = [
     commands: ['aprovarall'],
     category: 'admin',
     adminOnly: true,
+    botAdmin: true,
     groupOnly: true,
     description: 'Aprova todos os pedidos pendentes.',
     usage: '!aprovarall',
     cooldown: 5000,
     execute: async (ctx) => {
-      const pending = await listPending(ctx);
-      if (pending === null) return ctx.reply('ℹ️ Recurso indisponível nesta versão.');
+      const pending = await listPending(ctx.socket, ctx.remoteJid);
       if (!pending.length) return ctx.reply('✅ Nenhum pedido pendente.');
-      const jids = pending.map((p) => p.jid);
-      await ctx.socket.groupRequestParticipantsUpdate(ctx.remoteJid, jids, 'approve');
-      await ctx.reply(`✅ ${jids.length} pedidos aprovados.`);
+      const result = await approveRequests(ctx.socket, ctx.remoteJid, pending);
+      await ctx.reply(resumo('approve', result));
     },
   },
   {
@@ -141,17 +141,16 @@ module.exports = [
     commands: ['rejeitarall'],
     category: 'admin',
     adminOnly: true,
+    botAdmin: true,
     groupOnly: true,
     description: 'Rejeita todos os pedidos pendentes.',
     usage: '!rejeitarall',
     cooldown: 5000,
     execute: async (ctx) => {
-      const pending = await listPending(ctx);
-      if (pending === null) return ctx.reply('ℹ️ Recurso indisponível nesta versão.');
+      const pending = await listPending(ctx.socket, ctx.remoteJid);
       if (!pending.length) return ctx.reply('✅ Nenhum pedido pendente.');
-      const jids = pending.map((p) => p.jid);
-      await ctx.socket.groupRequestParticipantsUpdate(ctx.remoteJid, jids, 'reject');
-      await ctx.reply(`❌ ${jids.length} pedidos rejeitados.`);
+      const result = await rejectRequests(ctx.socket, ctx.remoteJid, pending);
+      await ctx.reply(resumo('reject', result));
     },
   },
 ];
