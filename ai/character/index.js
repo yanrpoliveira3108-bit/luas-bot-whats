@@ -25,7 +25,10 @@ async function ask({ chatId, userId, text, mode = 'chat', participant, diagnosti
   logger.info({ chatId, id: diagnosticId }, '[AI_CHARACTER] queued');
   return withChatLock(chatId, async () => {
     logger.info({ chatId, id: diagnosticId }, '[AI_CHARACTER] start');
-    const clean = state.scrub(text);
+    const original = String(text || '');
+    const clean = state.scrub(original);
+    const fingerprint = (value) => crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 16);
+    logger.info({ originalLength: original.length, characterInputLength: clean.length, originalHash: fingerprint(original), characterInputHash: fingerprint(clean) }, '[AI_INPUT]');
     const current = state.get(chatId);
     const recent = current.memoryEnabled ? current.recent.map((m) => ({ role: m.role, content: m.content })) : [];
     const messages = [
@@ -42,7 +45,8 @@ async function ask({ chatId, userId, text, mode = 'chat', participant, diagnosti
       s.lastHttpStatus = result && result.httpStatus ? result.httpStatus : null;
       s.lastLatencyMs = result && result.latencyMs ? result.latencyMs : null;
     });
-    logger.info({ chatId, id: diagnosticId, provider: result && result.provider, ok: Boolean(result && result.ok), code: result && result.code, httpStatus: result && result.httpStatus, latencyMs: result && result.latencyMs }, '[AI_CHARACTER] provider-result');
+    const outputHash = result && result.ok ? crypto.createHash('sha256').update(String(result.text)).digest('hex').slice(0, 16) : null;
+    logger.info({ chatId, id: diagnosticId, provider: result && result.provider, ok: Boolean(result && result.ok), code: result && result.code, httpStatus: result && result.httpStatus, latencyMs: result && result.latencyMs, characterOutputLength: result && result.ok ? String(result.text).length : 0, characterOutputHash: outputHash }, '[AI_CHARACTER] provider-result');
     if (result && result.ok) {
       state.addRecent(chatId, 'user', clean, participant || userId);
       state.addRecent(chatId, 'assistant', result.text, 'bot');

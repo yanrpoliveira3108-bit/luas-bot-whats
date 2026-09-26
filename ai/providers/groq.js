@@ -4,6 +4,7 @@ const logger = require('../../utils/logger').child('ai:groq');
 const fs = require('fs');
 const path = require('path');
 const CONFIG = require('../../config');
+const crypto = require('crypto');
 
 const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 const DEFAULT_MODEL = 'openai/gpt-oss-20b';
@@ -41,7 +42,9 @@ async function handle({ messages, text, mode, history, temperature = 0.7, maxTok
     { role: 'user', content: String(text || '') },
   ];
   const shape = { array: Array.isArray(normalizedMessages), messagesCount: normalizedMessages.length, roles: normalizedMessages.map((m) => m && m.role), contentTypes: normalizedMessages.map((m) => typeof (m && m.content)) };
-  logger.info({ messagesCount: normalizedMessages.length, roles: shape.roles, contentTypes: shape.contentTypes, totalChars: normalizedMessages.reduce((n, m) => n + String((m && m.content) || '').length, 0), model: selectedModel, maxTokens, temperature }, '[AI_RUNTIME] groq-request-shape');
+  const currentUser = [...normalizedMessages].reverse().find((m) => m && m.role === 'user');
+  const currentUserText = String((currentUser && currentUser.content) || '');
+  logger.info({ messagesCount: normalizedMessages.length, roles: shape.roles, contentTypes: shape.contentTypes, totalChars: normalizedMessages.reduce((n, m) => n + String((m && m.content) || '').length, 0), currentUserLength: currentUserText.length, currentUserHash: crypto.createHash('sha256').update(currentUserText).digest('hex').slice(0, 16), lastRole: currentUser && currentUser.role, model: selectedModel, maxTokens, temperature }, '[GROQ_INPUT]');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), effectiveTimeoutMs);
   const started = Date.now();
@@ -84,7 +87,9 @@ async function handle({ messages, text, mode, history, temperature = 0.7, maxTok
       logger.warn({ ok: false, provider: 'groq', code: failure.code, latencyMs: failure.latencyMs }, '[GROQ_TRACE] provider-result');
       return failure;
     }
-    const result = { ok: true, provider: 'groq', model: selectedModel, text: output.trim(), latencyMs: Date.now() - started };
+    const rawText = output;
+    logger.info({ status: response.status, finishReason: finishReason || null, rawTextLength: rawText.length, rawHash: crypto.createHash('sha256').update(rawText).digest('hex').slice(0, 16), rawEqualsNoChange: rawText.trim() === 'Nenhuma alteração necessária.' }, '[GROQ_OUTPUT]');
+    const result = { ok: true, provider: 'groq', model: selectedModel, text: rawText.trim(), latencyMs: Date.now() - started };
     logger.info({ ok: true, provider: 'groq', textLength: output.trim().length, latencyMs: result.latencyMs }, '[GROQ_TRACE] provider-result');
     return result;
   } catch (err) {

@@ -1,5 +1,8 @@
 'use strict';
 
+const crypto = require('crypto');
+const logger = require('./logger').child('ai:response');
+
 // Limite técnico conservador do texto de uma mensagem WhatsApp; nunca descarta conteúdo.
 const DEFAULT_CHUNK_SIZE = 4000;
 
@@ -33,6 +36,8 @@ function splitLongMessage(value, max = DEFAULT_CHUNK_SIZE) {
 
 async function sendLongMessage(ctx, text, options) {
   const chunks = splitLongMessage(text);
+  const fullText = String(text == null ? '' : text);
+  logger.info({ whatsappOutputLength: fullText.length, whatsappOutputHash: crypto.createHash('sha256').update(fullText).digest('hex').slice(0, 16), totalChunks: chunks.length }, '[AI_RESPONSE] send');
   for (let i = 0; i < chunks.length; i += 1) {
     try {
       await ctx.reply(chunks[i], options);
