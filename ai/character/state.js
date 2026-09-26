@@ -1,7 +1,8 @@
 'use strict';
 
 const groups = require('../../database/groups');
-const SECRET = /(gsk_[a-z0-9_-]+|bearer\s+[a-z0-9._-]+|(?:api[_ -]?key|token|senha|password|cookie)\s*[:=]\s*\S+)/ig;
+const SECRET = /(gsk_[a-z0-9_-]+|bearer\s+[a-z0-9._-]+|(?:GROQ_API_KEY|OPENAI_API_KEY|AI_API_KEY)|(?:api[_ -]?key|token|senha|password|cookie)\s*[:=]\s*\S+)/ig;
+const UNSAFE_MEMORY = /ignore\s+(?:tudo|todas|as regras)|(?:revele|mostre|exiba).*(?:api[_ -]?key|token|senha|password|\.env)/i;
 const MAX_RECENT = 12;
 const MAX_MEMORY = 30;
 
@@ -43,6 +44,7 @@ function learn(chatId, text) {
   });
 }
 function addMemory(chatId, text) {
+  if (UNSAFE_MEMORY.test(String(text || ''))) return;
   const clean = scrub(text); if (!clean) return;
   return update(chatId, (s) => { if (s.memoryEnabled && !s.memories.some((m) => m.text === clean)) s.memories.push({ text: clean, confidence: 0.5, updatedAt: new Date().toISOString() }); s.memories = s.memories.slice(-MAX_MEMORY); });
 }
