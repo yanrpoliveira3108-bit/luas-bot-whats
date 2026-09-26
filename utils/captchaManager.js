@@ -34,6 +34,13 @@ function normalizeAnswer(v) { return String(v || '').trim().toUpperCase().replac
 function row(id) { return db.prepare('captcha_get', 'SELECT * FROM captcha_challenges WHERE challenge_id = ?').get(id) || null; }
 function publicRow(r) { return r && { challengeId: r.challenge_id, groupJid: r.group_jid, participantJid: r.participant_jid, type: r.type, expectedAnswer: r.expected_answer, createdAt: r.created_at, expiresAt: r.expires_at, attempts: r.attempts, status: r.status, deliveryStatus: r.delivery_status || 'ok' }; }
 function namespace(jid) { return String(jid || '').endsWith('@lid') ? 'lid' : String(jid || '').endsWith('@s.whatsapp.net') ? 'pn' : 'other'; }
+function mappingStore(sock) {
+  const repository = sock && sock.signalRepository;
+  if (!repository) return { store: null, method: 'none' };
+  if (typeof repository.getLIDMappingStore === 'function') return { store: repository.getLIDMappingStore(), method: 'getLIDMappingStore' };
+  if (repository.lidMapping) return { store: repository.lidMapping, method: 'signalRepository.lidMapping' };
+  return { store: null, method: 'none' };
+}
 function maskedGroup(jid) { const value = String(jid || ''); return value ? `${value.slice(0, 6)}…${value.slice(-5)}` : ''; }
 function setClockForTests(fn) { clock = typeof fn === 'function' ? fn : () => Date.now(); }
 function resetClockForTests() { clock = () => Date.now(); }
@@ -120,9 +127,9 @@ async function expire(id) {
   const result = await reject(id, 'expired');
   if (result.ok) logger.info({ group: maskedGroup(r.group_jid), result: result.reason || 'rejected' }, '[CAPTCHA] desafio expirado');
 }
-function markDeliveryFailed(id, err) {
+function markDeliveryFailed(id, err, details = {}) {
   db.prepare('captcha_delivery_failed', `UPDATE captcha_challenges SET delivery_status = 'delivery_failed' WHERE challenge_id = ? AND status = 'pending'`).run(id);
-  logger.error({ challengeId: id, errorName: err && err.name, errorCode: err && (err.code || err.statusCode), errorMessage: err && err.message, stack: err && err.stack }, '[CAPTCHA_DELIVERY_ERROR]');
+  logger.error({ challengeId: id, ...details, errorName: err && err.name, errorCode: err && (err.code || err.statusCode), errorMessage: err && err.message, stack: err && err.stack }, '[CAPTCHA_DELIVERY_ERROR]');
 }
 
 async function cancelFor(groupJid, participantJid, reason = 'manual') {
@@ -161,7 +168,7 @@ async function reconcile(sock) {
     if (remainingMs <= 0) await expire(r.challenge_id); else schedule(r);
   }
 }
-async function handleCreated(sock, groupJid, participantJid, groupName = 'este grupo') {
+async function handleCreated(sock, groupJid, participantJid, groupName = 'este grupo', pendingEntry = null) {
   socketRef = sock;
   const pending = await listPending(sock, groupJid);
   if (!pending.some((p) => p.jid === participantJid)) return null;
@@ -169,41 +176,53 @@ async function handleCreated(sock, groupJid, participantJid, groupName = 'este g
   // Stub duplicado não dispara nova DM nem reinicia o TTL.
   if (!challenge.prompt) return challenge;
   logger.info({ group: maskedGroup(groupJid), challengeId: challenge.challengeId }, '[CAPTCHA] resolvendo destinatário privado');
-  const sourceNamespace = namespace(participantJid);
-  let privateJid = participantJid;
+  const pendingPhone = pendingEntry && (pendingEntry.phone_number || pendingEntry.pn || pendingEntry.participant_pn);
+  const sourceJid = typeof pendingPhone === 'string' ? pendingPhone : participantJid;
+  const source = typeof pendingPhone === 'string' ? 'pending.phone_number' : 'pending.jid';
+  const sourceNamespace = namespace(sourceJid);
+  let privateJid = sourceJid;
   let mappingFound = sourceNamespace === 'pn';
+  let mappingMethod = 'not-needed';
   if (sourceNamespace === 'lid') {
-    privateJid = await resolveLid(sock, participantJid);
-    mappingFound = Boolean(privateJid);
+    const resolved = await resolveLidInfo(sock, sourceJid);
+    mappingMethod = resolved.method;
+    mappingFound = resolved.mappingFound;
+    // O fork trata @lid explicitamente no pipeline de envio; sem PN mapeado,
+    // preservamos o LID original em vez de fabricar um número.
+    if (resolved.value) privateJid = resolved.value;
   }
   const resolvedNamespace = namespace(privateJid);
-  logger.info({ sourceNamespace, resolvedNamespace, mappingFound, sameAsSource: sourceNamespace === resolvedNamespace }, '[CAPTCHA_RUNTIME] recipient');
+  logger.info({ sourceNamespace, resolvedNamespace, mappingMethod, mappingFound, sameAsSource: sourceNamespace === resolvedNamespace }, '[CAPTCHA_IDENTITY] resolve');
+  logger.info({ source, namespace: resolvedNamespace, mappingFound, sameAsSource: sourceNamespace === resolvedNamespace }, '[CAPTCHA_IDENTITY] destination');
   if (!privateJid || resolvedNamespace === 'other') {
     const err = new Error('destinatário privado não resolvido');
-    markDeliveryFailed(challenge.challengeId, err);
+    markDeliveryFailed(challenge.challengeId, err, { destinationNamespace: resolvedNamespace, mappingFound });
     return challenge;
   }
   const shortId = challenge.challengeId.slice(-6).toUpperCase();
   const text = `🔐 *Verificação de entrada*\n\nVocê solicitou entrada em *${groupName}*.\n\n[${shortId}] ${challenge.prompt}\n\nSe tiver mais de uma verificação, responda: ${shortId} sua resposta\n⏱ Você tem 3 minutos.`;
-  logger.info({ challengeId: challenge.challengeId, destinationNamespace: resolvedNamespace }, '[CAPTCHA_RUNTIME] send-start');
+  logger.info({ challengeId: challenge.challengeId, destinationNamespace: resolvedNamespace }, '[CAPTCHA_DM] send-start');
   try {
     const result = await sock.sendMessage(privateJid, { text });
-    logger.info({ hasResult: Boolean(result), messageIdPresent: Boolean(result && result.key && result.key.id), destinationNamespace: resolvedNamespace }, '[CAPTCHA_RUNTIME] send-result');
+    const resultNamespace = namespace(result && result.key && result.key.remoteJid);
+    logger.info({ hasResult: Boolean(result), messageIdPresent: Boolean(result && result.key && result.key.id), destinationNamespace: resolvedNamespace, resultRemoteJidNamespace: resultNamespace, sameDestination: resultNamespace === resolvedNamespace }, '[CAPTCHA_DM] send-result');
     logger.info({ group: maskedGroup(groupJid), challengeId: challenge.challengeId }, '[CAPTCHA] DM enviada');
   } catch (err) {
-    markDeliveryFailed(challenge.challengeId, err);
+    markDeliveryFailed(challenge.challengeId, err, { destinationNamespace: resolvedNamespace, mappingFound });
     return challenge;
   }
   return challenge;
 }
-async function resolveLid(sock, lid) {
+async function resolveLidInfo(sock, lid) {
+  const { store, method } = mappingStore(sock);
+  if (!store || typeof store.getPNForLID !== 'function') return { value: null, method, mappingFound: false };
   try {
-    const map = sock && sock.signalRepository && sock.signalRepository.lidMapping;
-    const value = map && typeof map.getPNForLID === 'function' ? await map.getPNForLID(lid) : null;
-    return value && !String(value).endsWith('@lid') ? String(value).replace(/:\d+(?=@)/, '') : null;
+    const value = await store.getPNForLID(lid);
+    const normalized = value && !String(value).endsWith('@lid') ? String(value).replace(/:\d+(?=@)/, '') : null;
+    return { value: normalized, method, mappingFound: Boolean(normalized) };
   } catch (err) {
-    logger.error({ lid: String(lid).slice(0, 8), err: err.message, stack: err.stack }, '[CAPTCHA_DELIVERY_ERROR] falha na resolução LID/PN');
-    return null;
+    logger.error({ lid: String(lid).slice(-8), mappingMethod: method, err: err.message, stack: err.stack }, '[CAPTCHA_DELIVERY_ERROR] falha na resolução LID/PN');
+    return { value: null, method, mappingFound: false };
   }
 }
 function setSocket(sock) { socketRef = sock; }

@@ -16,13 +16,26 @@ function safeJid(jid) {
   return at < 0 ? '***' : `${value.slice(0, Math.min(at, 6))}…${value.slice(at)}`;
 }
 function suffix(jid) { return String(jid || '').endsWith('@lid') ? 'lid' : String(jid || '').endsWith('@s.whatsapp.net') ? 'pn' : 'other'; }
+function identitySuffix(jid) {
+  const value = String(jid || '').split('@')[0];
+  return value ? value.slice(-4) : '';
+}
 function withoutDevice(jid) { return String(jid || '').replace(/:\d+(?=@)/, ''); }
 
+function mappingStore(sock) {
+  const repository = sock && sock.signalRepository;
+  if (!repository) return { store: null, method: 'none' };
+  if (typeof repository.getLIDMappingStore === 'function') {
+    return { store: repository.getLIDMappingStore(), method: 'getLIDMappingStore' };
+  }
+  if (repository.lidMapping) return { store: repository.lidMapping, method: 'signalRepository.lidMapping' };
+  return { store: null, method: 'none' };
+}
 async function resolveLid(sock, jid) {
   if (!String(jid || '').endsWith('@lid')) return null;
-  const map = sock && sock.signalRepository && sock.signalRepository.lidMapping;
-  if (!map || typeof map.getPNForLID !== 'function') return null;
-  const resolved = await map.getPNForLID(jid);
+  const { store } = mappingStore(sock);
+  if (!store || typeof store.getPNForLID !== 'function') return null;
+  const resolved = await store.getPNForLID(jid);
   return resolved && !String(resolved).endsWith('@lid') ? withoutDevice(resolved) : null;
 }
 async function participantMatches(sock, left, right) {
@@ -86,7 +99,7 @@ async function processMembershipRequest({ sock, groupJid, participantJid, pendin
     if (captchaEnabled) {
       logger.info({ group: safeJid(groupJid), participant: safeJid(participantJid), source }, '[MEMBERSHIP] decision captcha');
       logger.info({ group: safeJid(groupJid), participant: safeJid(participantJid) }, '[CAPTCHA] criando desafio');
-      const challenge = await captcha.handleCreated(sock, groupJid, pendingEntry ? pendingEntry.jid : participantJid, await groupName(sock, groupJid));
+      const challenge = await captcha.handleCreated(sock, groupJid, pendingEntry ? pendingEntry.jid : participantJid, await groupName(sock, groupJid), pendingEntry);
       if (challenge) logger.info({ group: safeJid(groupJid), challengeId: challenge.challengeId }, '[CAPTCHA] desafio persistido');
       rememberProcessed(groupJid, participantJid);
       return { decision: 'captcha', challenge };
@@ -127,6 +140,19 @@ async function handleMessage(sock, msg, type) {
   const action = typeof params[1] === 'string' ? params[1].toLowerCase() : '';
   const requestMethod = params[2];
   logger.info({ groupJid: safeJid(groupJid), parametersCount: params.length, action, participantSuffix: suffix(participantJid), requestMethod }, '[MEMBERSHIP_DEBUG] membership stub matched');
+  const keyParticipant = msg.key.participant;
+  logger.info({
+    groupJid: safeJid(groupJid),
+    keyParticipantNamespace: suffix(keyParticipant),
+    stubParticipantNamespace: suffix(participantJid),
+    stubParametersCount: params.length,
+    action,
+    keyParticipantPresent: Boolean(keyParticipant),
+    stubParticipantPresent: Boolean(participantJid),
+    sameIdentity: Boolean(keyParticipant && participantJid && withoutDevice(keyParticipant) === withoutDevice(participantJid)),
+    keyParticipantSuffix: identitySuffix(keyParticipant),
+    stubParticipantSuffix: identitySuffix(participantJid),
+  }, '[CAPTCHA_IDENTITY] stub');
 
   if (!String(groupJid || '').endsWith('@g.us') || typeof participantJid !== 'string') return true;
   if (action === 'revoked' || action === 'rejected') {
@@ -139,6 +165,16 @@ async function handleMessage(sock, msg, type) {
   logger.info({ groupJid: safeJid(groupJid), participant: safeJid(participantJid) }, '[MEMBERSHIP_DEBUG] confirmando pedido');
   const pending = await listPending(sock, groupJid);
   logger.info({ groupJid: safeJid(groupJid), count: pending.length }, '[MEMBERSHIP_DEBUG] pending count');
+  for (const entry of pending) {
+    logger.info({
+      groupJid: safeJid(groupJid),
+      entryKeys: Object.keys(entry || {}).slice(0, 20),
+      jidNamespace: suffix(entry && entry.jid),
+      jidSuffix: identitySuffix(entry && entry.jid),
+      hasPhoneNumberField: typeof (entry && entry.phone_number) === 'string',
+      hasLidField: typeof (entry && entry.lid) === 'string',
+    }, '[CAPTCHA_IDENTITY] pending-entry');
+  }
   const match = await findParticipant(sock, pending, participantJid);
   logger.info({ stubType: suffix(participantJid), pendingCount: pending.length, matched: Boolean(match), stubParticipant: safeJid(participantJid), pendingParticipant: safeJid(match && match.jid) }, '[MEMBERSHIP_DEBUG] participant match');
   if (!match) return true;
