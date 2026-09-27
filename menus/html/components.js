@@ -226,6 +226,20 @@ function cabecalho(info) {
   );
 }
 
+/** Botão global de suporte: apenas abre a conversa, sem texto automático. */
+function botaoSuporte() {
+  const CONFIG = require('../../config');
+  const number = String(CONFIG.support && CONFIG.support.number || '').replace(/\D/g, '');
+  if (!number) return '';
+  const href = `https://wa.me/${number}`;
+  return (
+    `<a class=\"support-button\" href=\"${escapeAttr(href)}\" target=\"_blank\" rel=\"noopener noreferrer\" aria-label=\"Abrir suporte da Lua no WhatsApp\">` +
+    '<span class=\"support-icon\" aria-hidden=\"true\">[+]</span>' +
+    '<span><strong>SUPORTE</strong><small>Falar com o desenvolvedor</small></span>' +
+    '</a>'
+  );
+}
+
 /**
  * Rodapé: aviso limpo e discreto apenas quando há corte por tamanho.
  * Não polui o final da lista com avisos redundantes ou medições visíveis.
@@ -241,6 +255,7 @@ function rodape(info) {
   return (
     '<footer class="foot">' +
     linhaCorte +
+    botaoSuporte() +
     '<span class="foot-medida" id="lua-medida" hidden></span>' +
     '</footer>'
   );
@@ -257,5 +272,6 @@ module.exports = {
   secaoDeCategoria,
   cabecalho,
   painelIdentidade,
+  botaoSuporte,
   rodape,
 };

@@ -122,6 +122,11 @@ const CONFIG = {
     startedAt: Date.now(),
   },
 
+  // Contato público de suporte. Não concede permissões nem participa do owner check.
+  support: {
+    number: onlyDigits(envStr('SUPPORT_NUMBER', '5519981144235')),
+  },
+
   owner: {
     // lista de números (somente dígitos) com acesso de dono.
     // Aceita OWNER_NUMBER, OWNER_NUMBERS (vírgula) e OWNER_JID — todos
