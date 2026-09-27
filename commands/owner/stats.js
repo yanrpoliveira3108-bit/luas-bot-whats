@@ -147,7 +147,7 @@ module.exports = [
     cooldown: 3000,
     execute: async (ctx) => {
       const sub = String(ctx.args && ctx.args[0] || '').toLowerCase();
-      if (['status', 'debug', 'avisos', 'set', 'vincular', 'link', 'off', 'on'].includes(sub)) {
+      if (['status', 'debug', 'preview', 'avisos', 'set', 'vincular', 'link', 'off', 'on'].includes(sub)) {
         return require('../../utils/communityAuditCommand').execute(ctx);
       }
       if (!ctx.isOwner) return ctx.reply('🚫 Apenas o dono pode consultar o resumo do banco.');

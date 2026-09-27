@@ -26,7 +26,7 @@ async function renderAuditCard(event,visual={}){
  const img=new Jimp(W,H,Jimp.rgbaToInt(...C.bg,255)); stars(img); orbit(img,1110,130,130,C.violet); orbit(img,1110,130,170,C.blue); circle(img,1110,130,42,[30,35,67],170); circle(img,1110,130,28,[215,220,245],220); circle(img,1125,122,28,C.bg,255);
  const style=TYPE[event.type]||{title:ascii(event.type,'EVENTO'),accent:C.violet,action:''}; rect(img,34,30,1212,660,C.surface,245);rect(img,34,30,7,660,style.accent,255);rect(img,58,104,1160,1,C.faint,180);
  const fSmall=await Jimp.loadFont(Jimp.FONT_SANS_16_WHITE),fLabel=await Jimp.loadFont(Jimp.FONT_SANS_16_WHITE),fTitle=await Jimp.loadFont(Jimp.FONT_SANS_32_WHITE),fName=await Jimp.loadFont(Jimp.FONT_SANS_64_WHITE),fValue=await Jimp.loadFont(Jimp.FONT_SANS_32_WHITE);
- img.print(fTitle,70,58,'LUA // COMMUNITY INTELLIGENCE');img.print(fSmall,1060,67,fitText(fSmall,event.type,120));
+ img.print(fTitle,70,58,'LUA // COMMUNITY INTELLIGENCE'); if(event.preview){rect(img,1035,55,150,30,style.accent,150);img.print(fSmall,1055,63,'PREVIEW');} else {img.print(fSmall,1060,67,fitText(fSmall,event.type,120));}
  await avatar(img,visual.avatarBuffer); img.print(fSmall,110,430,'IDENTIDADE'); img.print(fName,92,458,fitText(fName,displayParticipant(event),320)); img.print(fSmall,112,535,fitText(fSmall,event.participantJid&&String(event.participantJid).endsWith('@lid')?'IDENTIDADE PROTEGIDA':humanJid(event.participantJid),270));
  img.print(fTitle,455,136,fitText(fTitle,style.title,720)); img.print(fValue,455,190,fitText(fValue,style.action,720));
  let y=292; const left=455,right=845,w=330; y=field(img,fLabel,'COMUNIDADE',displayCommunity(event),left,y,w); y=field(img,fLabel,'GRUPO',displayGroup(event),left,y,w);
@@ -35,7 +35,7 @@ async function renderAuditCard(event,visual={}){
  if(event.type==='PROMOTE'||event.type==='DEMOTE'){y=field(img,fLabel,'ALTERADO POR',displayActor(event),right,292,w);y=field(img,fLabel,'CARGO',event.type==='PROMOTE'?'MEMBRO -> ADMIN':'ADMIN -> MEMBRO',right,350,w);}
  if(event.type==='LEAVE'){y=field(img,fLabel,'SAIDA', 'Voluntaria',right,292,w);}
  field(img,fLabel,'HORARIO',dateLabel(event.occurredAt),right,event.type==='JOIN'?292:408,w);
- line(img,70,650,1140,style.accent,110);img.print(fSmall,70,662,'LUA DATABASE');img.print(fSmall,1060,662,`AUDIT ${shortAuditId(event.eventId)}`);
+ line(img,70,650,1140,style.accent,110);img.print(fSmall,70,662,event.preview?'LUA DATABASE / PREVIEW':'LUA DATABASE');img.print(fSmall,1060,662,event.preview?'PREVIEW MODE':`AUDIT ${shortAuditId(event.eventId)}`);
  return img.getBufferAsync(Jimp.MIME_PNG);
 }
 module.exports={renderAuditCard,ascii,fitText,wrapText,displayParticipant,displayActor,displayGroup,displayCommunity};
