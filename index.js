@@ -70,6 +70,7 @@ if (!CONFIG.owner.numbers.length) {
 }
 
 const logger = require('./utils/logger');
+const groupAccess = require('./utils/groupAccess');
 
 // banco
 const database = require('./database/database');
@@ -163,6 +164,9 @@ connection.onMessage((sock, messages, type) => {
 });
 
 connection.onGroupParticipants((sock, ev) => {
+  groupAccess.guardExternalEntry(sock, ev).catch((err) => {
+    logger.error({ groupJid: ev && ev.id, code: err && err.code }, '[GROUP_ACCESS] entry guard failed');
+  });
   groupHandler.handleGroupParticipants(sock, ev).catch((err) => {
     logger.error({ err: err.message }, 'erro em group-participants');
   });
