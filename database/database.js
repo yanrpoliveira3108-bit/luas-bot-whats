@@ -805,6 +805,15 @@ const MIGRATIONS = [
   CREATE INDEX IF NOT EXISTS idx_captcha_person ON captcha_challenges(participant_jid, status);
   CREATE INDEX IF NOT EXISTS idx_captcha_expiry ON captcha_challenges(status, expires_at);
   CREATE UNIQUE INDEX IF NOT EXISTS uq_captcha_pending_pair ON captcha_challenges(group_jid, participant_jid) WHERE status = 'pending';`,
+,
+
+  // 40 — auditoria visual multi-comunidade e alianças
+  `CREATE TABLE IF NOT EXISTS community_audit_communities (community_jid TEXT PRIMARY KEY, announcement_jid TEXT NOT NULL, enabled INTEGER DEFAULT 1, resolution_mode TEXT DEFAULT 'manual', community_name TEXT DEFAULT '', created_at TEXT DEFAULT '', updated_at TEXT DEFAULT '');`,
+  `CREATE TABLE IF NOT EXISTS community_audit_groups (group_jid TEXT PRIMARY KEY, community_jid TEXT NOT NULL, announcement_jid TEXT NOT NULL, group_name TEXT DEFAULT '', enabled INTEGER DEFAULT 1, resolution_mode TEXT DEFAULT 'manual', created_at TEXT DEFAULT '', updated_at TEXT DEFAULT '');`,
+  `CREATE TABLE IF NOT EXISTS community_audit_events (event_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL UNIQUE, type TEXT NOT NULL, community_jid TEXT, announcement_jid TEXT, group_jid TEXT NOT NULL, participant_jid TEXT NOT NULL, actor_jid TEXT, reason TEXT, group_name TEXT DEFAULT '', community_name TEXT DEFAULT '', participant_name TEXT DEFAULT '', member_count INTEGER, occurred_at TEXT NOT NULL, created_at TEXT NOT NULL, delivered_at TEXT, delivery_status TEXT NOT NULL DEFAULT 'PENDING');`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_events_status ON community_audit_events(delivery_status, created_at);`,
+  `CREATE TABLE IF NOT EXISTS alliances (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, name TEXT NOT NULL, value TEXT NOT NULL, owner_name TEXT DEFAULT '', owner_contact TEXT DEFAULT '', description TEXT DEFAULT '', public INTEGER DEFAULT 1, active INTEGER DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);`,
+  `CREATE INDEX IF NOT EXISTS idx_alliances_active ON alliances(active, public, id)`
 ];
 
 /* ----------------------------- core ------------------------------ */

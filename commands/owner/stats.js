@@ -141,11 +141,16 @@ module.exports = [
     name: 'database',
     commands: ['database'],
     category: 'owner',
-    ownerOnly: true,
-    description: 'Resumo do banco de dados.',
-    usage: '!database',
+    ownerOnly: false,
+    description: 'Resumo do banco ou auditoria por comunidade.',
+    usage: '!database [status|avisos|vincular|off]',
     cooldown: 3000,
     execute: async (ctx) => {
+      const sub = String(ctx.args && ctx.args[0] || '').toLowerCase();
+      if (['status', 'avisos', 'set', 'vincular', 'link', 'off', 'on'].includes(sub)) {
+        return require('../../utils/communityAuditCommand').execute(ctx);
+      }
+      if (!ctx.isOwner) return ctx.reply('🚫 Apenas o dono pode consultar o resumo do banco.');
       const s = db.stats();
       const lines = Object.entries(s).map(([k, v]) => `▸ ${k}: ${v}`);
       await ctx.reply(`🗄️ *Banco de dados*\n${lines.join('\n')}`);

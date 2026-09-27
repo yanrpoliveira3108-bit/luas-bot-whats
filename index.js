@@ -164,6 +164,9 @@ connection.onMessage((sock, messages, type) => {
 });
 
 connection.onGroupParticipants((sock, ev) => {
+  require('./plugins/communityAudit').handle(sock, ev).catch((err) => {
+    logger.error({ err: err.message, groupJid: ev && ev.id }, '[DATABASE_AUDIT_ERROR] handler failed');
+  });
   groupAccess.guardExternalEntry(sock, ev).catch((err) => {
     logger.error({ groupJid: ev && ev.id, code: err && err.code }, '[GROUP_ACCESS] entry guard failed');
   });

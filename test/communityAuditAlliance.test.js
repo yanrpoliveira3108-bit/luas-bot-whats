@@ -1,0 +1,12 @@
+'use strict';
+const fs=require('fs'); const os=require('os'); const path=require('path');
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'lua-audit-')); process.env.DATABASE_FILE=path.join(dir,'test.db');
+const db=require('../database/database'); db.open();
+const audit=require('../database/communityAudit'); const alliances=require('../database/alliances');
+const assert=require('assert');
+const A='120363000000000001@g.us', AA='120363000000000002@g.us', G='120363000000000003@g.us', B='120363000000000004@g.us';
+assert(audit.linkGroup({communityJid:A,announcementJid:AA,groupJid:G,resolutionMode:'manual'}));
+const e=audit.createEvent({type:'PROMOTE',communityJid:A,announcementJid:AA,groupJid:G,participantJid:'123@lid',actorJid:'456@s.whatsapp.net',occurredAt:new Date().toISOString()}); assert(e.record.event_id.startsWith('evt_')); assert.strictEqual(audit.createEvent({type:'PROMOTE',communityJid:A,announcementJid:AA,groupJid:G,participantJid:'123@lid',actorJid:'456@s.whatsapp.net',occurredAt:new Date().toISOString()}).duplicate,true);
+assert.strictEqual(audit.getGroupLink(G).announcement_jid,AA); audit.updateDelivery(e.record.event_id,'SENT'); assert.strictEqual(audit.getEvent(e.record.event_id).delivery_status,'SENT');
+const one=alliances.addAlliance({type:'GROUP',name:'Nightfall 🌙',value:'https://chat.whatsapp.com/Abc_123'}); const two=alliances.addAlliance({type:'SITE',name:'Projeto X',value:'https://example.com'}); assert.strictEqual(one.id+1,two.id); assert.strictEqual(alliances.listAlliances().length,2); assert.strictEqual(alliances.removeAlliance(one.id),true); assert.strictEqual(alliances.getAlliance(one.id).active,0); assert.throws(()=>alliances.addAlliance({type:'SITE',name:'bad',value:'ftp://x'}),/ALLIANCE_URL_INVALID/);
+console.log('communityAuditAlliance.test.js: OK'); db.close();
