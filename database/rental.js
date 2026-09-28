@@ -16,8 +16,8 @@ const now = () => new Date().toISOString();
 
 function ensureSeed() {
   for (const [key, label, cents, description] of CATALOG) {
-    prepare(`rental_seed_${key}`, `INSERT OR IGNORE INTO rental_catalog (key,label,price_cents,currency,description,active,sort_order,updated_at) VALUES (?,?,?,?,?,1,?,?)`)
-      .run(key, label, cents, 'BRL', description, CATALOG.findIndex((x) => x[0] === key), now());
+    prepare(`rental_seed_${key}`, `INSERT OR IGNORE INTO rental_catalog (key,label,price_cents,currency,description,active,sort_order,updated_at) VALUES (?,?,?,?,?,?,?,?)`)
+      .run(key, label, cents, 'BRL', description, cents > 0 ? 1 : 0, CATALOG.findIndex((x) => x[0] === key), now());
   }
   for (const plan of PLANS) {
     prepare(`rental_plan_seed_${plan}`, `INSERT OR IGNORE INTO rental_plan_defaults (plan,duration_ms,updated_at) VALUES (?,?,?)`)
