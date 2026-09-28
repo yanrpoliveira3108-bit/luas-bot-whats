@@ -813,7 +813,37 @@ const MIGRATIONS = [
   `CREATE TABLE IF NOT EXISTS community_audit_events (event_id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL UNIQUE, type TEXT NOT NULL, community_jid TEXT, announcement_jid TEXT, group_jid TEXT NOT NULL, participant_jid TEXT NOT NULL, actor_jid TEXT, reason TEXT, group_name TEXT DEFAULT '', community_name TEXT DEFAULT '', participant_name TEXT DEFAULT '', member_count INTEGER, occurred_at TEXT NOT NULL, created_at TEXT NOT NULL, delivered_at TEXT, delivery_status TEXT NOT NULL DEFAULT 'PENDING');`,
   `CREATE INDEX IF NOT EXISTS idx_audit_events_status ON community_audit_events(delivery_status, created_at);`,
   `CREATE TABLE IF NOT EXISTS alliances (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, name TEXT NOT NULL, value TEXT NOT NULL, owner_name TEXT DEFAULT '', owner_contact TEXT DEFAULT '', description TEXT DEFAULT '', public INTEGER DEFAULT 1, active INTEGER DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);`,
-  `CREATE INDEX IF NOT EXISTS idx_alliances_active ON alliances(active, public, id)`
+  `CREATE INDEX IF NOT EXISTS idx_alliances_active ON alliances(active, public, id)`,
+
+  // 42 — catálogo comercial e estado persistente de planos/grupos
+  `CREATE TABLE IF NOT EXISTS rental_catalog (
+    key TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    price_cents INTEGER NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'BRL',
+    description TEXT DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL DEFAULT ''
+  );
+  CREATE TABLE IF NOT EXISTS rental_plan_defaults (
+    plan TEXT PRIMARY KEY,
+    duration_ms INTEGER,
+    updated_at TEXT NOT NULL DEFAULT ''
+  );
+  CREATE TABLE IF NOT EXISTS rental_groups (
+    group_jid TEXT PRIMARY KEY,
+    plan TEXT NOT NULL DEFAULT 'FREE' CHECK(plan IN ('FREE','TEST','RENTAL')),
+    started_at TEXT NOT NULL DEFAULT '',
+    expires_at TEXT DEFAULT NULL,
+    duration_ms INTEGER DEFAULT NULL,
+    activated_by TEXT DEFAULT '',
+    rental_mode_enabled INTEGER NOT NULL DEFAULT 0,
+    bot_enabled INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS idx_rental_groups_plan_expiry ON rental_groups(plan, expires_at);`,
+
 ];
 
 /* ----------------------------- core ------------------------------ */

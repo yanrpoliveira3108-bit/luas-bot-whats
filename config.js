@@ -362,6 +362,7 @@ const CONFIG = {
     databaseDir: path.resolve(ROOT, path.dirname(envStr('DATABASE_FILE', './database/lua.db'))),
     menuImage: path.resolve(ROOT, envStr('MENU_IMAGE', './assets/menu.jpg')),
     assetsDir: path.resolve(ROOT, 'assets'),
+    rentalDir: path.resolve(ROOT, 'assets/rental'),
     tmpDir: path.resolve(ROOT, 'tmp'),
     // LOG_DIR permite apontar os logs para outro lugar (testes/diagnóstico)
     logsDir: path.resolve(ROOT, envStr('LOG_DIR', './logs')),
@@ -529,6 +530,7 @@ function ensureDirs() {
     CONFIG.paths.logsDir,
     CONFIG.paths.backupDir,
     CONFIG.paths.assetsDir,
+    CONFIG.paths.rentalDir,
     CONFIG.safety.send.stateDir,
   ].forEach((d) => fs.mkdirSync(d, { recursive: true }));
 }
