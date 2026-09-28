@@ -36,7 +36,7 @@ const redeem = {
 const vip = {
   name: 'vip', commands: ['vip'], category: 'general', cooldown: 1200,
   description: 'Consulta o VIP pessoal ou do grupo.', usage: ',vip',
-  execute: async (ctx) => { const sub = String(ctx.args[0] || '').toLowerCase(); if (sub === 'remover') { if (!ctx.isOwner) return deny(ctx); const scope = ctx.isGroup ? 'GROUP' : 'USER'; try { premium.revokeEntitlement(scope, ctx.isGroup ? ctx.remoteJid : ctx.sender, ctx.sender); return ctx.reply('✅ VIP revogado.'); } catch (_) { return ctx.reply('❌ VIP ativo não encontrado.'); } } if (sub === 'ver') { if (!allowed(ctx, 'VIP_LOOKUP')) return deny(ctx); const t = target(ctx) || ctx.sender; return ctx.reply(vipText(ctx.isGroup && !target(ctx) ? 'GROUP' : 'USER', t)); } return ctx.reply(vipText('USER', ctx.sender)); },
+  execute: async (ctx) => { const sub = String(ctx.args[0] || '').toLowerCase(); if (sub === 'remover') { if (!ctx.isOwner) return deny(ctx); const t = target(ctx); const scope = t ? 'USER' : (ctx.isGroup ? 'GROUP' : 'USER'); try { premium.revokeEntitlement(scope, t || (ctx.isGroup ? ctx.remoteJid : ctx.sender), ctx.sender); return ctx.reply('✅ VIP revogado.'); } catch (_) { return ctx.reply('❌ VIP ativo não encontrado.'); } } if (sub === 'ver') { if (!allowed(ctx, 'VIP_LOOKUP')) return deny(ctx); const t = target(ctx) || ctx.sender; return ctx.reply(vipText(ctx.isGroup && !target(ctx) ? 'GROUP' : 'USER', t)); } return ctx.reply(vipText('USER', ctx.sender)); },
 };
 
 const subowner = {
