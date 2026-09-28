@@ -398,8 +398,6 @@ function checkGate(cmd, ctx) {
     if (!ok) return { ok: false, message: cmd.requiresUserVip ? '💎 Este recurso exige VIP pessoal.' : '💎 Este recurso exige VIP ativo.' };
   }
 
-  }
-
   // Modo Registro (AutoBot, global) — sobrepõe o modo privado do .env
   if (autobot.isEnabled(null, 'modoregistro') && !ctx.isRegistered && !ctx.isOwner) {
     return { ok: false, message: '🔒 *Modo Registro ativo.*\n▸ Peça a um administrador para te registrar com *!registrar*. ' };
