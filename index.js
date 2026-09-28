@@ -164,6 +164,7 @@ connection.onMessage((sock, messages, type) => {
 });
 
 connection.onGroupParticipants((sock, ev) => {
+  if (ev && ev.id && !require('./database/rental').isGroupBotEnabled(ev.id)) return;
   require('./plugins/communityAudit').handle(sock, ev).catch((err) => {
     logger.error({ err: err.message, groupJid: ev && ev.id }, '[DATABASE_AUDIT_ERROR] handler failed');
   });

@@ -18,6 +18,7 @@ let socketProvider = () => connection.getSocket();
 
 function activeSettings() {
   return groups.all().filter((group) => {
+    if (!require('../database/rental').isGroupBotEnabled(group.id)) return false;
     const settings = groups.getSettings(group.id) || {};
     return settings.captcha === true || settings.autoaceitar === true;
   });

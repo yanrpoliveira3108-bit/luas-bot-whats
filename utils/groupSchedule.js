@@ -407,6 +407,7 @@ function arm(jid, cfg) {
 
 /** Evento agendado chegou. */
 async function dispararEvento(jid, ev) {
+  if (!require('../database/rental').isGroupBotEnabled(jid)) return { ok: false, code: 'bot-off' };
   const cfg = getConfig(jid);
   if (!cfg.enabled || cfg.version !== ev.version) {
     return { ok: false, code: 'stale' };
@@ -588,6 +589,7 @@ function agendarRetentativa(jid, version, esperado, attempt) {
 }
 
 function avisarUmaVez(jid, code, esperado) {
+  if (!require('../database/rental').isGroupBotEnabled(jid)) return;
   const cfg = getConfig(jid);
   if (cfg.notified === code) return;
   registrar(jid, (cur) => {

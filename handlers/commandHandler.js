@@ -390,6 +390,11 @@ function checkGate(cmd, ctx) {
     if (!allowed) return { ok: false, message: ctx.isGroup ? M.deniedAdmin : M.deniedOwner };
   }
   if (cmd.botAdmin && ctx.isGroup && !ctx.isBotAdmin) return { ok: false, message: M.botNotAdmin };
+  if (ctx.isGroup && !ctx.isOwner && (cmd.requiresRentalMode || cmd.requiresPlan)) {
+    const rental = require('../database/rental');
+    const access = rental.canUseRentalFeature(ctx.remoteJid, cmd.requiresPlan ? { plan: cmd.requiresPlan } : {});
+    if (!access.ok) return { ok: false, message: access.reason === 'MODE_OFF' ? '🌙 Este recurso exige o modo aluguel ativo.' : '🌙 Este plano não possui acesso a este recurso.' };
+  }
 
   // Modo Registro (AutoBot, global) — sobrepõe o modo privado do .env
   if (autobot.isEnabled(null, 'modoregistro') && !ctx.isRegistered && !ctx.isOwner) {
@@ -504,6 +509,10 @@ async function handleMessage(sock, msg, type) {
 
     const ctx = await buildContext(sock, msg);
     if (!ctx.sender) return;
+
+    // BOT OFF é um gate do grupo, independente de plano, aluguel e blacklist.
+    // A identidade do owner já foi resolvida acima para permitir recuperação.
+    if (ctx.isGroup && !ctx.isOwner && !require('../database/rental').isGroupBotEnabled(ctx.remoteJid)) return;
 
     // O dono falou neste chat agora: durante uma PAUSA do freio, este chat
     // continua respondendo (sem isso, comando de dono em GRUPO ficava sem

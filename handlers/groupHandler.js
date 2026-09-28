@@ -262,6 +262,7 @@ async function enforceMute(sock, ctx) {
 async function handleGroupParticipants(sock, ev) {
   const { id, author, participants, action } = ev || {};
   if (!id) return;
+  if (!require('../database/rental').isGroupBotEnabled(id)) return;
   groups.ensure(id, '');
   autobot.ensureGroupDefaults(id);
   const who = author || '';

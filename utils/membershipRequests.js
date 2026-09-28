@@ -91,6 +91,7 @@ async function processMembershipRequest({ sock, groupJid, participantJid, pendin
   const key = `${groupJid}|${participantJid}`;
   if (inFlight.has(key)) return inFlight.get(key);
   const work = (async () => {
+    if (!require('../database/rental').isGroupBotEnabled(groupJid)) return { skipped: true, reason: 'bot-off' };
     if (await wasProcessed(sock, groupJid, participantJid)) return { skipped: true, reason: 'deduplicated' };
     const settings = groups.getSettings(groupJid) || {};
     const captchaEnabled = settings.captcha === true;

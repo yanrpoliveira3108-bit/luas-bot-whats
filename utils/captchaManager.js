@@ -182,7 +182,8 @@ async function onResponse(sock, participantJid, text, send, meta = {}) {
   logger.info({ chatNamespace: namespace(meta.remoteJid), participantNamespace: incomingNamespace, fromMe: Boolean(meta.fromMe), messageType: meta.messageType || 'unknown', hasText, hasQuoted: quote.hasQuotedMessage, textLength: rawText.length, explicitChallengeId: Boolean(explicitId), quotedCaptchaCandidate: quote.hasStanzaId }, '[CAPTCHA_ANSWER] inbound');
   logger.info(quote, '[CAPTCHA_ANSWER] quote');
 
-  const all = db.prepare('captcha_pending_all', `SELECT * FROM captcha_challenges WHERE status = 'pending' ORDER BY created_at ASC`).all();
+  const all = db.prepare('captcha_pending_all', `SELECT * FROM captcha_challenges WHERE status = 'pending' ORDER BY created_at ASC`).all()
+    .filter((challenge) => require('../database/rental').isGroupBotEnabled(challenge.group_jid));
   const matchesIdentity = [];
   for (const challenge of all) {
     let matched = false;
