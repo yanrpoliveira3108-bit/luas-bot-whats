@@ -251,12 +251,11 @@ body{font-family:var(--lua-font,system-ui,-apple-system,"Segoe UI",Roboto,sans-s
 .pn-status{margin:8px 0 0;font-size:${s(12.5)};min-height:16px;color:var(--lua-ok-text,#6EE7B7)}
 .pn-tip{margin:8px 0 0;font-size:${s(11.5)};color:var(--lua-text-secondary,#94A3B8)}
 
-/* ---------- suporte global ---------- */
-.support-button{display:flex;align-items:center;gap:10px;margin-top:8px;padding:9px 11px;min-height:44px;border:1px solid var(--lua-border,rgba(255,255,255,.14));border-radius:12px;background:linear-gradient(135deg,rgba(139,92,246,.22),rgba(30,32,38,.92));color:var(--lua-text,#F8FAFC);text-decoration:none;box-shadow:0 3px 12px var(--lua-glow,rgba(139,92,246,.18));}
-.support-button:active{transform:translateY(1px);filter:brightness(1.08)}
-.support-icon{display:inline-flex;align-items:center;justify-content:center;width:25px;height:25px;border-radius:8px;color:var(--lua-neon,#C084FC);border:1px solid var(--lua-neon,#C084FC);font-size:13px;font-weight:700}
-.support-button strong{display:block;font-size:${s(12.5)};letter-spacing:.4px}
-.support-button small{display:block;margin-top:2px;color:var(--lua-text-secondary,#94A3B8);font-size:${s(10.5)}}
+/* ---------- indicação de suporte ---------- */
+.support-hint{display:flex;align-items:center;gap:10px;margin-top:8px;padding:9px 11px;min-height:44px;border:1px solid var(--lua-border,rgba(255,255,255,.14));border-radius:12px;background:var(--lua-card,#1E2026);color:var(--lua-text,#F8FAFC)}
+.support-icon{display:inline-flex;align-items:center;justify-content:center;width:25px;height:25px;border-radius:8px;font-size:16px}
+.support-hint strong{display:block;font-size:${s(12.5)};letter-spacing:.4px}
+.support-hint small{display:block;margin-top:2px;color:var(--lua-text-secondary,#94A3B8);font-size:${s(10.5)}}
 
 /* ---------- rodapé ---------- */
 .foot{margin-top:10px;padding:8px 6px 4px;border-top:1px solid var(--lua-line,rgba(255,255,255,.10));font-size:${s(11)};

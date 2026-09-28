@@ -1,21 +1,27 @@
 'use strict';
-const assert=require('assert');
-const CONFIG=require('../config');
-const components=require('../menus/html/components');
-assert.strictEqual(CONFIG.support.number,'5519981144235');
-assert(!CONFIG.owner.numbers.includes('5519981144235'));
-const html=components.botaoSuporte();
-assert(html.includes('class="support-button"'));
-assert(html.includes('href="https://wa.me/5519981144235"'));
-assert(html.includes('target="_blank"'));
-assert(html.includes('SUPORTE'));
-const footer=components.rodape({prefix:'!',avisoCorte:null});
-assert(footer.includes('support-button'));
-assert(footer.includes('https://wa.me/5519981144235'));
-assert(!footer.includes('text='));
-console.log('supportButton.test.js: OK');
-const templates=require('../menus/html/templates');
-const documentHtml=templates.menuPrincipal({botName:'Lua',version:'1',emoji:'',prefix:'!',total:0,categoriaLabel:'Menu',escopoTexto:'no privado',grupo:{categorias:[],inicial:'',titulo:'Menu',total:0},altura:640,passo:.7,ident:{prefixo:'!'},visual:null});
-assert(documentHtml.includes('support-button'));
-assert(documentHtml.includes('https://wa.me/5519981144235'));
-console.log('supportButton HTML flow: OK');
+
+const assert = require('assert');
+const CONFIG = require('../config');
+const components = require('../menus/html/components');
+const { SUPPORT_NAME, supportNumber, supportVcard } = require('../utils/supportContact');
+
+assert.strictEqual(CONFIG.support.number, '5519981144235');
+assert(!CONFIG.owner.numbers.includes(CONFIG.support.number));
+
+const footer = components.rodape({ prefix: ',' });
+assert(footer.includes('SUPORTE'));
+assert(footer.includes('Digite ,suporte'));
+assert(!footer.includes('<a'));
+assert(!footer.includes('wa.me'));
+assert(!footer.includes('data-copy'));
+assert(!footer.includes('onclick'));
+
+assert.strictEqual(SUPPORT_NAME, 'Lua • Suporte');
+assert.strictEqual(supportNumber(), '5519981144235');
+const vcard = supportVcard();
+assert(vcard.includes('FN:Lua • Suporte'));
+assert(vcard.includes('waid=5519981144235:+5519981144235'));
+assert(vcard.startsWith('BEGIN:VCARD\n'));
+assert(vcard.endsWith('\nEND:VCARD'));
+
+console.log('supportButton.test.js: native-contact fallback protected');

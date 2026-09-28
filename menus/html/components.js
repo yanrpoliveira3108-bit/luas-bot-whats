@@ -226,17 +226,14 @@ function cabecalho(info) {
   );
 }
 
-/** Botão global de suporte: apenas abre a conversa, sem texto automático. */
-function botaoSuporte() {
-  const CONFIG = require('../../config');
-  const number = String(CONFIG.support && CONFIG.support.number || '').replace(/\D/g, '');
-  if (!number) return '';
-  const href = `https://wa.me/${number}`;
+/** Indicação honesta: o HTML não dispara navegação externa nem comandos. */
+function indicacaoSuporte(info = {}) {
+  const prefix = escapeHtml(info.prefix || ',');
   return (
-    `<a class=\"support-button\" href=\"${escapeAttr(href)}\" target=\"_blank\" rel=\"noopener noreferrer\" aria-label=\"Abrir suporte da Lua no WhatsApp\">` +
-    '<span class=\"support-icon\" aria-hidden=\"true\">[+]</span>' +
-    '<span><strong>SUPORTE</strong><small>Falar com o desenvolvedor</small></span>' +
-    '</a>'
+    '<div class=\"support-hint\" aria-label=\"Suporte nativo\">' +
+    '<span class=\"support-icon\" aria-hidden=\"true\">🏷️</span>' +
+    `<span><strong>SUPORTE</strong><small>Digite ${prefix}suporte para receber o contato nativo</small></span>` +
+    '</div>'
   );
 }
 
@@ -255,7 +252,7 @@ function rodape(info) {
   return (
     '<footer class="foot">' +
     linhaCorte +
-    botaoSuporte() +
+    indicacaoSuporte({ prefix: (info && info.prefix) || ',' }) +
     '<span class="foot-medida" id="lua-medida" hidden></span>' +
     '</footer>'
   );
@@ -272,6 +269,6 @@ module.exports = {
   secaoDeCategoria,
   cabecalho,
   painelIdentidade,
-  botaoSuporte,
+  indicacaoSuporte,
   rodape,
 };
