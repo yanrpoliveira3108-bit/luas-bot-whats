@@ -390,10 +390,14 @@ function checkGate(cmd, ctx) {
     if (!allowed) return { ok: false, message: ctx.isGroup ? M.deniedAdmin : M.deniedOwner };
   }
   if (cmd.botAdmin && ctx.isGroup && !ctx.isBotAdmin) return { ok: false, message: M.botNotAdmin };
-  if (ctx.isGroup && !ctx.isOwner && (cmd.requiresRentalMode || cmd.requiresPlan)) {
-    const rental = require('../database/rental');
-    const access = rental.canUseRentalFeature(ctx.remoteJid, cmd.requiresPlan ? { plan: cmd.requiresPlan } : {});
-    if (!access.ok) return { ok: false, message: access.reason === 'MODE_OFF' ? '🌙 Este recurso exige o modo aluguel ativo.' : '🌙 Este plano não possui acesso a este recurso.' };
+  if (ctx.isGroup && !ctx.isOwner && (cmd.requiresRentalMode || cmd.requiresPlan || cmd.requiresVip || cmd.requiresUserVip || cmd.requiresGroupVip)) {
+    const premium = require('../database/premium');
+    const okUser = premium.hasUserVip(ctx.sender);
+    const okGroup = premium.hasGroupVip(ctx.remoteJid);
+    const ok = cmd.requiresUserVip ? okUser : cmd.requiresGroupVip ? okGroup : cmd.requiresVip ? (okUser || okGroup) : require('../database/rental').canUseRentalFeature(ctx.remoteJid, cmd.requiresPlan ? { plan: cmd.requiresPlan } : {}).ok;
+    if (!ok) return { ok: false, message: cmd.requiresUserVip ? '💎 Este recurso exige VIP pessoal.' : '💎 Este recurso exige VIP ativo.' };
+  }
+
   }
 
   // Modo Registro (AutoBot, global) — sobrepõe o modo privado do .env

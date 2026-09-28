@@ -7,7 +7,8 @@ const PLANS = ['FREE', 'TEST', 'RENTAL'];
 const CATALOG = [
   ['NUMBER', 'Números', 700, 'A partir de números para uso no WhatsApp.'],
   ['BOT', 'Bot', 0, 'Venda do bot Lua.'],
-  ['RENTAL', 'Aluguel', 2500, 'Aluguel do bot por período.'],
+  ['RENTAL', 'Aluguel VIP', 2500, 'Ativa recursos premium do bot no grupo por período determinado.'],
+  ['VIP', 'VIP Pessoal', 0, 'Libera comandos VIP diretamente para sua conta durante o período contratado.'],
   ['DATABASE', 'Database', 0, 'Bases e estruturas de dados.'],
   ['HOST', 'Host', 0, 'Hospedagem e infraestrutura.'],
 ];
@@ -46,9 +47,9 @@ function formatMoney(cents, currency = 'BRL') {
 function parseDuration(input) {
   const raw = String(input || '').trim().toLowerCase();
   if (raw === 'infinito' || raw === 'infinite' || raw === '∞') return null;
-  const m = raw.match(/^(\d+)\s*(m|min|h|d|w)$/);
+  const m = raw.match(/^(\d+)\s*(s|sec|m|min|h|d|w)$/);
   if (!m || Number(m[1]) <= 0) throw new Error('DURATION_INVALID');
-  const unit = { m: 60000, min: 60000, h: 3600000, d: 86400000, w: 604800000 }[m[2]];
+  const unit = { s: 1000, sec: 1000, m: 60000, min: 60000, h: 3600000, d: 86400000, w: 604800000 }[m[2]];
   const ms = Number(m[1]) * unit;
   if (!Number.isSafeInteger(ms) || ms > 10 * 365 * 86400000) throw new Error('DURATION_INVALID');
   return ms;
@@ -57,7 +58,8 @@ function durationLabel(ms) {
   if (ms === null || ms === undefined) return 'infinito';
   let n = Math.floor(ms / 86400000); if (n) return `${n}d`;
   n = Math.floor(ms / 3600000); if (n) return `${n}h`;
-  return `${Math.floor(ms / 60000)}m`;
+  n = Math.floor(ms / 60000); if (n) return `${n}m`;
+  return `${Math.floor(ms / 1000)}s`;
 }
 function getPlanDefaults() { ensureSeed(); return Object.fromEntries(prepare('rental_defaults_all', 'SELECT plan,duration_ms FROM rental_plan_defaults').all().map((r) => [r.plan, r.duration_ms === null ? null : Number(r.duration_ms)])); }
 function setPlanDefaultDuration(plan, duration) { plan = String(plan).toUpperCase(); if (!PLANS.includes(plan)) throw new Error('PLAN_INVALID'); const ms = duration === null ? null : (typeof duration === 'number' ? duration : parseDuration(duration)); if (ms !== null && (!Number.isSafeInteger(ms) || ms <= 0)) throw new Error('DURATION_INVALID'); ensureSeed(); prepare('rental_default_set', 'UPDATE rental_plan_defaults SET duration_ms=?,updated_at=? WHERE plan=?').run(ms, now(), plan); return getPlanDefaults()[plan]; }

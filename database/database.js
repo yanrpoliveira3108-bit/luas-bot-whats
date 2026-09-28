@@ -844,6 +844,55 @@ const MIGRATIONS = [
   );
   CREATE INDEX IF NOT EXISTS idx_rental_groups_plan_expiry ON rental_groups(plan, expires_at);`,
 
+  // 43 — entitlements premium, keys de ativação e subdonos
+  `CREATE TABLE IF NOT EXISTS activation_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key_hash TEXT NOT NULL UNIQUE,
+    key_prefix TEXT NOT NULL,
+    key_last4 TEXT NOT NULL,
+    scope TEXT NOT NULL CHECK(scope IN ('GROUP','USER')),
+    tier TEXT NOT NULL DEFAULT 'VIP',
+    duration_ms INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'UNUSED' CHECK(status IN ('UNUSED','REDEEMED','REVOKED')),
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    redeemed_at TEXT DEFAULT NULL,
+    redeemed_by TEXT DEFAULT '',
+    redeemed_for TEXT DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS idx_activation_keys_status ON activation_keys(status, created_at);
+  CREATE TABLE IF NOT EXISTS vip_entitlements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope TEXT NOT NULL CHECK(scope IN ('GROUP','USER')),
+    subject_id TEXT NOT NULL,
+    plan TEXT NOT NULL DEFAULT 'VIP',
+    started_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE','EXPIRED','REVOKED')),
+    source TEXT NOT NULL DEFAULT 'KEY',
+    created_by TEXT NOT NULL,
+    key_id INTEGER DEFAULT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(scope, subject_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_vip_entitlements_lookup ON vip_entitlements(scope, subject_id, status, expires_at);
+  CREATE TABLE IF NOT EXISTS vip_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    key_id INTEGER DEFAULT NULL,
+    actor_id TEXT DEFAULT '',
+    metadata TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS subowners (
+    user_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1
+  );`
+
 ];
 
 /* ----------------------------- core ------------------------------ */

@@ -4,12 +4,13 @@ const rental = require('../../database/rental');
 const poster = require('../../utils/rentalPoster');
 const htmlRental = require('../../utils/htmlRental');
 const { detectMediaType } = require('../../utils/messages');
+const premium = require('../../database/premium');
 
-const label = { NUMBER: 'Número', BOT: 'Bot', RENTAL: 'Aluguel', DATABASE: 'Database', HOST: 'Host' };
+const label = { NUMBER: 'Número', BOT: 'Bot', RENTAL: 'Aluguel VIP', VIP: 'VIP Pessoal', DATABASE: 'Database', HOST: 'Host' };
 function planLabel(p) { return ({ FREE: 'GRÁTIS', TEST: 'TESTE', RENTAL: 'ALUGUEL' }[p] || p); }
 function fmtDate(v) { return v ? new Date(v).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : '—'; }
 function remaining(ms) { if (ms === null) return 'infinito'; if (!ms || ms < 0) return 'expirado'; const d = Math.floor(ms / 86400000); const h = Math.floor(ms % 86400000 / 3600000); return `${d}d ${h}h`; }
-function statusText(ctx) { const s = rental.getGroupSubscription(ctx.remoteJid); return ['🌙 *LUA • PLANO*', '', `Grupo: ${ctx.groupName || 'este grupo'}`, `Plano: ${planLabel(s.plan)}`, `Status: ${s.status === 'ACTIVE' ? 'ATIVO' : 'EXPIRADO'}`, `Início: ${fmtDate(s.started_at)}`, `Expira: ${fmtDate(s.expires_at)}`, `Tempo restante: ${remaining(s.remainingMs)}`, `Modo aluguel: ${s.rentalModeEnabled ? 'ATIVO' : 'INATIVO'}`].join('\n'); }
+function statusText(ctx) { const s = rental.getGroupSubscription(ctx.remoteJid); return ['🌙 *LUA • PLANO*', '', `Grupo: ${ctx.groupName || 'este grupo'}`, `Plano: ${planLabel(s.plan)}`, `Status: ${s.status === 'ACTIVE' ? 'ATIVO' : 'EXPIRADO'}`, `Início: ${fmtDate(s.started_at)}`, `Expira: ${fmtDate(s.expires_at)}`, `Tempo restante: ${remaining(s.remainingMs)}`, `Modo aluguel: ${s.rentalModeEnabled ? 'ATIVO' : 'INATIVO'}`, `VIP DO GRUPO: ${premium.hasGroupVip(ctx.remoteJid) ? 'ATIVO' : 'INATIVO'}`].join('\n'); }
 async function ownerOnly(ctx) { if (!ctx.isOwner) { await ctx.reply('🚫 Apenas o dono pode alterar esta configuração.'); return false; } return true; }
 function catalogText(includeInactive) { return ['🌙 *LUA • VALORES*', '', ...rental.getCatalog(includeInactive).map((i) => `${label[i.key] || i.label}: ${rental.formatMoney(i.price_cents, i.currency)}${i.active ? '' : ' (inativo)'}`)].join('\n'); }
 
@@ -24,7 +25,7 @@ const aluguel = {
       if (sub === 'status' && ctx.isOwner) return ctx.reply(catalogText(true));
       if (sub === 'valor' && ctx.args.length === 1) return ctx.reply(catalogText(ctx.isOwner));
       if (!(await ownerOnly(ctx))) return;
-      const key = ({ numero: 'NUMBER', number: 'NUMBER', bot: 'BOT', aluguel: 'RENTAL', rental: 'RENTAL', database: 'DATABASE', host: 'HOST' })[String(ctx.args[1] || '').toLowerCase()] || String(ctx.args[1] || '').toUpperCase();
+      const key = ({ numero: 'NUMBER', number: 'NUMBER', bot: 'BOT', aluguel: 'RENTAL', rental: 'RENTAL', vip: 'VIP', database: 'DATABASE', host: 'HOST' })[String(ctx.args[1] || '').toLowerCase()] || String(ctx.args[1] || '').toUpperCase();
       const price = ctx.args[2];
       if (!key || price === undefined) return ctx.reply('Uso: ,aluguel valor numero <valor>');
       try { const item = rental.setCatalogPrice(key, price); return ctx.reply(`✅ ${item.label}: ${rental.formatMoney(item.price_cents, item.currency)}`); } catch (e) { return ctx.reply(e.message === 'MONEY_INVALID' ? '❌ Valor inválido. Use 7, 7,50 ou 7.50.' : '❌ Categoria inválida.'); }
