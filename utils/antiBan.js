@@ -103,7 +103,7 @@ function calculateTypingDelay(text, isAudio = false) {
  * Simula comportamento humano (envia presença e aguarda delay natural).
  */
 async function simulateTyping(sock, jid, textOrContent = '', presenceType = 'composing') {
-  if (isTestEnvironment() || !freioConfig.get().typingEnabled || !sock) {
+  if (isTestEnvironment() || !freioConfig.get().delayEnabled || !freioConfig.get().typingEnabled || !sock) {
     return;
   }
   const isAudio = presenceType === 'recording';

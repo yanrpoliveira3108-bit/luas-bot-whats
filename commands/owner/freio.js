@@ -110,8 +110,10 @@ function statusText() {
     '*Limites em vigor*',
     `▸ ${limits.maxPerMinute} msg/min no total  ${bar(used, limits.maxPerMinute)} ${used}/${limits.maxPerMinute}`,
     `▸ ${limits.chatMaxPerMinute} msg/min por conversa`,
-    `▸ Intervalo: ${limits.minIntervalMs}ms global · ${limits.chatIntervalMs}ms por conversa`,
-    `▸ Jitter: ${runtime.jitterMs}ms`,
+    `▸ Delay artificial: ${runtime.delayEnabled ? 'ON' : 'OFF'}`,
+    `▸ Multi-chat: ${runtime.multichatEnabled ? 'ON' : 'OFF'} · FIFO por chat`,
+    `▸ Intervalo técnico: ${limits.minIntervalMs}ms global · ${limits.chatIntervalMs}ms por conversa`,
+    `▸ Jitter configurado: ${runtime.jitterMs}ms`,
     `▸ Typing: ${runtime.typingEnabled ? 'ATIVO' : 'DESATIVADO'} (${runtime.typingMinMs}-${runtime.typingMaxMs}ms)`,
     `▸ Backlog offline: ${runtime.ignoreOfflineBacklog ? 'IGNORAR' : 'PROCESSAR'} · grace ${runtime.backlogGraceMs}ms`,
     `▸ Backlog descartado nesta sessão: ${backlog.dropped}`,
@@ -183,7 +185,9 @@ module.exports = [
           '`!freio backlog on|off`',
           '`!freio backlog grace 10s`',
           '`!freio ppm 20`',
-          '`!freio delay 500ms 1500ms`',
+          '`!freio delay on|off` (delay artificial)',
+          '`!freio delay 500ms 1500ms` (intervalos)',
+          '`!freio multichat on|off`',
           '`!freio typing on|off`',
           '`!freio reset`',
           '`!freio pv on|off|status`',
@@ -223,6 +227,13 @@ module.exports = [
       }
 
       if (sub === 'delay') {
+        const mode = String(ctx.args[1] || '').toLowerCase();
+        if (['on', 'off', '1', '0'].includes(mode)) {
+          const on = ['on', '1'].includes(mode);
+          freioConfig.set('delay_enabled', on);
+          freioConfig.set('typing_enabled', on);
+          return ctx.reply(`✅ Delay artificial: ${on ? 'ON' : 'OFF'}. PPM, permissões e segurança continuam ativos.`);
+        }
         try {
           const min = freioConfig.parseDuration(ctx.args[1]);
           const max = freioConfig.parseDuration(ctx.args[2]);
@@ -232,6 +243,14 @@ module.exports = [
           await ctx.reply(`✅ Delay atualizado: global ${min}ms · por conversa ${max}ms.`);
         } catch (_) { await ctx.reply('⚠️ Delay inválido. Use `!freio delay 500ms 1500ms`, com mínimo ≤ máximo e até 60s.'); }
         return;
+      }
+
+      if (sub === 'multichat') {
+        const arg = String(ctx.args[1] || '').toLowerCase();
+        if (!['on', 'off', '1', '0'].includes(arg)) return ctx.reply(`Multi-chat: ${freioConfig.get().multichatEnabled ? 'ON' : 'OFF'}. Use multichat on|off.`);
+        const on = ['on', '1'].includes(arg);
+        freioConfig.set('multichat_enabled', on);
+        return ctx.reply(`✅ Multi-chat ${on ? 'ON' : 'OFF'}. ${on ? 'FIFO por chat e concorrência entre chats.' : 'modo conservador global.'}`);
       }
 
       if (sub === 'typing') {

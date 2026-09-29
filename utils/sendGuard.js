@@ -133,6 +133,8 @@ let dirty = false;
 let attached = false;
 let ready = false;
 let currentSend = null; // envio em andamento (usado pelo watchdog do janitor)
+const recentPerf = [];
+const PERF_CAP = 200;
 
 /* ------------------------------ persistência ---------------------------- */
 
@@ -360,11 +362,15 @@ function multiplierFor(kind) {
 }
 
 function minIntervalFor(kind) {
-  return Math.round(freioConfig.get().minIntervalMs * multiplierFor(kind) * intervalFactor());
+  const c = freioConfig.get();
+  if (!c.delayEnabled) return 0;
+  return Math.round(c.minIntervalMs * multiplierFor(kind) * intervalFactor());
 }
 
 function chatIntervalFor(kind) {
-  return Math.round(freioConfig.get().chatIntervalMs * multiplierFor(kind) * intervalFactor());
+  const c = freioConfig.get();
+  if (!c.delayEnabled) return 0;
+  return Math.round(c.chatIntervalMs * multiplierFor(kind) * intervalFactor());
 }
 
 function maxPerMinute() {
@@ -741,7 +747,9 @@ function nextWait(now) {
 }
 
 function jitter() {
-  const j = Number(freioConfig.get().jitterMs) || 0;
+  const config = freioConfig.get();
+  if (!config.delayEnabled) return 0;
+  const j = Number(config.jitterMs) || 0;
   if (j <= 0) return 0;
   return Math.round(Math.random() * j * intervalFactor());
 }
@@ -824,6 +832,7 @@ async function pump() {
       state.totalSent++;
       audit({ t: ts, jid: picked.jid, kind: picked.item.kind, h: picked.item.hash || undefined });
 
+      const queuedAt = picked.item.enqueuedAt;
       const startedAt = Date.now();
       currentSend = { jid: picked.jid, kind: picked.item.kind, startedAt, warnAt: 0 };
       const prazoMs = Number(CFG.sendTimeoutMs) || 0;
@@ -853,6 +862,8 @@ async function pump() {
         diagnose(err, picked);
         picked.item.reject(err);
       } finally {
+        recentPerf.push({ kind: picked.item.kind, queueWaitMs: Math.max(0, startedAt - queuedAt), sendMs: Math.max(0, Date.now() - startedAt), totalMs: Math.max(0, Date.now() - queuedAt), at: Date.now() });
+        if (recentPerf.length > PERF_CAP) recentPerf.shift();
         currentSend = null;
       }
       if (state.totalSent % 20 === 0) saveState();
@@ -1265,6 +1276,21 @@ function init() {
 
 /* -------------------------------- relatório ----------------------------- */
 
+function perfStats() {
+  const values = recentPerf.slice();
+  const percentile = (key, p) => {
+    const a = values.map((x) => x[key]).sort((x, y) => x - y);
+    return a.length ? a[Math.min(a.length - 1, Math.floor((a.length - 1) * p))] : 0;
+  };
+  return {
+    count: values.length,
+    queueWaitMs: { p50: percentile('queueWaitMs', .5), p95: percentile('queueWaitMs', .95), max: values.length ? Math.max(...values.map((x) => x.queueWaitMs)) : 0 },
+    sendMs: { p50: percentile('sendMs', .5), p95: percentile('sendMs', .95), max: values.length ? Math.max(...values.map((x) => x.sendMs)) : 0 },
+    totalMs: { p50: percentile('totalMs', .5), p95: percentile('totalMs', .95), max: values.length ? Math.max(...values.map((x) => x.totalMs)) : 0 },
+    last: values[values.length - 1] || null,
+  };
+}
+
 function stats() {
   const now = Date.now();
   const left = warmupLeftMs(now);
@@ -1367,6 +1393,7 @@ module.exports = {
   chatLiberadoNaPausa,
   enqueue,
   stats,
+  perfStats,
   setPaused,
   isPaused,
   resetWarmup,

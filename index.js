@@ -138,6 +138,8 @@ const eventHandler = require('./handlers/eventHandler');
 const janitor = require('./utils/janitor');
 const autobot = require('./utils/autobot');
 const sendGuard = require('./utils/sendGuard');
+const freioConfig = require('./utils/freioConfig');
+const chatQueue = require('./utils/chatQueue');
 const safety = require('./utils/safety');
 const connection = require('./connection/connect');
 const { cleanupTmp } = require('./utils/download');
@@ -149,26 +151,31 @@ autoBackup.startAutoBackup();
 const membershipRequests = require('./utils/membershipRequests');
 const membershipMonitor = require('./utils/membershipMonitor');
 
+let globalMessageQueue = Promise.resolve();
+
 connection.onMessage((sock, messages, type, transportMeta = {}) => {
   for (const msg of messages) {
     const handlerQueuedAt = Date.now();
     const socketReceivedAt = transportMeta.receivedAtById && msg && msg.key
       ? transportMeta.receivedAtById.get(msg.key.id) || transportMeta.receivedAt
       : transportMeta.receivedAt;
-    try { if (msg && msg.key && msg.key.remoteJid) sendGuard.noteInbound(msg.key.remoteJid); } catch (_) {}
-    // O vendor entrega pedidos como stubs no mesmo pipeline de messages.upsert.
-    // Consome somente esses stubs; mensagens normais seguem intactas.
-    membershipRequests.handleMessage(sock, msg, type).then((consumed) => {
+    const chatJid = msg && msg.key && msg.key.remoteJid;
+    try { if (chatJid) sendGuard.noteInbound(chatJid); } catch (_) {}
+    const task = async () => {
+      // O vendor entrega pedidos como stubs no mesmo pipeline de messages.upsert.
+      const consumed = await membershipRequests.handleMessage(sock, msg, type);
       if (consumed) return;
       const handlerStartedAt = Date.now();
-      commandHandler.handleMessage(sock, msg, type, {
+      await commandHandler.handleMessage(sock, msg, type, {
         socketReceivedAt,
         handlerQueuedAt,
         handlerStartedAt,
-      }).catch((err) => {
-        logger.error({ err: err.message }, 'erro não tratado em mensagem');
       });
-    }).catch((err) => logger.error({ err: err.message, stack: err.stack }, '[MEMBERSHIP_ERROR] erro no fluxo de pedidos'));
+    };
+    const run = freioConfig.get().multichatEnabled
+      ? chatQueue.enqueue(chatJid, task)
+      : (globalMessageQueue = globalMessageQueue.catch(() => {}).then(task));
+    run.catch((err) => logger.error({ err: err.message, chatJid }, 'erro não tratado em mensagem'));
   }
 });
 connection.onGroupParticipants((sock, ev) => {
