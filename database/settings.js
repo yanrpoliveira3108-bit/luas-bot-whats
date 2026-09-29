@@ -105,10 +105,6 @@ module.exports = {
   setHtmlPlayEnabled,
   menuHtmlEnabled,
   setMenuHtmlEnabled,
-<<<<<<< HEAD
   antiPvEnabled,
   setAntiPvEnabled,
-=======
-
->>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
 };
