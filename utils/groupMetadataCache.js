@@ -361,5 +361,5 @@ module.exports = {
   aquecer,
   stats,
   // exposto para os testes
-  _interno: { cache, guardar, valido, TTL_MS, PRAZO_MS, CFG },
+  _interno: { cache, guardar, valido, TTL_MS, PRAZO_MS },
 };
