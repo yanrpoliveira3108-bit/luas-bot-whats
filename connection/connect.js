@@ -45,6 +45,11 @@ let pairingCodeRequested = false; // true após gerar o código (reconexão NÃO
 let pendingPhone = null;      // número para re-tentar pairing (se necessário)
 let currentPhoneDigits = null;
 let lastCloseReason = null;
+let socketGeneration = 0;
+let activeGeneration = 0;
+let reconnectInFlight = null;
+const reconnectHistory = [];
+let lastSessionSync = null;
 
 // Diagnóstico focado no caminho de entrada. Desligado por padrão para não
 // acrescentar I/O ao runtime normal. Não registra texto/conteúdo de mensagens.
@@ -191,6 +196,10 @@ function getStatus() {
     jid,
     phoneDigits: jid ? phoneDigitsFromJid(jid) : currentPhoneDigits,
     lastReason: lastCloseReason,
+    socketGeneration: activeGeneration,
+    reconnectInProgress: Boolean(reconnectInFlight || reconnectTimer || connecting),
+    reconnectsLast5m: reconnectHistory.filter((t) => Date.now() - t < 5 * 60 * 1000).length,
+    sessionSync: lastSessionSync,
   };
 }
 
@@ -216,7 +225,7 @@ function disposeSocket() {
   } catch (_) {
     /* ignora */
   }
-  logger.info('socket anterior encerrado');
+  logger.info({ socketGeneration: activeGeneration }, '[SOCKET_DISPOSE]');
 }
 
 /**
@@ -289,6 +298,9 @@ async function connect({ phone } = {}) {
     if (semCacheSeguro) logger.warn('SAFE_CACHE=0 — usando os caches padrão da biblioteca');
     if (semCacheGrupo) logger.warn('GROUP_META_CACHE=0 — consulta de metadados ao vivo (sem cache)');
 
+    const generation = ++socketGeneration;
+    activeGeneration = generation;
+    logger.info({ socketGeneration: generation }, '[SOCKET_CREATE]');
     sock = makeWASocket({
       version,
       auth: {
@@ -333,7 +345,7 @@ async function connect({ phone } = {}) {
     } catch (_) {
       /* a API seletiva é opcional e nunca pode impedir a conexão */
     }
-    wireEvents(sock, saveCreds);
+    wireEvents(sock, saveCreds, generation);
 
     if (!state.creds.registered) {
       if (!phone && !pairingCodeRequested) {
@@ -405,9 +417,12 @@ async function connect({ phone } = {}) {
 
 /* --------------------------- eventos Baileys ------------------------- */
 
-function wireEvents(sockRef, saveCreds) {
-  sockRef.ev.on('creds.update', saveCreds);
-  sockRef.ev.on('connection.update', (update) => handleConnectionUpdate(update, sockRef));
+function wireEvents(sockRef, saveCreds, generation) {
+  sockRef.ev.on('creds.update', (update) => {
+    if (generation !== activeGeneration) return;
+    Promise.resolve(saveCreds(update)).catch((err) => logger.error({ socketGeneration: generation, errorName: err.name, errorMessage: err.message }, '[CREDS_SAVE_ERROR]'));
+  });
+  sockRef.ev.on('connection.update', (update) => handleConnectionUpdate(update, sockRef, generation));
 
   sockRef.ev.on('messages.upsert', ({ messages, type }) => {
     const receivedAt = Date.now();
@@ -496,21 +511,6 @@ function wireEvents(sockRef, saveCreds) {
     );
   });
 
-  // Instrumentação runtime: o fork também expõe pedidos como group.join-request
-  // em process-message.js. Neste estágio apenas observamos; não redirecionamos
-  // o fluxo automático antes de confirmar o evento real no Termux.
-  sockRef.ev.on('group.join-request', (request) => {
-    logger.info(
-      {
-        groupJid: request && request.id,
-        participant: request && request.participant,
-        action: request && request.action,
-        method: request && request.method,
-      },
-      '[WA_RUNTIME] group.join-request'
-    );
-  });
-
   sockRef.ev.on('group-participants.update', (ev) => {
     if (listeners.groupParticipants) listeners.groupParticipants(sockRef, ev);
   });
@@ -569,8 +569,29 @@ function friendlyCloseReason(statusCode) {
 /**
  * Trata atualizações de conexão (abertura, fechamento, logout, restart).
  */
-function handleConnectionUpdate(update, sockRef) {
-  const { connection, lastDisconnect } = update;
+function handleConnectionUpdate(update, sockRef, generation = activeGeneration) {
+  const { connection, lastDisconnect } = update || {};
+  const error = lastDisconnect && lastDisconnect.error;
+  const statusCode = error && error.output ? error.output.statusCode : undefined;
+  const reason = statusCode != null ? (DisconnectReason[statusCode] || String(statusCode)) : 'unknown';
+  const diagnostic = {
+    socketGeneration: generation,
+    connection: connection || null,
+    isNewLogin: Boolean(update && update.isNewLogin),
+    qrPresent: Boolean(update && update.qr),
+    lastDisconnectPresent: Boolean(lastDisconnect),
+    statusCode: statusCode == null ? null : statusCode,
+    reasonName: reason,
+    errorName: error && error.name,
+    errorMessage: error && error.message,
+    willReconnect: Boolean(connection === 'close' && statusCode !== DisconnectReason.loggedOut),
+    reconnectSource: 'connection.update',
+  };
+  if (connection === 'close' || connection === 'open' || process.env.SOCKET_DIAG === '1') logger.info(diagnostic, '[CONNECTION_STATE]');
+  if (generation !== activeGeneration) {
+    logger.info({ socketGeneration: generation, activeGeneration }, '[STALE_CONNECTION_UPDATE_IGNORED]');
+    return;
+  }
 
   if (connection === 'connecting') {
     logger.info('connection.update: connecting (handshake em andamento)');
@@ -585,7 +606,8 @@ function handleConnectionUpdate(update, sockRef) {
     pendingPhone = null;
     pairingCodeRequested = false;
     currentPhoneDigits = phoneDigitsFromJid(sockRef.user && sockRef.user.id) || currentPhoneDigits;
-    logger.info({ jid: sockRef.user && sockRef.user.id }, '✅ conectado ao WhatsApp (connection = open)');
+    lastSessionSync = { generation, state: 'open', at: new Date().toISOString() };
+    logger.info({ socketGeneration: generation, jid: sockRef.user && sockRef.user.id }, '[SOCKET_OPEN]');
     // Diagnóstico de identidade LID (comunidades dependem do LID da sessão).
     logger.info(
       { id: sockRef.user && sockRef.user.id, lid: sockRef.user && sockRef.user.lid, hasLid: !!(sockRef.user && sockRef.user.lid) },
@@ -605,12 +627,10 @@ function handleConnectionUpdate(update, sockRef) {
 
   if (connection === 'close') {
     lifecycleOpen = false;
-    const statusCode = lastDisconnect && lastDisconnect.error
-      ? lastDisconnect.error.output && lastDisconnect.error.output.statusCode
-      : null;
-    const reason = statusCode ? DisconnectReason[statusCode] || String(statusCode) : 'unknown';
     lastCloseReason = reason;
-    logger.warn({ reason, statusCode }, 'conexão fechada');
+    reconnectHistory.push(Date.now());
+    while (reconnectHistory.length && Date.now() - reconnectHistory[0] > 5 * 60 * 1000) reconnectHistory.shift();
+    logger.warn({ socketGeneration: generation, reason, statusCode }, '[SOCKET_CLOSE]');
     if (sockRef === sock) sock = null; // só limpa se for o socket ATUAL (evita soquete antigo apagar o novo)
 
     if (skipCloseHandling) {
@@ -686,7 +706,11 @@ function handleConnectionUpdate(update, sockRef) {
 
 /** Reconexão com backoff exponencial (5s → 60s). */
 function scheduleReconnect(minDelay = 0) {
-  if (shutdownRequested || reconnectTimer || loggedOutDetected) return;
+  if (isConnected()) {
+    logger.info({ reason: 'already_open', socketGeneration: activeGeneration }, '[RECONNECT_SKIPPED]');
+    return;
+  }
+  if (shutdownRequested || reconnectTimer || reconnectInFlight || loggedOutDetected) return;
   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
     logger.error('muitas tentativas de reconexão sem sucesso — encerrando tentativas automáticas');
     emitStatus({
@@ -700,16 +724,13 @@ function scheduleReconnect(minDelay = 0) {
   reconnectAttempts++;
   logger.info({ delayMs: delay, tentativa: reconnectAttempts }, 'reconexão agendada');
   emitStatus({ type: 'reconnecting', delay, attempt: reconnectAttempts });
-  reconnectTimer = setTimeout(async () => {
+  reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    try {
-      // reconecta SEM pedir código: se a sessão foi registrada, restaura;
-      // se o pareamento está em andamento, continua aguardando o login.
-      await connect({});
-    } catch (err) {
-      logger.error({ err: err.message }, 'erro na reconexão');
-      scheduleReconnect();
-    }
+    reconnectInFlight = connect({}).catch((err) => {
+      logger.error({ errorName: err.name, errorMessage: err.message }, '[RECONNECT_ERROR]');
+    }).finally(() => {
+      reconnectInFlight = null;
+    });
   }, delay);
 }
 
