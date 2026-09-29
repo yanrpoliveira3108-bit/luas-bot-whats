@@ -115,6 +115,7 @@ function statusText() {
     `▸ Typing: ${runtime.typingEnabled ? 'ATIVO' : 'DESATIVADO'} (${runtime.typingMinMs}-${runtime.typingMaxMs}ms)`,
     `▸ Backlog offline: ${runtime.ignoreOfflineBacklog ? 'IGNORAR' : 'PROCESSAR'} · grace ${runtime.backlogGraceMs}ms`,
     `▸ Backlog descartado nesta sessão: ${backlog.dropped}`,
+    '▸ Fila: POR CHAT · scheduler global round-robin',
     `▸ Mídia espera ${limits.mediaMultiplier}× mais`,
     limits.dupMaxChats > 0
       ? `▸ Mesma mensagem: máx. ${limits.dupMaxChats} conversas/${limits.dupWindowMin} min`
