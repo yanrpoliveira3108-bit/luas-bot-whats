@@ -137,13 +137,7 @@ const groupHandler = require('./handlers/groupHandler');
 const eventHandler = require('./handlers/eventHandler');
 const janitor = require('./utils/janitor');
 const autobot = require('./utils/autobot');
-<<<<<<< HEAD
-const sendGuard = require('./utils/sendGuard');
-const freioConfig = require('./utils/freioConfig');
-const chatQueue = require('./utils/chatQueue');
-=======
 const chatSerial = require('./utils/chatSerial');
->>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
 const safety = require('./utils/safety');
 const connection = require('./connection/connect');
 const { cleanupTmp } = require('./utils/download');
@@ -155,11 +149,6 @@ autoBackup.startAutoBackup();
 const membershipRequests = require('./utils/membershipRequests');
 const membershipMonitor = require('./utils/membershipMonitor');
 
-<<<<<<< HEAD
-let globalMessageQueue = Promise.resolve();
-
-=======
->>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
 connection.onMessage((sock, messages, type, transportMeta = {}) => {
   for (const msg of messages) {
     const handlerQueuedAt = Date.now();
@@ -167,10 +156,6 @@ connection.onMessage((sock, messages, type, transportMeta = {}) => {
       ? transportMeta.receivedAtById.get(msg.key.id) || transportMeta.receivedAt
       : transportMeta.receivedAt;
     const chatJid = msg && msg.key && msg.key.remoteJid;
-<<<<<<< HEAD
-    try { if (chatJid) sendGuard.noteInbound(chatJid); } catch (_) {}
-=======
->>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
     const task = async () => {
       // O vendor entrega pedidos como stubs no mesmo pipeline de messages.upsert.
       const consumed = await membershipRequests.handleMessage(sock, msg, type);
@@ -182,13 +167,7 @@ connection.onMessage((sock, messages, type, transportMeta = {}) => {
         handlerStartedAt,
       });
     };
-<<<<<<< HEAD
-    const run = freioConfig.get().multichatEnabled
-      ? chatQueue.enqueue(chatJid, task)
-      : (globalMessageQueue = globalMessageQueue.catch(() => {}).then(task));
-=======
     const run = chatSerial.enqueue(chatJid, task);
->>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
     run.catch((err) => logger.error({ err: err.message, chatJid }, 'erro não tratado em mensagem'));
   }
 });

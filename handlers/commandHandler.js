@@ -546,10 +546,6 @@ async function handleMessage(sock, msg, type, transportMeta = {}) {
         messageType: msg.message && Object.keys(msg.message)[0],
       });
       if (consumedCaptcha) return;
-<<<<<<< HEAD
-      if (await handlePrivateAntiPv(sock, ctx)) return;
-=======
->>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
     }
 
     const lidAddressed = ctx.isGroup && (
@@ -794,90 +790,6 @@ async function handleMessage(sock, msg, type, transportMeta = {}) {
 
 /* ------------------------------- anti-PV ------------------------------- */
 
-<<<<<<< HEAD
-const pvWarned = new Map(); // jid -> timestamp do último aviso
-
-janitor.register(
-  'anti-pv',
-  () => {
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    for (const [k, ts] of pvWarned) if (ts < cutoff) pvWarned.delete(k);
-  },
-  60 * 60 * 1000
-);
-
-/**
- * Trata mensagens no privado (recursos globais Anti PV / PV2 / PV3).
- * - antipv  → avisa uma vez por dia e ignora
- * - antipv2 → ignora em silêncio
- * - antipv3 → bloqueia o número e avisa o dono (o mais forte vence)
- * @returns {Promise<boolean>} true se a mensagem foi tratada (deve parar)
- */
-async function handlePrivateAntiPv(sock, ctx) {
-  if (ctx.isOwner) return false; // dono fala com o bot no PV sempre
-  // O CAPTCHA é processado antes desta função. OFF apenas desliga o gate
-  // Anti-PV; o restante do pipeline continua normalmente.
-  if (!safety.antiPvEnabled()) return false;
-  const pv3 = autobot.isEnabled(null, 'antipv3');
-  const pv2 = autobot.isEnabled(null, 'antipv2');
-  const pv1 = autobot.isEnabled(null, 'antipv');
-  if (!pv1 && !pv2 && !pv3) return false;
-
-  const sender = ctx.sender;
-
-  if (pv3) {
-    try {
-      if (typeof sock.updateBlockStatus === 'function') {
-        await sock.updateBlockStatus(sender, 'block');
-      }
-    } catch (err) {
-      logger.warn({ err: err.message, usuario: sender }, 'anti pv3: falha ao bloquear');
-    }
-    for (const owner of CONFIG.owner.numbers) {
-      sock
-        .sendMessage(`${owner}@s.whatsapp.net`, {
-          text: `🚫 *Anti PV3*\n▸ Bloqueei @${String(sender).split('@')[0]} que chamou o bot no privado.`,
-          mentions: [sender],
-        })
-        .catch(() => {});
-    }
-    logger.info({ usuario: sender }, 'anti pv3: usuário bloqueado');
-    return true;
-  }
-
-  if (pv2) {
-    logger.info({ usuario: sender }, 'anti pv2: mensagem ignorada');
-    return true;
-  }
-
-  // pv1 — um aviso por dia
-  if (pv1) {
-    const last = pvWarned.get(sender) || 0;
-    if (Date.now() - last > 24 * 60 * 60 * 1000) {
-      pvWarned.set(sender, Date.now());
-      await ctx
-        .reply('🔒 *Anti PV ativo*\n▸ Não atendo no privado. Use os comandos dentro do grupo.')
-        .catch(() => {});
-    }
-    return true;
-  }
-
-  // Silent PV seguro (Anti-Ban): se nenhum anti-pv explícito estiver ligado,
-  // ignora conversas casuais de estranhos no privado para evitar denúncias (report spam).
-  if (CONFIG.security?.silentPv) {
-    const prefix = settings.effectivePrefix();
-    const isCmd = (ctx.text || '').trim().startsWith(prefix);
-    if (!isCmd) {
-      logger.info({ usuario: sender }, '[ANTI-BAN] Silent PV: mensagem casual de estranho ignorada no privado');
-      return true;
-    }
-  }
-
-  return false;
-}
-
-=======
->>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
 function grantXp(sender) {
   const now = Date.now();
   const last = lastXp.get(sender) || 0;

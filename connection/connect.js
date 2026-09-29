@@ -29,13 +29,8 @@ const logger = require('../utils/logger').child('connection');
 const activity = require('../utils/activity');
 const pairing = require('./pairing');
 const sessionRecovery = require('./sessionRecovery');
-<<<<<<< HEAD
-const sendGuard = require('../utils/sendGuard');
-const sessionBacklog = require('../utils/sessionBacklog');
-=======
 const sessionBacklog = require('../utils/sessionBacklog');
 const metaAi = require('../utils/metaAi');
->>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
 
 let sock = null;
 let lifecycleOpen = false;
@@ -441,11 +436,8 @@ function wireEvents(sockRef, saveCreds) {
     // Diagnóstico de recepção em comunidades/grupos LID (baixo ruído: só
     // dispara para mensagens LID ou stubs de cifra — o caso que investigamos).
     for (const m of accepted) {
-<<<<<<< HEAD
-=======
       // Auditoria opt-in: somente nomes/tipos/presença; nunca conteúdo privado.
       metaAi.probeMessage(m);
->>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
       const jid = m.key && m.key.remoteJid;
       const participant = m.key && m.key.participant;
       const participantAlt = m.key && m.key.participantAlt;

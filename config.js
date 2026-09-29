@@ -163,11 +163,7 @@ const CONFIG = {
     textFallback: envBool('HTML_PLAY_TEXT_FALLBACK', true),
   },
 
-<<<<<<< HEAD
-  /* ------------- segurança de envio (anti-restrição de conta) -------------
-=======
   /* ---------------- segurança de payload e conexão ----------------
->>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
    *
    * Contexto real: os números do dono caíram em "conta restrita" logo nos
    * primeiros comandos — inclusive com `!ping`, que é TEXTO PURO. Isso mostra
@@ -464,10 +460,6 @@ function ensureDirs() {
     CONFIG.paths.backupDir,
     CONFIG.paths.assetsDir,
     CONFIG.paths.rentalDir,
-<<<<<<< HEAD
-    CONFIG.safety.send.stateDir,
-=======
->>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
   ].forEach((d) => fs.mkdirSync(d, { recursive: true }));
 }
 
