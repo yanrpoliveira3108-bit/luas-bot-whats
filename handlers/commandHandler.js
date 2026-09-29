@@ -33,6 +33,7 @@ const perf = require('../utils/perf');
 const antiBan = require('../utils/antiBan');
 const contextReact = require('../utils/contextReact');
 const prefixReply = require('../utils/prefixReply');
+const pvPolicy = require('../utils/pvPolicy');
 const captchaManager = require('../utils/captchaManager');
 const safety = require('../utils/safety');
 const aiCharacter = require('../ai/character');
@@ -283,7 +284,9 @@ async function buildContext(sock, msg) {
     mediaType: detectMediaType(msg),
   };
 
+  const canReply = (reason) => ctx.isGroup || pvPolicy.canSendPrivate({ destination: remoteJid, sourceMessage: msg, reason });
   ctx.reply = async (t, opts = {}) => {
+    if (!canReply('incoming_reply')) return null;
     try {
       await antiBan.simulateTyping(sock, remoteJid, t, 'composing');
       const res = await antiBan.enqueueOutbound(() =>
