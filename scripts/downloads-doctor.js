@@ -398,47 +398,6 @@ async function downloads(alvo, linkDoUsuario) {
   }
 }
 
-/* ══════════════════════════ 4. FREIO/ENVIO ══════════════════════════ */
-
-async function envio() {
-  titulo('4) SAÍDA (o freio de envio deixa o arquivo sair?)');
-  try {
-    const guard = require('../utils/sendGuard');
-    guard.init();
-    const st = guard.stats();
-    linha('ok', `Freio ativo — fila: ${st.queue || 0} • enviadas: ${st.totalSent ?? st.sent ?? 0}`);
-    const lim = st.limits || {};
-    linha(
-      'ok',
-      `Limites: ${lim.maxPerMinute}/min total • ${lim.chatMaxPerMinute}/min por conversa • intervalo ${lim.chatIntervalMs}ms`,
-      st.warmup && st.warmup.active
-        ? `warmup ATIVO (número recém-pareado): teto reduzido, faltam ${st.warmup.remainingHours}h. ` +
-          'Use `!freio warmup off` se o número já é antigo.'
-        : 'número aquecido (sem redução de teto)'
-    );
-    if (st.paused) {
-      linha('bad', `Envio PAUSADO por ${st.pauseRemainingMin} min`, 'o freio pausou por sinal de restrição — `!freio retomar`');
-    }
-    // sequência real de um download (aviso + título + arquivo)
-    const jid = '120363000000000000@g.us';
-    const t0 = Date.now();
-    const tempos = [];
-    const fake = (kind) => guard.enqueue(kind, jid, async () => {
-      tempos.push(Date.now() - t0);
-      return { ok: true };
-    });
-    await Promise.all([fake('text'), fake('text'), fake('media')]);
-    const total = ((Date.now() - t0) / 1000).toFixed(1);
-    if (tempos.length === 3 && Date.now() - t0 < 30000) {
-      linha('ok', `Sequência de download (aviso + título + arquivo) levou ${total}s`);
-    } else {
-      linha('bad', `Sequência de download levou ${total}s (o normal é menos de 30s)`, 'o arquivo vai chegar muito atrasado no WhatsApp');
-    }
-  } catch (e) {
-    linha('warn', 'Não consegui testar o freio', e.message);
-  }
-}
-
 /* ══════════════════════════ VEREDITO ══════════════════════════ */
 
 function veredito() {
@@ -447,7 +406,7 @@ function veredito() {
   const avisos = resultados.filter((r) => r.status === 'warn');
   if (!ruins.length) {
     console.log(`  ${C.ok}Tudo que dá para testar aqui passou.${C.reset}`);
-    console.log('  Se no WhatsApp ainda não chega, o problema é no ENVIO — veja a seção 4.');
+    console.log('  Se no WhatsApp ainda não chega, verifique o transporte da sessão.');
     return;
   }
   console.log(`  ${C.bad}${ruins.length} item(ns) com problema:${C.reset}`);
@@ -479,7 +438,6 @@ function veredito() {
   ambiente();
   await rede();
   await downloads(alvo, linkDoUsuario);
-  await envio();
   veredito();
 
   // limpa o que sobrou dos testes

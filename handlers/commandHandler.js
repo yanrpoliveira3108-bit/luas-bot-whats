@@ -532,12 +532,6 @@ async function handleMessage(sock, msg, type, transportMeta = {}) {
     // O dono falou neste chat agora: durante uma PAUSA do freio, este chat
     // continua respondendo (sem isso, comando de dono em GRUPO ficava sem
     // resposta e parecia "comando que não funciona")
-    if (ctx.isOwner) {
-      try {
-        require('../utils/sendGuard').noteOwnerChat(ctx.remoteJid);
-      } catch (_) {}
-    }
-
     perf.add('messages');
 
     // CAPTCHA só consome uma DM quando existe desafio pending para este remetente.
@@ -552,7 +546,10 @@ async function handleMessage(sock, msg, type, transportMeta = {}) {
         messageType: msg.message && Object.keys(msg.message)[0],
       });
       if (consumedCaptcha) return;
+<<<<<<< HEAD
       if (await handlePrivateAntiPv(sock, ctx)) return;
+=======
+>>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
     }
 
     const lidAddressed = ctx.isGroup && (
@@ -797,6 +794,7 @@ async function handleMessage(sock, msg, type, transportMeta = {}) {
 
 /* ------------------------------- anti-PV ------------------------------- */
 
+<<<<<<< HEAD
 const pvWarned = new Map(); // jid -> timestamp do último aviso
 
 janitor.register(
@@ -878,6 +876,8 @@ async function handlePrivateAntiPv(sock, ctx) {
   return false;
 }
 
+=======
+>>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
 function grantXp(sender) {
   const now = Date.now();
   const last = lastXp.get(sender) || 0;
@@ -902,7 +902,6 @@ async function notifyAfk(sock, ctx) {
 
 module.exports = {
   handleMessage,
-  handlePrivateAntiPv,
   checkCommandLimit,
   buildContext,
   executeCommand,

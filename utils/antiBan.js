@@ -1,18 +1,6 @@
-/**
- * utils/antiBan.js — camada de segurança, blindagem e anti-ban do Lua.
- *
- * Principais proteções contra restrição e banimento pelo WhatsApp:
- * 1. Simulação de presença humana ("digitando..." / "gravando...") antes do envio;
- * 2. Delays orgânicos proporcionais ao conteúdo, com jitter aleatório;
- * 3. Fila global de saída (outbound queue / throttle) que impede rajadas no WebSocket;
- * 4. Silenciador de privado (Silent PV): não responde estranhos no PV com menus/erros,
- *    eliminando a causa #1 de banimento (denúncias de usuários "Report & Block");
- * 5. Impressão digital de navegador realista (Windows 11 / macOS Chrome em vez de Ubuntu);
- * 6. Controle de status online (evita parecer um script rodando 24h ininterruptas).
- */
-
 'use strict';
 
+<<<<<<< HEAD
 const CONFIG = require('../config');
 const logger = require('./logger').child('antiban');
 const freioConfig = require('./freioConfig');
@@ -140,24 +128,20 @@ function encerrarPresenca(sock, jid, presenceType) {
  * Retorna o array de navegador seguro para o Baileys.
  * Padrão: Windows Chrome (muito mais natural e menos visado que Ubuntu).
  */
-function getBrowserConfig(Browsers) {
-  if (!Browsers) {
-    return ['Windows', 'Chrome', '10.0.22631'];
-  }
-  const name = String(CONFIG.security?.browserName || 'windows').toLowerCase();
-  switch (name) {
-    case 'macos':
-    case 'mac':
-    case 'darwin':
-      return Browsers.macOS ? Browsers.macOS('Desktop') : ['Mac OS', 'Desktop', '14.4.1'];
-    case 'ubuntu':
-    case 'linux':
-      return Browsers.ubuntu ? Browsers.ubuntu('Chrome') : ['Ubuntu', 'Chrome', '20.0.04'];
-    case 'windows':
-    default:
-      return Browsers.windows ? Browsers.windows('Chrome') : ['Windows', 'Chrome', '10.0.22631'];
-  }
+=======
+// Compatibilidade para módulos antigos. Não aplica fila, PPM, pacing ou delay.
+// Preserva somente a API de passagem e a configuração de browser da conexão.
+function enqueueOutbound(fn) { return Promise.resolve().then(fn); }
+function simulateTyping() { return Promise.resolve(); }
+function encerrarPresenca(sock, jid) {
+  try { return sock && sock.sendPresenceUpdate ? Promise.resolve(sock.sendPresenceUpdate('paused', jid)).catch(() => {}) : Promise.resolve(); } catch (_) { return Promise.resolve(); }
 }
+>>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
+function getBrowserConfig(Browsers) {
+  if (!Browsers) return ['Windows', 'Chrome', '10.0.22631'];
+  return Browsers.windows ? Browsers.windows('Chrome') : ['Windows', 'Chrome', '10.0.22631'];
+}
+<<<<<<< HEAD
 
 /* --------------------------- relatório de status ---------------------- */
 
@@ -187,3 +171,8 @@ module.exports = {
   isEnabled,
   sleep,
 };
+=======
+function getStatus() { return { humanDelays: false, outboundInterval: 'none', pacing: false }; }
+function isEnabled() { return false; }
+module.exports = { enqueueOutbound, simulateTyping, encerrarPresenca, calculateTypingDelay: () => 0, getBrowserConfig, getStatus, isEnabled };
+>>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)

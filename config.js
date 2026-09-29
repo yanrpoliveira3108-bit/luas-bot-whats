@@ -39,7 +39,7 @@ function envBool(key, fallback) {
  * Booleano OPCIONAL: devolve null quando a variável não existe no .env.
  * Usado pelos overrides de payload de risco — "não definido" precisa ser
  * diferente de "definido como false", senão um override herdado do modo
- * seguro impediria o !freio seguro on/off de funcionar em runtime.
+ * seguro impediria o modo seguro de funcionar em runtime.
  */
 function envBoolOrNull(key) {
   const v = process.env[key];
@@ -75,7 +75,7 @@ function onlyDigits(s) {
 // MODO SEGURO — padrão DESLIGADO (o comportamento normal do bot: HTML, cards,
 // menu por lista/botões e pagamento funcionam). NÃO existe prova de que esses
 // payloads causem restrição: vários bots rodam com HTML/cards sem cair. O modo
-// seguro fica disponível como opção (!freio seguro on) para quem quiser testar.
+// seguro fica disponível como opção para quem quiser testar.
 const SAFE_MODE_DEFAULT = envBool('SAFE_MODE', false);
 
 /**
@@ -163,7 +163,11 @@ const CONFIG = {
     textFallback: envBool('HTML_PLAY_TEXT_FALLBACK', true),
   },
 
+<<<<<<< HEAD
   /* ------------- segurança de envio (anti-restrição de conta) -------------
+=======
+  /* ---------------- segurança de payload e conexão ----------------
+>>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
    *
    * Contexto real: os números do dono caíram em "conta restrita" logo nos
    * primeiros comandos — inclusive com `!ping`, que é TEXTO PURO. Isso mostra
@@ -172,101 +176,30 @@ const CONFIG = {
    *
    * Por isso o padrão aqui é o comportamento NORMAL do bot: HTML, cards,
    * menu por lista/botões e pagamento liberados. O "modo seguro" continua
-   * existindo como OPÇÃO (SAFE_MODE=1 ou `!freio seguro on`) para quem quiser
+   * existindo como OPÇÃO (SAFE_MODE=1) para quem quiser
    * testar sem eles.
    *
-   * O que fica ligado por padrão é o FREIO DE RITMO (utils/sendGuard.js), que
-   * não muda conteúdo nenhum: fila, intervalo, teto por minuto, anti-rajada,
-   * pausa automática ao ver sinal de restrição e bloqueio de PV frio.
    */
   safety: {
     // MODO SEGURO (padrão: DESLIGADO). Ligue para bloquear lista/botões
     // nativos, cards HTML e pagamento — assumindo que você aceita perder isso.
-    // Em runtime: !freio seguro on|off (persistido no banco).
+    // Em runtime, o modo seguro pode ser ajustado pelo painel de segurança.
     safeMode: SAFE_MODE_DEFAULT,
 
     // Overrides explícitos (só mude se aceitar o risco: reativam payload de
     // alto risco, que é justamente o que gera restrição em minutos).
     // null = não definido no .env → a decisão segue o modo seguro (inclusive
-    // quando ele é trocado em runtime com !freio seguro on/off).
+    // quando ele é trocado em runtime).
     allowInteractive: envBoolOrNull('ALLOW_INTERACTIVE'),
     allowRichCards: envBoolOrNull('ALLOW_RICH_CARDS'),
     allowPaymentTest: envBoolOrNull('ALLOW_PAYMENT_TEST'),
 
-    // Freio de envio: fila única, intervalo entre mensagens e teto por minuto.
-    send: {
-      // intervalo mínimo GLOBAL entre dois envios (ms)
-      minIntervalMs: envInt('SEND_MIN_INTERVAL_MS', 1200),
-      // intervalo mínimo por CONVERSA (ms) — evita rajada no mesmo grupo
-      chatIntervalMs: envInt('SEND_CHAT_INTERVAL_MS', 2000),
-      // variação aleatória somada ao intervalo (deixa o ritmo humano)
-      jitterMs: envInt('SEND_JITTER_MS', 900),
-      // teto global de mensagens por minuto
-      maxPerMinute: envInt('SEND_MAX_PER_MINUTE', 15),
-      // teto de mensagens por minuto na MESMA conversa
-      chatMaxPerMinute: envInt('SEND_CHAT_MAX_PER_MINUTE', 6),
-      // mídia (foto/vídeo/áudio/documento/sticker) espera mais
-      mediaMultiplier: Math.max(1, envInt('SEND_MEDIA_MULTIPLIER', 2)),
-      // número recém-pareado: limites mais duros nas primeiras horas
-      warmupHours: envInt('SEND_WARMUP_HOURS', 48),
-      // Meses de limite: quanto MENOS mensagens por minuto um número recém
-      // pareado pode mandar (volume). 3 = um terço do teto normal.
-      warmupFactor: Math.max(1, envInt('SEND_WARMUP_FACTOR', 3)),
-      // Efeito do warmup no ESPAÇAMENTO entre mensagens. 1 (padrão) = nenhum:
-      // multiplicar o espaçamento fazia o arquivo de um download chegar ~62s
-      // depois do comando, o que parece "download quebrado".
-      // Ex.: 2 = dobra o intervalo entre mensagens durante o warmup.
-      warmupIntervalFactor: Math.max(1, envInt('SEND_WARMUP_INTERVAL_FACTOR', 1)),
-      // trava de mensagem IDÊNTICA repetida em vários chats (broadcast).
-      // 0 = desligado (padrão): o !broadcast do dono passa normalmente, só
-      // respeitando o ritmo do freio. Ative (ex.: 3) se quiser o bloqueio.
-      dupMaxChats: envInt('SEND_DUP_MAX_CHATS', 0),
-      dupWindowMin: envInt('SEND_DUP_WINDOW_MIN', 10),
-      // nunca abrir conversa no privado com quem nunca falou com o bot.
-      // Não muda nada no uso normal (o bot só responde, nunca inicia), mas
-      // evita o cenário clássico de "mensagem fria em PV" em qualquer caminho
-      // futuro. Use SEND_BLOCK_COLD_PV=0 para liberar.
-      blockColdPv: envBool('SEND_BLOCK_COLD_PV', true),
-      // pausa automática de TODOS os envios ao detectar sinal de restrição
-      pauseMinutes: envInt('SEND_PAUSE_MINUTES', 15),
-      // espera após (re)conectar antes do primeiro envio (ms)
-      connectGraceMs: envInt('SEND_CONNECT_GRACE_MS', 8000),
-      // teto de itens na fila por conversa (evita fila infinita)
-      maxQueuePerChat: envInt('SEND_MAX_QUEUE_PER_CHAT', 15),
-      // PVs liberados sempre (além do dono e de quem já falou com o bot)
-      allowJids: envList('SEND_PV_ALLOW'),
-      // PRAZO DE UM ENVIO (ms). Se `sendMessage` não concluir nesse tempo, o
-      // envio é considerado TRAVADO (não é erro: pode ter saído). O freio libera
-      // a fila, registra na auditoria/estado e reenvia UMA vez sem citação.
-      // Sem isso, um envio pendurado travava a fila inteira: o bot ficava
-      // "digitando…" e nenhuma mensagem aparecia no grupo (aparelho, 25/09/2026).
-      // 0 = sem prazo (comportamento antigo, NÃO recomendado).
-      sendTimeoutMs: envInt('SEND_TIMEOUT_MS', 45000),
-      // prazo do reenvio pós-travamento (menor: o chat já se mostrou problemático)
-      sendRetryTimeoutMs: envInt('SEND_RETRY_TIMEOUT_MS', 20000),
-      // reenvia UMA vez o envio que travou (sem citação, com metadados de grupo
-      // em cache)? O erro de MONTAGEM já tem reenvio próprio no ponto de saída.
-      retryOnHang: envBool('SEND_RETRY_ON_HANG', true),
-      // onde fica o estado (contadores, chats conhecidos, warmup).
-      // O caminho é configurável para os testes trabalharem isolados.
-      stateDir: path.resolve(ROOT, envStr('SEND_STATE_DIR', './data')),
-    },
+    // O controle de payloads continua em `safety`; não há limitador de ritmo.
   },
 
-  /* ---------------- segurança e anti-ban (camada humana) ---------------- */
+  /* ---------------- segurança da conexão ---------------- */
   security: {
-    // MESMA chave do modo seguro de payloads (ver bloco `safety` acima).
-    // ATENÇÃO: aqui NÃO se controla o ritmo — as proteções abaixo são
-    // controladas por HUMAN_DELAYS / OUTBOUND_INTERVAL_MS / SILENT_PV.
     safeMode: SAFE_MODE_DEFAULT,
-    // Simula presença humana ("digitando..." / "gravando áudio...") antes de responder
-    humanDelays: envBool('HUMAN_DELAYS', true),
-    minTypingDelayMs: envInt('MIN_TYPING_DELAY_MS', 600),
-    maxTypingDelayMs: envInt('MAX_TYPING_DELAY_MS', 2200),
-    // Intervalo mínimo entre mensagens no envio (evita rajadas no WebSocket)
-    outboundIntervalMs: envInt('OUTBOUND_INTERVAL_MS', 1000),
-    // Modo privado silencioso: não responde estranhos no PV com menus/erros (evita denúncias)
-    silentPv: envBool('SILENT_PV', true),
     // Tipo de assinatura de navegador: windows | macos | ubuntu
     browserName: envStr('BROWSER_NAME', 'windows'),
     // Ficar online 24h contínuas (false = mais natural, não mantém online artificialmente)
@@ -531,7 +464,10 @@ function ensureDirs() {
     CONFIG.paths.backupDir,
     CONFIG.paths.assetsDir,
     CONFIG.paths.rentalDir,
+<<<<<<< HEAD
     CONFIG.safety.send.stateDir,
+=======
+>>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
   ].forEach((d) => fs.mkdirSync(d, { recursive: true }));
 }
 

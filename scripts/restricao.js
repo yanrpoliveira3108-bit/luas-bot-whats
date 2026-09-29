@@ -42,7 +42,7 @@ function arg(name, fallback) {
 const DIAS = Math.max(1, parseInt(arg('dias', '7'), 10) || 7);
 const ARQUIVO = arg('arquivo', null);
 const LOGS_DIR = CONFIG.paths.logsDir;
-const AUDIT_FILE = path.join(CONFIG.safety.send.stateDir, 'sends.jsonl');
+const AUDIT_FILE = path.join(CONFIG.paths.databaseDir, 'sends.jsonl');
 
 /* --------------------------------- cores -------------------------------- */
 

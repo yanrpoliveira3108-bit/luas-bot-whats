@@ -15,7 +15,7 @@
  *     já faziam com `ctx.react`): nada de reações concorrentes.
  *   - Nunca reage a eventos de reação, mensagens de protocolo, status ou sem id.
  *   - Falha ao reagir NUNCA interrompe o comando (nada é relançado) e o envio
- *     passa pelo mesmo socket/freio de envio (utils/sendGuard) de sempre.
+ *     passa pelo mesmo socket de envio de sempre.
  *   - Reação temática ≠ sucesso do comando: nenhum ✅ é colocado aqui.
  *
  * "Resposta ao bot" usa os METADADOS REAIS da citação (contextInfo.stanzaId +

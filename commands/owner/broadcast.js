@@ -1,7 +1,6 @@
 'use strict';
 
 const groups = require('../../database/groups');
-const antiBan = require('../../utils/antiBan');
 const { confirmAction } = require('../_shared/confirm');
 
 module.exports = [
@@ -28,31 +27,21 @@ module.exports = [
       }
       await confirmAction(ctx, `enviar anúncio para ${targets.length} grupos com proteção anti-ban`, async (c) => {
         let ok = 0;
-        let blocked = 0;
         await c.reply(
           `📢 Iniciando envio para ${targets.length} grupos.\n` +
             '_O freio de envio espaça as mensagens automaticamente._'
         );
         for (const g of targets) {
           try {
-            // "digitando..." antes de cada grupo (ritmo humano) e depois o
-            // envio pelo freio — que espaça, respeita o teto por minuto e,
-            // se SEND_DUP_MAX_CHATS estiver ligado, barra o texto idêntico
-            // repetido (o que for barrado volta marcado com guardBlocked).
-            await antiBan.simulateTyping(c.socket, g.id, text, 'composing');
-            const res = await c.socket.sendMessage(g.id, {
+            await c.socket.sendMessage(g.id, {
               text: `📢 *Anúncio do ${require('../../config').bot.name}*\n\n${text}`,
             });
-            if (res && res.guardBlocked) blocked++;
-            else ok++;
+            ok++;
           } catch (_) {
             /* ignora grupos que falharem */
           }
         }
-        const aviso = blocked
-          ? `\n⚠️ ${blocked} grupo(s) barrado(s) (SEND_DUP_MAX_CHATS): texto IDÊNTICO já foi para outros grupos.`
-          : '';
-        await c.reply(`✅ Anúncio enviado para ${ok}/${targets.length} grupos.${aviso}`);
+        await c.reply(`✅ Anúncio enviado para ${ok}/${targets.length} grupos.`);
       });
     },
   },

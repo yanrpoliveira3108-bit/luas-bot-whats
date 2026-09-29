@@ -134,7 +134,7 @@ function lerJsonl(arquivo) {
 
 /* ------------------------------- 1) estado ------------------------------ */
 
-const STATE_DIR = base(CONFIG.safety.send.stateDir);
+const STATE_DIR = base(path.join(RAIZ, 'data'));
 const AUDIT = path.join(STATE_DIR, 'sends.jsonl');
 const STATE_FILE = path.join(STATE_DIR, 'sendguard.json');
 
@@ -291,7 +291,7 @@ if (!eventos.length) {
     L('');
     L('   Correção: a trava de mensagem idêntica NÃO vem ligada por padrão');
     L('   (SEND_DUP_MAX_CHATS=0 = desligado). Se aparecer "broadcast_identico"');
-    L('   com o valor 0 no .env, é o defeito corrigido em utils/sendGuard.js —');
+    L('   com o valor 0 no .env, essa trava permanece desativada —');
     L('   atualize (git pull) e reinicie o bot.');
   }
   if (restricoes.length) {
@@ -473,7 +473,7 @@ if (barrados.length) {
   L('   MENSAGEM foi descartada antes de sair. É exatamente o sintoma');
   L('   "ele faz, mas não aparece nada".');
   L('   ▸ Atualize o bot (`git pull`) e reinicie: a trava de mensagem idêntica');
-  L('     estava ligada por engano no padrão (corrigido em utils/sendGuard.js).');
+  L('     não faz parte do fluxo normal de envio.');
   L('   ▸ Depois de reiniciar: `!freio bloqueios` deve ficar zerado.');
 } else if (achados.falhaEnvio.length) {
   const causaCache = achados.falhaEnvio.some((l) => /NodeCache\.formatKey/.test(String(l.stack || l.frame || '')));

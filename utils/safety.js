@@ -93,6 +93,7 @@ function blocksPaymentTest() {
   return safeMode();
 }
 
+<<<<<<< HEAD
 /** Iniciar conversa no privado com quem nunca falou com o bot. */
 function blocksColdPv() {
   return !!CONFIG.safety.send.blockColdPv;
@@ -114,6 +115,8 @@ function setAntiPvEnabled(enabled) {
   return value;
 }
 
+=======
+>>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
 /**
  * Resumo legível (usado no boot, no !freio e nos logs).
  */
@@ -124,13 +127,11 @@ function summary() {
     interactive: !blocksInteractive(),
     richCards: !blocksRichCards(),
     paymentTest: !blocksPaymentTest(),
-    coldPvBlocked: blocksColdPv(),
     reasons: on
       ? [
           'menu cai no modo numerado (sem lista/botões nativos)',
           'cards HTML (ping2/tigrinho) caem no texto',
           '!sp/!st de pagamento desativado',
-          blocksColdPv() ? 'bot não inicia conversa no PV' : 'PV livre (SEND_BLOCK_COLD_PV=0)',
         ]
       : ['modo seguro DESLIGADO — payloads de risco liberados'],
   };
@@ -143,8 +144,11 @@ module.exports = {
   blocksInteractive,
   blocksRichCards,
   blocksPaymentTest,
+<<<<<<< HEAD
   blocksColdPv,
   antiPvEnabled,
   setAntiPvEnabled,
+=======
+>>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
   summary,
 };

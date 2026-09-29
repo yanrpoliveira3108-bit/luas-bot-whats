@@ -203,7 +203,7 @@ if (restricao.length) {
 // passa). É a explicação mais comum de "não funciona em chat nenhum" e não
 // aparecia em lugar nenhum.
 try {
-  const dirEstado = (CONFIG && CONFIG.safety && CONFIG.safety.send && CONFIG.safety.send.stateDir) || path.join(RAIZ, 'data');
+  const dirEstado = path.join(RAIZ, 'data');
   const st = JSON.parse(fs.readFileSync(path.join(dirEstado, 'sendguard.json'), 'utf8'));
   if (st && st.pausedUntil) {
     const ate = quando(st.pausedUntil);
@@ -254,7 +254,6 @@ for (const l of ultimos.slice(-12)) {
 
 H('4) O CÓDIGO CARREGA NESTE APARELHO? (módulos mexidos)');
 const modulos = [
-  'utils/sendGuard',
   'utils/safeNodeCache',
   'utils/groupMetadataCache',
   'utils/buildInfo',

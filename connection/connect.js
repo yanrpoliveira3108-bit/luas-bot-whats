@@ -29,8 +29,13 @@ const logger = require('../utils/logger').child('connection');
 const activity = require('../utils/activity');
 const pairing = require('./pairing');
 const sessionRecovery = require('./sessionRecovery');
+<<<<<<< HEAD
 const sendGuard = require('../utils/sendGuard');
 const sessionBacklog = require('../utils/sessionBacklog');
+=======
+const sessionBacklog = require('../utils/sessionBacklog');
+const metaAi = require('../utils/metaAi');
+>>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
 
 let sock = null;
 let lifecycleOpen = false;
@@ -283,8 +288,6 @@ async function connect({ phone } = {}) {
     // INTERRUPTORES DE EMERGÊNCIA (código sem edição, só .env, e reiniciar):
     //   SAFE_CACHE=0      → volta aos caches padrão da biblioteca
     //   GROUP_META_CACHE=0 → volta à consulta de metadados ao vivo
-    //   SEND_TIMEOUT_MS=0  → envio sem prazo (comportamento antigo)
-    //   SEND_RETRY_ON_HANG=0 → nunca reenvia envio travado
     // Servem para ISOLAR uma suspeita em segundos, sem mexer em código.
     const semCacheSeguro = String(process.env.SAFE_CACHE || '1') === '0';
     const semCacheGrupo = String(process.env.GROUP_META_CACHE || '1') === '0';
@@ -324,25 +327,6 @@ async function connect({ phone } = {}) {
       'socket criado — aguardando connection.update'
     );
 
-    // FREIO DE ENVIO (anti-restrição): instala a fila + limites em TODAS as
-    // saídas do socket antes de qualquer handler existir. É isso que impede
-    // rajada de mensagens (o padrão que o WhatsApp trata como spam), trava
-    // mensagem idêntica repetida em vários chats e pausa tudo sozinho quando
-    // aparece sinal de restrição. A simulação de "digitando..." (utils/antiBan)
-    // continua por cima, para o ritmo parecer humano.
-    sendGuard.attach(sock);
-    // pausa que já estava valendo quando o bot parou (sinal de restrição do
-    // WhatsApp): continua valendo — e o dono precisa saber, senão parece que
-    // "o bot está morto". Só a conversa do dono é respondida enquanto durar.
-    try {
-      const pausa = sendGuard.pausaDoEstado && sendGuard.pausaDoEstado();
-      if (pausa) {
-        logger.warn(
-          { ate: pausa.until, minutos: pausa.minutos, motivo: pausa.reason },
-          '⏸️  ENVIOS PAUSADOS (pausa anterior ainda valendo) — só os chats do dono são respondidos'
-        );
-      }
-    } catch (_) {}
     // metadados de grupo: cache + prazo nas consultas (as dos NOSSOS comandos
     // também, que até agora podiam pendurar em grupo de comunidade/LID) e
     // aquecimento em segundo plano com a lista de grupos do número.
@@ -366,9 +350,6 @@ async function connect({ phone } = {}) {
         pendingPhone = String(phone).replace(/\D/g, '');
         currentPhoneDigits = pendingPhone;
         pairingCodeRequested = false; // novo pareamento → vai re-pedir o código
-        // número NOVO: recomeça o warmup (limites mais duros nas primeiras
-        // horas, que é quando o WhatsApp mais restringe conta recém-criada)
-        sendGuard.resetWarmup('novo pareamento');
         // ⚠️ IMPORTANTE: espera o websocket abrir e o handshake concluir
         // (evento 'qr') ANTES de pedir o código. O requestPairingCode chama
         // sendNode, que lança "Connection Closed" (428) se o websocket ainda
@@ -460,6 +441,11 @@ function wireEvents(sockRef, saveCreds) {
     // Diagnóstico de recepção em comunidades/grupos LID (baixo ruído: só
     // dispara para mensagens LID ou stubs de cifra — o caso que investigamos).
     for (const m of accepted) {
+<<<<<<< HEAD
+=======
+      // Auditoria opt-in: somente nomes/tipos/presença; nunca conteúdo privado.
+      metaAi.probeMessage(m);
+>>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
       const jid = m.key && m.key.remoteJid;
       const participant = m.key && m.key.participant;
       const participantAlt = m.key && m.key.participantAlt;
@@ -608,9 +594,6 @@ function handleConnectionUpdate(update, sockRef) {
     pairingCodeRequested = false;
     currentPhoneDigits = phoneDigitsFromJid(sockRef.user && sockRef.user.id) || currentPhoneDigits;
     logger.info({ jid: sockRef.user && sockRef.user.id }, '✅ conectado ao WhatsApp (connection = open)');
-    // freio: zera as janelas de frequência e respeita a espera inicial
-    // (uma rajada logo depois de conectar é justamente o que chama atenção)
-    sendGuard.markConnected();
     // Diagnóstico de identidade LID (comunidades dependem do LID da sessão).
     logger.info(
       { id: sockRef.user && sockRef.user.id, lid: sockRef.user && sockRef.user.lid, hasLid: !!(sockRef.user && sockRef.user.lid) },

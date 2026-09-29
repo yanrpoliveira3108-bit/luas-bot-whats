@@ -1,5 +1,6 @@
 'use strict';
 const perf = require('../../utils/perf');
+<<<<<<< HEAD
 const sendGuard = require('../../utils/sendGuard');
 const freio = require('../../utils/freioConfig');
 const chatQueue = require('../../utils/chatQueue');
@@ -8,10 +9,17 @@ module.exports = [{
   name: 'perf', commands: ['perf'], category: 'owner', ownerOnly: true, cooldown: 2000,
   description: 'Diagnóstico de latência e benchmark controlado.',
   usage: '!perf status|sendtest',
+=======
+const chatSerial = require('../../utils/chatSerial');
+module.exports = [{
+  name: 'perf', commands: ['perf'], category: 'owner', ownerOnly: true, cooldown: 2000,
+  description: 'Diagnóstico de latência e benchmark controlado.', usage: '!perf status|sendtest',
+>>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
   execute: async (ctx) => {
     if (!ctx.isOwner) return ctx.reply('🚫 Apenas o dono pode usar o diagnóstico de performance.');
     const sub = String(ctx.args[0] || 'status').toLowerCase();
     if (sub === 'status') {
+<<<<<<< HEAD
       const s = perf.snapshot(); const g = sendGuard.stats(); const sp = sendGuard.perfStats(); const q = chatQueue.stats(); const c = freio.get();
       return ctx.reply([
         '⚡ LUA PERF', `Respostas recentes: ${s.response.count}`, `p50=${s.response.p50}ms · p95=${s.response.p95}ms · max=${s.response.max}ms`,
@@ -22,10 +30,18 @@ module.exports = [{
         `PPM: ${g.limits.maxPerMinute}/min · janela=60s · enviados=${g.counters.lastMinute}`,
         `Fila atual=${g.counters.currentDepth} · pico=${g.counters.peakDepth} · oldest=${g.counters.oldestPendingAgeMs}ms · waiting=${g.counters.currentlyWaiting}`,
         `Envios travados: ${g.travados.total}`, 
+=======
+      const s = perf.snapshot(); const q = chatSerial.stats();
+      return ctx.reply([
+        '⚡ LUA PERF', `Respostas recentes: ${s.response.count}`,
+        `p50=${s.response.p50}ms · p95=${s.response.p95}ms · max=${s.response.max}ms`,
+        `Média histórica: ${s.avgResponseMs}ms`, `Chats com processamento ativo: ${q.activeChats}`,
+>>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
       ].join('\n'));
     }
     if (sub === 'sendtest') {
       const out = [];
+<<<<<<< HEAD
       const run = async (name, fn) => { const t = Date.now(); await fn(); out.push(`${name}: total=${Date.now() - t}ms`); };
       await run('TEXT', () => ctx.reply('LUA PERF TEST • texto', { quoted: false }));
       await run('TEXT NORMAL', () => ctx.reply('LUA PERF TEST • normal', { quoted: false }));
@@ -36,6 +52,14 @@ module.exports = [{
         catch (err) { out.push(`HTML MIN: indisponível (${err.code || 'bloqueado'})`); }
       });
       return ctx.reply(['⚠️ Os tempos medem término do helper, não confirmação de entrega.', ...out].join('\n'), { quoted: false });
+=======
+      const run = async (name, fn) => { const t = Date.now(); try { await fn(); out.push(`${name}: total=${Date.now() - t}ms`); } catch (err) { out.push(`${name}: erro=${err.code || err.message}`); } };
+      await run('TEXT', () => ctx.reply('LUA PERF TEST • texto', { quoted: false }));
+      await run('TEXT NORMAL', () => ctx.reply('LUA PERF TEST • normal', { quoted: false }));
+      await run('BUTTON', () => ctx.sendButtons({ text: 'LUA PERF TEST', buttons: [{ id: 'perf_noop', label: 'OK' }] }));
+      await run('HTML MIN', async () => require('../../utils/richHtml').sendHtml(ctx.socket, ctx.remoteJid, '<div>LUA PERF TEST</div>', { title: 'LUA PERF TEST' }));
+      return ctx.reply(['⚠️ Tempo até o helper concluir; não é confirmação de entrega.', ...out].join('\n'), { quoted: false });
+>>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
     }
     return ctx.reply('Use: .perf status ou .perf sendtest');
   },

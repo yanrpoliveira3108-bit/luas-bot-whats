@@ -32,7 +32,7 @@
  *   • vencidos → devolve o que tem e RENOVA em segundo plano (nunca segura o envio);
  *   • frios → busca com PRAZO (GROUP_META_TIMEOUT_MS). Se estourar, devolve
  *     undefined e registra — aí o Baileys cai na consulta sem prazo dele, mas
- *     o envio já vai ter prazo próprio no freio (utils/sendGuard.js).
+ *     o envio já vai ter prazo próprio no transporte do socket.
  *
  * Além disso o cache é AQUECIDO na conexão (`groupFetchAllParticipating`, uma
  * consulta só para todos os grupos) e acompanha os eventos de grupo — assim o
@@ -47,10 +47,6 @@
 'use strict';
 
 const logger = require('./logger').child('grupometa');
-const CONFIG = require('../config');
-
-const CFG = (CONFIG.safety && CONFIG.safety.send) || {};
-
 /** Validade dos metadados guardados (ms). */
 const TTL_MS = Math.max(1000, Number(process.env.GROUP_META_TTL_MS) || 5 * 60 * 1000);
 /** Prazo de uma busca de metadados (ms). 0 = sem prazo (não recomendado). */
