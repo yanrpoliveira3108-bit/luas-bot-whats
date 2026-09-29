@@ -19,7 +19,9 @@ module.exports = [{
         `Send real p50/p95/max=${sp.sendMs.p50}/${sp.sendMs.p95}/${sp.sendMs.max}ms`, `Total envio p50/p95/max=${sp.totalMs.p50}/${sp.totalMs.p95}/${sp.totalMs.max}ms`,
         `Média histórica: ${s.avgResponseMs}ms`,
         `Chats ativos: ${q.activeChats} · queuedChats=${q.queuedChats}`, `Freio: delay=${c.delayEnabled ? 'ON' : 'OFF'} · multichat=${c.multichatEnabled ? 'ON' : 'OFF'}`,
-        `Envios travados: ${g.travados.total}`,
+        `PPM: ${g.limits.maxPerMinute}/min · janela=60s · enviados=${g.counters.lastMinute}`,
+        `Fila atual=${g.counters.currentDepth} · pico=${g.counters.peakDepth} · oldest=${g.counters.oldestPendingAgeMs}ms · waiting=${g.counters.currentlyWaiting}`,
+        `Envios travados: ${g.travados.total}`, 
       ].join('\n'));
     }
     if (sub === 'sendtest') {

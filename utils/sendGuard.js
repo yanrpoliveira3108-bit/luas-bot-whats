@@ -133,8 +133,10 @@ let dirty = false;
 let attached = false;
 let ready = false;
 let currentSend = null; // envio em andamento (usado pelo watchdog do janitor)
+let logicalSendSeq = 0;
 const recentPerf = [];
 const PERF_CAP = 200;
+const queueMetrics = { peakDepth: 0, oldestPendingAt: 0, currentWaiters: 0 };
 
 /* ------------------------------ persistência ---------------------------- */
 
@@ -478,7 +480,8 @@ function pruneWindows(now) {
 /* --------------------------- classificação ----------------------------- */
 
 /** Tipo do envio (define o intervalo): text | media | interactive | revoke | react | action. */
-function classify(content) {
+function classify(content, opts = {}) {
+  if (opts && opts.sendCategory === 'control') return 'control';
   if (!content || typeof content !== 'object') return 'text';
   if (content.delete) return 'revoke';
   if (content.react) return 'react';
@@ -632,6 +635,7 @@ function enqueue(kind, jid, run) {
   state.totalQueued++;
   return new Promise((resolve, reject) => {
     const item = {
+      logicalSendId: ++logicalSendSeq,
       kind,
       jid: j,
       run,
@@ -643,6 +647,11 @@ function enqueue(kind, jid, run) {
     if (!queues.has(j)) queues.set(j, []);
     queues.get(j).push(item);
     enqueueChat(j);
+    const depth = queueSize();
+    queueMetrics.peakDepth = Math.max(queueMetrics.peakDepth, depth);
+    if (!queueMetrics.oldestPendingAt) queueMetrics.oldestPendingAt = now;
+    queueMetrics.currentWaiters = depth;
+    logger.info({ logicalSendId: item.logicalSendId, chatKey: j, category: kind, queueName: 'sendGuard', queueDepthAtEnqueue: depth, queueDepthAtStart: null, ppmWaitMs: null, rateLimiterWaitMs: null, queueWaitMs: null, artificialDelayMs: freioConfig.get().delayEnabled ? null : 0, totalPreSendWaitMs: null }, '[SEND_WAIT] queued');
     wake();
   });
 }
@@ -819,6 +828,8 @@ async function pump() {
       const idx = list.indexOf(picked.item);
       if (idx >= 0) list.splice(idx, 1);
       dequeueChatIfEmpty(picked.jid);
+      queueMetrics.currentWaiters = queueSize();
+      if (!queueMetrics.currentWaiters) queueMetrics.oldestPendingAt = 0;
 
       const ts = Date.now();
       lastSendAt = ts;
@@ -834,6 +845,10 @@ async function pump() {
 
       const queuedAt = picked.item.enqueuedAt;
       const startedAt = Date.now();
+      const queueWaitMs = Math.max(0, startedAt - queuedAt);
+      const queueDepthAtStart = queueSize();
+      queueMetrics.currentWaiters = queueDepthAtStart;
+      logger.info({ logicalSendId: picked.item.logicalSendId, chatKey: picked.jid, category: picked.item.kind, queueName: 'sendGuard', queueDepthAtEnqueue: null, queueDepthAtStart, ppmWaitMs: null, rateLimiterWaitMs: null, queueWaitMs, artificialDelayMs: freioConfig.get().delayEnabled ? null : 0, totalPreSendWaitMs: queueWaitMs }, '[SEND_WAIT] start');
       currentSend = { jid: picked.jid, kind: picked.item.kind, startedAt, warnAt: 0 };
       const prazoMs = Number(CFG.sendTimeoutMs) || 0;
       try {
@@ -1129,7 +1144,7 @@ function attach(sock) {
   if (typeof sock.sendMessage === 'function') {
     const origSendMessage = sock.sendMessage.bind(sock);
     sock.sendMessage = (jid, content, opts = {}) => {
-      const kind = classify(content);
+      const kind = classify(content, opts);
       // opções da tentativa ATUAL — pode ser reduzida (sem citação) pelo
       // reenvio de erro de montagem aqui embaixo ou pelo freio, se travar
       let opcoes = opts || {};
@@ -1346,6 +1361,10 @@ function stats() {
       sent: state.totalSent,
       blocked: state.totalBlocked,
       queuedNow: queueSize(),
+      currentDepth: queueSize(),
+      peakDepth: queueMetrics.peakDepth,
+      oldestPendingAgeMs: queueMetrics.oldestPendingAt ? Math.max(0, now - queueMetrics.oldestPendingAt) : 0,
+      currentlyWaiting: queueMetrics.currentWaiters,
       lastMinute: globalWindow.filter((t) => now - t < WINDOW_MS).length,
     },
     chatsConhecidos: state.knownChats.length,

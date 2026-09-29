@@ -52,6 +52,7 @@ const {
 } = require('../utils/messages');
 
 const { registry } = require('../engine/plugins');
+const CONTROL_COMMANDS = new Set(['ping', 'pingraw', 'perf', 'debug', 'freio', 'status', 'bot']);
 
 /* --------------------------- metadados ------------------------------- */
 
@@ -289,7 +290,7 @@ async function buildContext(sock, msg) {
         sock.sendMessage(
           remoteJid,
           opts.mentions && opts.mentions.length ? { text: String(t), mentions: opts.mentions } : { text: String(t) },
-          { quoted: opts.quoted === false ? undefined : msg }
+          { quoted: opts.quoted === false ? undefined : msg, sendCategory: CONTROL_COMMANDS.has(ctx.command) ? 'control' : undefined }
         )
       );
       if (isCommunity || lidGroupMsg) {

@@ -9,6 +9,9 @@ const DEFAULTS = Object.freeze({
   minIntervalMs: Number(CONFIG.safety.send.minIntervalMs) || 1200,
   chatIntervalMs: Number(CONFIG.safety.send.chatIntervalMs) || 2000,
   jitterMs: Number(CONFIG.safety.send.jitterMs) || 900,
+  // Controle único do Freio; PPM continua separado do delay artificial.
+  delayEnabled: false,
+  multichatEnabled: true,
   typingEnabled: CONFIG.security.humanDelays !== false,
   typingMinMs: Number(CONFIG.security.minTypingDelayMs) || 600,
   typingMaxMs: Number(CONFIG.security.maxTypingDelayMs) || 2200,
@@ -30,6 +33,8 @@ function read() {
     minIntervalMs: integer('freio_min_interval_ms', DEFAULTS.minIntervalMs),
     chatIntervalMs: integer('freio_chat_interval_ms', DEFAULTS.chatIntervalMs),
     jitterMs: integer('freio_jitter_ms', DEFAULTS.jitterMs),
+    delayEnabled: bool('freio_delay_enabled', DEFAULTS.delayEnabled),
+    multichatEnabled: bool('freio_multichat_enabled', DEFAULTS.multichatEnabled),
     typingEnabled: bool('freio_typing_enabled', DEFAULTS.typingEnabled),
     typingMinMs: integer('freio_typing_min_ms', DEFAULTS.typingMinMs),
     typingMaxMs: integer('freio_typing_max_ms', DEFAULTS.typingMaxMs),
