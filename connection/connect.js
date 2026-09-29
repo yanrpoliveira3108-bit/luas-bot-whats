@@ -30,6 +30,7 @@ const activity = require('../utils/activity');
 const pairing = require('./pairing');
 const sessionRecovery = require('./sessionRecovery');
 const sendGuard = require('../utils/sendGuard');
+const sessionBacklog = require('../utils/sessionBacklog');
 
 let sock = null;
 let lifecycleOpen = false;
@@ -435,6 +436,7 @@ function wireEvents(sockRef, saveCreds) {
   sockRef.ev.on('messages.upsert', ({ messages, type }) => {
     const receivedAt = Date.now();
     const batch = Array.isArray(messages) ? messages : [];
+    const accepted = batch.filter((message) => !sessionBacklog.shouldDrop(type, message, receivedAt));
     socketInputStats.upserts += 1;
     socketInputStats.messages += batch.length;
     if (type === 'append') socketInputStats.append += batch.length;
@@ -457,7 +459,7 @@ function wireEvents(sockRef, saveCreds) {
 
     // Diagnóstico de recepção em comunidades/grupos LID (baixo ruído: só
     // dispara para mensagens LID ou stubs de cifra — o caso que investigamos).
-    for (const m of batch) {
+    for (const m of accepted) {
       const jid = m.key && m.key.remoteJid;
       const participant = m.key && m.key.participant;
       const participantAlt = m.key && m.key.participantAlt;
@@ -488,7 +490,7 @@ function wireEvents(sockRef, saveCreds) {
         );
       }
     }
-    if (listeners.message) listeners.message(sockRef, batch, type, { receivedAt, receivedAtById });
+    if (listeners.message && accepted.length) listeners.message(sockRef, accepted, type, { receivedAt, receivedAtById });
   });
 
   // O fork emite history sync como evento separado. Apenas resumimos; não
@@ -599,6 +601,7 @@ function handleConnectionUpdate(update, sockRef) {
 
   if (connection === 'open') {
     lifecycleOpen = true;
+    sessionBacklog.markSessionOnline(Date.now());
     resetReconnect();
     sessionWasRegistered = true;
     pendingPhone = null;

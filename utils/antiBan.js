@@ -15,6 +15,7 @@
 
 const CONFIG = require('../config');
 const logger = require('./logger').child('antiban');
+const freioConfig = require('./freioConfig');
 
 /* --------------------------- fila de saída ---------------------------- */
 
@@ -83,11 +84,10 @@ function sleep(ms) {
  * Retorna milissegundos a esperar.
  */
 function calculateTypingDelay(text, isAudio = false) {
-  if (isTestEnvironment() || !CONFIG.security?.humanDelays) {
-    return 0;
-  }
-  const min = Number(CONFIG.security?.minTypingDelayMs) || 600;
-  const max = Number(CONFIG.security?.maxTypingDelayMs) || 2200;
+  const runtime = freioConfig.get();
+  if (isTestEnvironment() || !runtime.typingEnabled) return 0;
+  const min = runtime.typingMinMs;
+  const max = Math.max(min, runtime.typingMaxMs);
 
   if (isAudio) {
     return Math.min(max, min + 800 + Math.floor(Math.random() * 400));
@@ -103,7 +103,7 @@ function calculateTypingDelay(text, isAudio = false) {
  * Simula comportamento humano (envia presença e aguarda delay natural).
  */
 async function simulateTyping(sock, jid, textOrContent = '', presenceType = 'composing') {
-  if (isTestEnvironment() || !CONFIG.security?.humanDelays || !sock) {
+  if (isTestEnvironment() || !freioConfig.get().typingEnabled || !sock) {
     return;
   }
   const isAudio = presenceType === 'recording';
@@ -164,8 +164,8 @@ function getBrowserConfig(Browsers) {
 function getStatus() {
   return {
     safeMode: !!CONFIG.security?.safeMode,
-    humanDelays: !!CONFIG.security?.humanDelays,
-    typingDelayRange: `${CONFIG.security?.minTypingDelayMs || 600}ms - ${CONFIG.security?.maxTypingDelayMs || 2200}ms`,
+    humanDelays: !!freioConfig.get().typingEnabled,
+    typingDelayRange: `${freioConfig.get().typingMinMs}ms - ${freioConfig.get().typingMaxMs}ms`,
     outboundInterval: `${CONFIG.security?.outboundIntervalMs || 1000}ms`,
     silentPv: !!CONFIG.security?.silentPv,
     browser: CONFIG.security?.browserName || 'windows',

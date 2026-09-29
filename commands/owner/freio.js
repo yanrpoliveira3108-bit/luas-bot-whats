@@ -21,6 +21,8 @@ const CONFIG = require('../../config');
 const sendGuard = require('../../utils/sendGuard');
 const safety = require('../../utils/safety');
 const logger = require('../../utils/logger').child('freio');
+const freioConfig = require('../../utils/freioConfig');
+const sessionBacklog = require('../../utils/sessionBacklog');
 
 function bar(current, max, size = 10) {
   const ratio = max > 0 ? Math.min(1, current / max) : 0;
@@ -90,6 +92,8 @@ function statusText() {
   const s = sendGuard.stats();
   const limits = s.limits;
   const used = s.counters.lastMinute;
+  const runtime = freioConfig.get();
+  const backlog = sessionBacklog.stats();
 
   return [
     '🛡️ *FREIO DE ENVIO*',
@@ -107,6 +111,10 @@ function statusText() {
     `▸ ${limits.maxPerMinute} msg/min no total  ${bar(used, limits.maxPerMinute)} ${used}/${limits.maxPerMinute}`,
     `▸ ${limits.chatMaxPerMinute} msg/min por conversa`,
     `▸ Intervalo: ${limits.minIntervalMs}ms global · ${limits.chatIntervalMs}ms por conversa`,
+    `▸ Jitter: ${runtime.jitterMs}ms`,
+    `▸ Typing: ${runtime.typingEnabled ? 'ATIVO' : 'DESATIVADO'} (${runtime.typingMinMs}-${runtime.typingMaxMs}ms)`,
+    `▸ Backlog offline: ${runtime.ignoreOfflineBacklog ? 'IGNORAR' : 'PROCESSAR'} · grace ${runtime.backlogGraceMs}ms`,
+    `▸ Backlog descartado nesta sessão: ${backlog.dropped}`,
     `▸ Mídia espera ${limits.mediaMultiplier}× mais`,
     limits.dupMaxChats > 0
       ? `▸ Mesma mensagem: máx. ${limits.dupMaxChats} conversas/${limits.dupWindowMin} min`
@@ -166,6 +174,78 @@ module.exports = [
     cooldown: 2000,
     execute: async (ctx) => {
       const sub = String(ctx.args[0] || 'status').toLowerCase();
+
+      if (sub === 'ajuda' || sub === 'help') {
+        await ctx.reply([
+          '🚦 *FREIO — CONTROLES*',
+          '`!freio status`',
+          '`!freio backlog on|off`',
+          '`!freio backlog grace 10s`',
+          '`!freio ppm 20`',
+          '`!freio delay 500ms 1500ms`',
+          '`!freio typing on|off`',
+          '`!freio reset`',
+          '`!freio pv on|off|status`',
+        ].join('\\n'));
+        return;
+      }
+
+      if (sub === 'backlog') {
+        const arg = String(ctx.args[1] || 'status').toLowerCase();
+        if (arg === 'status' || arg === 'estado') {
+          const c = freioConfig.get();
+          await ctx.reply(`🧹 Backlog offline: ${c.ignoreOfflineBacklog ? 'IGNORAR' : 'PROCESSAR'}\\nGrace: ${c.backlogGraceMs}ms\\nDescartadas nesta sessão: ${sessionBacklog.stats().dropped}`);
+          return;
+        }
+        if (arg === 'grace') {
+          try {
+            const ms = freioConfig.parseDuration(ctx.args[2]);
+            sessionBacklog.setGrace(ms);
+            await ctx.reply(`✅ Grace do backlog atualizada: ${ms}ms.`);
+          } catch (_) { await ctx.reply('⚠️ Grace inválida. Use de 1s a 5m.'); }
+          return;
+        }
+        if (['on', 'off', '1', '0'].includes(arg)) {
+          sessionBacklog.setEnabled(['on', '1'].includes(arg));
+          await ctx.reply(`✅ Backlog offline: ${['on', '1'].includes(arg) ? 'IGNORAR' : 'PROCESSAR'}.`);
+          return;
+        }
+        await ctx.reply('⚠️ Use: `!freio backlog on|off|grace 10s|status`.');
+        return;
+      }
+
+      if (sub === 'ppm') {
+        const value = Number(ctx.args[1]);
+        try { freioConfig.set('max_per_minute', freioConfig.validatePpm(value)); await ctx.reply(`✅ Limite global atualizado: ${value} mensagens/minuto.`); }
+        catch (_) { await ctx.reply('⚠️ PPM inválido. Use um valor entre 1 e 1000.'); }
+        return;
+      }
+
+      if (sub === 'delay') {
+        try {
+          const min = freioConfig.parseDuration(ctx.args[1]);
+          const max = freioConfig.parseDuration(ctx.args[2]);
+          if (min > max) throw new Error('ORDER');
+          freioConfig.validateDelay(min); freioConfig.validateDelay(max);
+          freioConfig.set('min_interval_ms', min); freioConfig.set('chat_interval_ms', max);
+          await ctx.reply(`✅ Delay atualizado: global ${min}ms · por conversa ${max}ms.`);
+        } catch (_) { await ctx.reply('⚠️ Delay inválido. Use `!freio delay 500ms 1500ms`, com mínimo ≤ máximo e até 60s.'); }
+        return;
+      }
+
+      if (sub === 'typing') {
+        const arg = String(ctx.args[1] || '').toLowerCase();
+        if (!['on', 'off', '1', '0'].includes(arg)) { await ctx.reply('⚠️ Use: `!freio typing on` ou `!freio typing off`.'); return; }
+        freioConfig.set('typing_enabled', ['on', '1'].includes(arg));
+        await ctx.reply(`✅ Typing humano: ${['on', '1'].includes(arg) ? 'ativado' : 'desativado'}.`);
+        return;
+      }
+
+      if (sub === 'reset') {
+        freioConfig.reset();
+        await ctx.reply('✅ Configurações editáveis do Freio restauradas para defaults seguros conhecidos.');
+        return;
+      }
 
       if (sub === 'pv' || sub === 'antipv') {
         const arg = String(ctx.args[1] || 'status').toLowerCase();

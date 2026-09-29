@@ -64,6 +64,7 @@ const { AsyncLocalStorage } = require('async_hooks');
 const CONFIG = require('../config');
 const logger = require('./logger').child('sendguard');
 const activity = require('./activity');
+const freioConfig = require('./freioConfig');
 const safety = require('./safety');
 
 const CFG = CONFIG.safety.send;
@@ -359,15 +360,15 @@ function multiplierFor(kind) {
 }
 
 function minIntervalFor(kind) {
-  return Math.round(CFG.minIntervalMs * multiplierFor(kind) * intervalFactor());
+  return Math.round(freioConfig.get().minIntervalMs * multiplierFor(kind) * intervalFactor());
 }
 
 function chatIntervalFor(kind) {
-  return Math.round(CFG.chatIntervalMs * multiplierFor(kind) * intervalFactor());
+  return Math.round(freioConfig.get().chatIntervalMs * multiplierFor(kind) * intervalFactor());
 }
 
 function maxPerMinute() {
-  return Math.max(1, Math.round(CFG.maxPerMinute / factor()));
+  return Math.max(1, Math.round(freioConfig.get().maxPerMinute / factor()));
 }
 
 /**
@@ -740,7 +741,7 @@ function nextWait(now) {
 }
 
 function jitter() {
-  const j = Number(CFG.jitterMs) || 0;
+  const j = Number(freioConfig.get().jitterMs) || 0;
   if (j <= 0) return 0;
   return Math.round(Math.random() * j * intervalFactor());
 }
@@ -1292,7 +1293,7 @@ function stats() {
     limits: {
       minIntervalMs: minIntervalFor('text'),
       chatIntervalMs: chatIntervalFor('text'),
-      jitterMs: CFG.jitterMs,
+      jitterMs: freioConfig.get().jitterMs,
       maxPerMinute: maxPerMinute(),
       chatMaxPerMinute: chatMaxPerMinute(),
       mediaMultiplier: CFG.mediaMultiplier,
