@@ -101,15 +101,16 @@ function makeVisualCommand(kind) {
 
       // status (padrão)
       const last = isWelcome ? st.last_welcome_template : st.last_goodbye_template;
-      const greetingSettings = require('../../plugins/welcome/greetingEngine').getGreetingSettings(gid);
-      const customText = isWelcome ? greetingSettings.welcomeText : greetingSettings.goodbyeText;
+      const customConfigured = isWelcome
+        ? !!(st.welcome_text || (groups.get(gid) && groups.get(gid).welcome_msg))
+        : !!(st.goodbye_text || (groups.get(gid) && groups.get(gid).goodbye_msg));
       let botEnabled = true;
       try { botEnabled = require('../../database/rental').isGroupBotEnabled(gid); } catch (_) { botEnabled = false; }
       return ctx.reply(
         [
           `${emoji} *${isWelcome ? 'LUA WELCOME' : 'LUA GOODBYE'}*`,
           `Status: ${onOff(enabled)}`,
-          `Texto personalizado: ${customText ? '✅ sim' : '❌ não'}`,
+          `Texto personalizado: ${customConfigured ? '✅ sim' : '❌ não'}`,
           `Bot no grupo: ${onOff(botEnabled)}`,
           `Card visual: ${onOff(enabled)}`,          `Templates aleatórios: ${onOff(random)}`,
           `Menção ao usuário: ${onOff(st.welcome_mention)}`,
