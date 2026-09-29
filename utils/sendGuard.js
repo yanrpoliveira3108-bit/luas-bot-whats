@@ -590,6 +590,8 @@ function blockedResult(jid, reason) {
 function enqueue(kind, jid, run) {
   const j = String(jid || '');
   const now = Date.now();
+  const logicalSendId = ++logicalSendSeq;
+  if (process.env.PERF_DEBUG === '1') logger.info({ logicalSendId, stage: 'enqueue', count: 1, chatKey: j, category: kind }, '[FREIO_PASS]');
 
   // 1) conversa fria no PV (iniciar conversa com quem nunca falou com o bot)
   if (CFG.blockColdPv && !isGroupJid(j) && !j.endsWith('@broadcast') && !isOwnerJid(j) && !isAllowedPv(j) && !isKnownChat(j)) {
@@ -635,7 +637,7 @@ function enqueue(kind, jid, run) {
   state.totalQueued++;
   return new Promise((resolve, reject) => {
     const item = {
-      logicalSendId: ++logicalSendSeq,
+      logicalSendId,
       kind,
       jid: j,
       run,
