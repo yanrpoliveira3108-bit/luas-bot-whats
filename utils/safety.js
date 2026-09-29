@@ -93,30 +93,6 @@ function blocksPaymentTest() {
   return safeMode();
 }
 
-<<<<<<< HEAD
-/** Iniciar conversa no privado com quem nunca falou com o bot. */
-function blocksColdPv() {
-  return !!CONFIG.safety.send.blockColdPv;
-}
-
-function antiPvEnabled() {
-  try {
-    return require('../database/settings').antiPvEnabled();
-  } catch (_) {
-    // Falha de leitura não deve desativar silenciosamente uma proteção existente.
-    return true;
-  }
-}
-
-function setAntiPvEnabled(enabled) {
-  const value = !!enabled;
-  require('../database/settings').setAntiPvEnabled(value);
-  logger.info({ enabled: value }, '[FREIO] anti-pv atualizado');
-  return value;
-}
-
-=======
->>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
 /**
  * Resumo legível (usado no boot, no !freio e nos logs).
  */
@@ -144,11 +120,5 @@ module.exports = {
   blocksInteractive,
   blocksRichCards,
   blocksPaymentTest,
-<<<<<<< HEAD
-  blocksColdPv,
-  antiPvEnabled,
-  setAntiPvEnabled,
-=======
->>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
   summary,
 };

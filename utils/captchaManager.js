@@ -4,10 +4,7 @@ const crypto = require('node:crypto');
 const db = require('../database/database');
 const { listPending, approveRequests, rejectRequests } = require('./groupRequests');
 const logger = require('./logger').child('captcha');
-<<<<<<< HEAD
-=======
 const pvPolicy = require('./pvPolicy');
->>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
 
 const CAPTCHA_TTL_MS = 3 * 60 * 1000;
 const MAX_ATTEMPTS = 3;
@@ -281,14 +278,11 @@ async function handleCreated(sock, groupJid, participantJid, groupName = 'este g
   const shortId = challenge.challengeId.slice(-6).toUpperCase();
   const text = `🔐 *Verificação de entrada*\n\nVocê solicitou entrada em *${groupName}*.\n\n[${shortId}] ${challenge.prompt}\n\nSe tiver mais de uma verificação, responda: ${shortId} sua resposta\n⏱ Você tem 3 minutos.`;
   logger.info({ challengeId: challenge.challengeId, destinationNamespace: resolvedNamespace }, '[CAPTCHA_DM] send-start');
-<<<<<<< HEAD
-=======
   if (!pvPolicy.canSendPrivate({ destination: privateJid, sourceMessage: null, reason: 'captcha_outbound' })) {
     logger.info({ challengeId: challenge.challengeId }, '[PV_POLICY_BLOCK] captcha_outbound');
     markDeliveryFailed(challenge.challengeId, new Error('PV_POLICY_BLOCK'), { reason: 'captcha_outbound' });
     return challenge;
   }
->>>>>>> 63c00b8 (refactor: remove artificial send pacing and add simple PV policy)
   try {
     const result = await sock.sendMessage(privateJid, { text });
     const resultNamespace = namespace(result && result.key && result.key.remoteJid);
