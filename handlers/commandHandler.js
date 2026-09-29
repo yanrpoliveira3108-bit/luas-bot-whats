@@ -501,7 +501,19 @@ function shouldProcessMessage(msg) {
  * @param {object} msg mensagem
  * @param {string} [type] tipo do upsert ('notify' = tempo real, 'append' = histórico)
  */
-async function handleMessage(sock, msg, type) {
+async function handleMessage(sock, msg, type, transportMeta = {}) {
+  const handlerStartedAt = transportMeta.handlerStartedAt || Date.now();
+  if ((process.env.PERF_DEBUG === '1' || process.env.SOCKET_DIAG === '1') && type !== 'append') {
+    const socketReceivedAt = transportMeta.socketReceivedAt;
+    logger.info({
+      type: type || 'unknown',
+      chatJid: msg && msg.key && msg.key.remoteJid,
+      messageId: msg && msg.key && msg.key.id,
+      socketReceivedAt,
+      handlerStartedAt,
+      queueBeforeHandlerMs: socketReceivedAt ? Math.max(0, handlerStartedAt - socketReceivedAt) : null,
+    }, '[HANDLER_START]');
+  }
   try {
     // Histórico/sincronização não é "mensagem nova": processar 'append'
     // fazia o bot rodar filtros, XP e comandos em mensagens antigas.

@@ -287,14 +287,14 @@ async function handleGroupParticipants(sock, ev) {
       groups.addMember(id, pid);
       groups.logEvent(id, who, 'entrada', pid);
       if (!isSelf) {
-        await welcomeMember(sock, id, pid, meta);
+        await welcomeMember(sock, id, pid, meta, Date.now());
         await maybeAntiFakeAntiBot(sock, id, pid, who, meta);
       }
       await maybeKickBanned(sock, id, pid);
     } else if (action === 'remove' || action === 'leave') {
       groups.logEvent(id, who, 'saida', pid);
       groups.removeMember(id, pid);
-      if (!isSelf) await goodbyeMember(sock, id, pid, meta, action);
+      if (!isSelf) await goodbyeMember(sock, id, pid, meta, action, Date.now());
     } else if (action === 'promote') {
       groups.logEvent(id, who, 'promote', pid);
     } else if (action === 'demote') {
@@ -330,56 +330,56 @@ async function handleGroupUpdate(sock, ev) {
   }
 }
 
-async function maybeWelcome(sock, jid, userJid) {
-  const g = groups.get(jid);
-  if (!g || !g.welcome_enabled || !g.welcome_msg) return false;
-  let text = String(g.welcome_msg).replace(/\{user\}/g, `@${String(userJid).split('@')[0]}`);
-  const settings = require('../database/settings');
-  const prefix = settings.effectivePrefix();
-  text += `\n\n💡 _Novo por aqui? Digite *${prefix}guia* para ver os primeiros passos!_`;
-
+async function maybeWelcome(sock, jid, userJid, meta, occurredAt) {
+  const visualState = require('../database/welcome').getState(jid);
+  const legacy = groups.get(jid);
+  if (!visualState.welcome_enabled && !(legacy && legacy.welcome_enabled && legacy.welcome_msg)) return false;
+  const welcomeSystem = require('../plugins/welcome');
   try {
-    await sock.sendMessage(jid, { text, mentions: [userJid] });
+    const resolved = await welcomeSystem.resolveText(sock, jid, userJid, 'welcome', { meta, occurredAt });
+    await sock.sendMessage(jid, { text: resolved.text, mentions: [userJid] });
     return true;
   } catch (err) {
-    logger.warn({ err: err.message }, 'falha ao enviar boas-vindas');
+    logger.warn({ err: err && err.message }, 'falha ao enviar boas-vindas');
     return false;
   }
 }
 
-async function maybeGoodbye(sock, jid, userJid) {
-  const g = groups.get(jid);
-  if (!g || !g.goodbye_enabled || !g.goodbye_msg) return false;
-  const text = String(g.goodbye_msg).replace(/\{user\}/g, `@${String(userJid).split('@')[0]}`);
+async function maybeGoodbye(sock, jid, userJid, meta, occurredAt) {
+  const visualState = require('../database/welcome').getState(jid);
+  const legacy = groups.get(jid);
+  if (!visualState.goodbye_enabled && !(legacy && legacy.goodbye_enabled && legacy.goodbye_msg)) return false;
+  const welcomeSystem = require('../plugins/welcome');
   try {
-    await sock.sendMessage(jid, { text, mentions: [userJid] });
+    const resolved = await welcomeSystem.resolveText(sock, jid, userJid, 'goodbye', { meta, occurredAt });
+    await sock.sendMessage(jid, { text: resolved.text, mentions: [userJid] });
     return true;
   } catch (err) {
-    logger.warn({ err: err.message }, 'falha ao enviar despedida');
+    logger.warn({ err: err && err.message }, 'falha ao enviar despedida');
     return false;
   }
 }
 
-async function welcomeMember(sock, jid, userJid) {
+async function welcomeMember(sock, jid, userJid, meta, occurredAt) {
   let handled = false;
   try {
     const welcomeSystem = require('../plugins/welcome');
-    handled = await welcomeSystem.onMemberAdded(sock, jid, userJid);
+    handled = await welcomeSystem.onMemberAdded(sock, jid, userJid, { meta, occurredAt });
   } catch (err) {
-    logger.warn({ err: err.message }, '[WELCOME] card falhou, usando texto');
+    logger.warn({ err: err && err.message }, '[WELCOME] card falhou, usando texto');
   }
-  if (!handled) await maybeWelcome(sock, jid, userJid);
+  if (!handled) await maybeWelcome(sock, jid, userJid, meta, occurredAt);
 }
 
-async function goodbyeMember(sock, jid, userJid) {
+async function goodbyeMember(sock, jid, userJid, meta, action, occurredAt) {
   let handled = false;
   try {
     const welcomeSystem = require('../plugins/welcome');
-    handled = await welcomeSystem.onMemberRemoved(sock, jid, userJid);
+    handled = await welcomeSystem.onMemberRemoved(sock, jid, userJid, { meta, action, occurredAt });
   } catch (err) {
-    logger.warn({ err: err.message }, '[GOODBYE] card falhou, usando texto');
+    logger.warn({ err: err && err.message }, '[GOODBYE] card falhou, usando texto');
   }
-  if (!handled) await maybeGoodbye(sock, jid, userJid);
+  if (!handled) await maybeGoodbye(sock, jid, userJid, meta, occurredAt);
 }
 
 /**

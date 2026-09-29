@@ -149,20 +149,28 @@ autoBackup.startAutoBackup();
 const membershipRequests = require('./utils/membershipRequests');
 const membershipMonitor = require('./utils/membershipMonitor');
 
-connection.onMessage((sock, messages, type) => {
+connection.onMessage((sock, messages, type, transportMeta = {}) => {
   for (const msg of messages) {
+    const handlerQueuedAt = Date.now();
+    const socketReceivedAt = transportMeta.receivedAtById && msg && msg.key
+      ? transportMeta.receivedAtById.get(msg.key.id) || transportMeta.receivedAt
+      : transportMeta.receivedAt;
     try { if (msg && msg.key && msg.key.remoteJid) sendGuard.noteInbound(msg.key.remoteJid); } catch (_) {}
     // O vendor entrega pedidos como stubs no mesmo pipeline de messages.upsert.
     // Consome somente esses stubs; mensagens normais seguem intactas.
     membershipRequests.handleMessage(sock, msg, type).then((consumed) => {
       if (consumed) return;
-      commandHandler.handleMessage(sock, msg, type).catch((err) => {
+      const handlerStartedAt = Date.now();
+      commandHandler.handleMessage(sock, msg, type, {
+        socketReceivedAt,
+        handlerQueuedAt,
+        handlerStartedAt,
+      }).catch((err) => {
         logger.error({ err: err.message }, 'erro não tratado em mensagem');
       });
     }).catch((err) => logger.error({ err: err.message, stack: err.stack }, '[MEMBERSHIP_ERROR] erro no fluxo de pedidos'));
   }
 });
-
 connection.onGroupParticipants((sock, ev) => {
   if (ev && ev.id && !require('./database/rental').isGroupBotEnabled(ev.id)) return;
   require('./plugins/communityAudit').handle(sock, ev).catch((err) => {

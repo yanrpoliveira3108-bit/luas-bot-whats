@@ -617,7 +617,9 @@ const MIGRATIONS = [
     goodbye_enabled INTEGER NOT NULL DEFAULT 0,
     goodbye_random INTEGER NOT NULL DEFAULT 1,
     last_welcome_template TEXT DEFAULT '',
-    last_goodbye_template TEXT DEFAULT ''
+    last_goodbye_template TEXT DEFAULT '',
+    welcome_text TEXT DEFAULT '',
+    goodbye_text TEXT DEFAULT ''
   );
   CREATE TABLE IF NOT EXISTS welcome_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

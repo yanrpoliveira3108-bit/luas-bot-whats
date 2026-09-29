@@ -12,6 +12,10 @@
 const { prepare } = require('./database');
 const now = () => new Date().toISOString();
 
+const STATE_TTL_MS = 15000;
+const STATE_CACHE_MAX = 2000;
+const stateCache = new Map();
+
 const DEFAULTS = {
   welcome_enabled: 0,
   welcome_random: 1,
@@ -20,6 +24,8 @@ const DEFAULTS = {
   goodbye_random: 1,
   last_welcome_template: '',
   last_goodbye_template: '',
+  welcome_text: '',
+  goodbye_text: '',
 };
 
 function ensure(groupId) {
@@ -27,31 +33,57 @@ function ensure(groupId) {
 }
 
 /** Estado do grupo (com padrões). */
-function getState(groupId) {
-  ensure(groupId);
+function invalidate(groupId) {
+  if (groupId) stateCache.delete(groupId);
+  else stateCache.clear();
+}
+
+function getState(groupId, options = {}) {
+  const hit = stateCache.get(groupId);
+  if (hit && hit.expiresAt > Date.now()) return Object.assign({}, hit.value);
+  if (options.create !== false) ensure(groupId);
   const row = prepare('get_welcome_state', `SELECT * FROM welcome_state WHERE group_id = ?`).get(groupId) || {};
-  return Object.assign({}, DEFAULTS, row);
+  const value = Object.assign({}, DEFAULTS, row);
+  if (stateCache.size >= STATE_CACHE_MAX) stateCache.delete(stateCache.keys().next().value);
+  stateCache.set(groupId, { value, expiresAt: Date.now() + STATE_TTL_MS });
+  return Object.assign({}, value);
 }
 
 function setWelcome(groupId, enabled) {
   ensure(groupId);
-  return prepare('set_welcome_en', `UPDATE welcome_state SET welcome_enabled = ? WHERE group_id = ?`).run(enabled ? 1 : 0, groupId);
+  const result = prepare('set_welcome_en', `UPDATE welcome_state SET welcome_enabled = ? WHERE group_id = ?`).run(enabled ? 1 : 0, groupId);
+  invalidate(groupId);
+  return result;
 }
 
 function setGoodbye(groupId, enabled) {
   ensure(groupId);
-  return prepare('set_goodbye_en', `UPDATE welcome_state SET goodbye_enabled = ? WHERE group_id = ?`).run(enabled ? 1 : 0, groupId);
+  const result = prepare('set_goodbye_en', `UPDATE welcome_state SET goodbye_enabled = ? WHERE group_id = ?`).run(enabled ? 1 : 0, groupId);
+  invalidate(groupId);
+  return result;
 }
 
 function setRandom(groupId, kind, enabled) {
   ensure(groupId);
   const col = kind === 'welcome' ? 'welcome_random' : 'goodbye_random';
-  return prepare('set_welcome_rand', `UPDATE welcome_state SET ${col} = ? WHERE group_id = ?`).run(enabled ? 1 : 0, groupId);
+  const result = prepare('set_welcome_rand', `UPDATE welcome_state SET ${col} = ? WHERE group_id = ?`).run(enabled ? 1 : 0, groupId);
+  invalidate(groupId);
+  return result;
 }
 
 function setMention(groupId, enabled) {
   ensure(groupId);
-  return prepare('set_welcome_mention', `UPDATE welcome_state SET welcome_mention = ? WHERE group_id = ?`).run(enabled ? 1 : 0, groupId);
+  const result = prepare('set_welcome_mention', `UPDATE welcome_state SET welcome_mention = ? WHERE group_id = ?`).run(enabled ? 1 : 0, groupId);
+  invalidate(groupId);
+  return result;
+}
+
+function setText(groupId, kind, text) {
+  ensure(groupId);
+  const col = kind === 'goodbye' ? 'goodbye_text' : 'welcome_text';
+  const result = prepare(`set_${col}`, `UPDATE welcome_state SET ${col} = ? WHERE group_id = ?`).run(String(text || ''), groupId);
+  invalidate(groupId);
+  return result;
 }
 
 /**
@@ -59,9 +91,9 @@ function setMention(groupId, enabled) {
  * Se random estiver desligado, retorna sempre o PRIMEIRO da lista (fixo).
  * @returns {string} id do template (ex.: 'welcome-02')
  */
-function nextTemplate(groupId, kind, templates) {
+function chooseTemplate(groupId, kind, templates, options = {}) {
   const list = Array.isArray(templates) && templates.length ? templates : ['welcome-01'];
-  const st = getState(groupId);
+  const st = getState(groupId, options);
   const lastCol = kind === 'welcome' ? 'last_welcome_template' : 'last_goodbye_template';
   const random = kind === 'welcome' ? st.welcome_random : st.goodbye_random;
 
@@ -72,9 +104,19 @@ function nextTemplate(groupId, kind, templates) {
     pick = pool[Math.floor(Math.random() * pool.length)];
   }
 
+  return pick;
+}
+
+function nextTemplate(groupId, kind, templates) {
+  const pick = chooseTemplate(groupId, kind, templates);
   const col = kind === 'welcome' ? 'last_welcome_template' : 'last_goodbye_template';
   prepare('set_welcome_last', `UPDATE welcome_state SET ${col} = ? WHERE group_id = ?`).run(pick, groupId);
+  invalidate(groupId);
   return pick;
+}
+
+function peekTemplate(groupId, kind, templates) {
+  return chooseTemplate(groupId, kind, templates, { create: false });
 }
 
 /** Registra um evento (entrada/saída) com o fake ID — tabela limitada. */
@@ -108,7 +150,9 @@ module.exports = {
   setGoodbye,
   setRandom,
   setMention,
+  setText,
   nextTemplate,
+  peekTemplate,
   recordEvent,
   countMembers,
 };

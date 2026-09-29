@@ -45,6 +45,20 @@ let pendingPhone = null;      // número para re-tentar pairing (se necessário)
 let currentPhoneDigits = null;
 let lastCloseReason = null;
 
+// Diagnóstico focado no caminho de entrada. Desligado por padrão para não
+// acrescentar I/O ao runtime normal. Não registra texto/conteúdo de mensagens.
+const SOCKET_DIAG = process.env.PERF_DEBUG === '1' || process.env.SOCKET_DIAG === '1';
+const socketInputStats = { upserts: 0, append: 0, notify: 0, other: 0, messages: 0, historyChats: 0, historyMessages: 0 };
+function messageTimestampMs(value) {
+  if (value == null) return null;
+  const n = typeof value === 'object' && typeof value.toNumber === 'function' ? value.toNumber() : Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n < 1e12 ? n * 1000 : n;
+}
+function socketDiagLog(payload, message) {
+  if (SOCKET_DIAG) logger.info(payload, message);
+}
+
 // Limite de tentativas AUTOMÁTICAS de reconexão. Após esgotar, para de
 // tentar sozinho e avisa (evita o loop infinito "reconectando...").
 const MAX_RECONNECT_ATTEMPTS = 8;
@@ -419,9 +433,31 @@ function wireEvents(sockRef, saveCreds) {
   sockRef.ev.on('connection.update', (update) => handleConnectionUpdate(update, sockRef));
 
   sockRef.ev.on('messages.upsert', ({ messages, type }) => {
+    const receivedAt = Date.now();
+    const batch = Array.isArray(messages) ? messages : [];
+    socketInputStats.upserts += 1;
+    socketInputStats.messages += batch.length;
+    if (type === 'append') socketInputStats.append += batch.length;
+    else if (type === 'notify') socketInputStats.notify += batch.length;
+    else socketInputStats.other += batch.length;
+    socketDiagLog({ type: type || 'unknown', count: batch.length, receivedAt }, '[RAW_UPSERT]');
+
+    const receivedAtById = new Map();
+    // Esta observação ocorre antes de membershipRequests, commandHandler e do
+    // logger visual. Não imprime texto nem payload da mensagem.
+    for (const m of batch) {
+      const key = m && m.key;
+      const messageId = key && key.id;
+      const chatJid = key && key.remoteJid;
+      const messageTimestamp = messageTimestampMs(m && m.messageTimestamp);
+      const ageMs = messageTimestamp == null ? null : Math.max(0, receivedAt - messageTimestamp);
+      if (messageId) receivedAtById.set(messageId, receivedAt);
+      socketDiagLog({ type: type || 'unknown', chatJid, messageId, messageTimestamp, receivedAt, ageMs }, '[RAW_MESSAGE_AGE]');
+    }
+
     // Diagnóstico de recepção em comunidades/grupos LID (baixo ruído: só
     // dispara para mensagens LID ou stubs de cifra — o caso que investigamos).
-    for (const m of messages || []) {
+    for (const m of batch) {
       const jid = m.key && m.key.remoteJid;
       const participant = m.key && m.key.participant;
       const participantAlt = m.key && m.key.participantAlt;
@@ -452,7 +488,32 @@ function wireEvents(sockRef, saveCreds) {
         );
       }
     }
-    if (listeners.message) listeners.message(sockRef, messages, type);
+    if (listeners.message) listeners.message(sockRef, batch, type, { receivedAt, receivedAtById });
+  });
+
+  // O fork emite history sync como evento separado. Apenas resumimos; não
+  // encaminhamos esse evento ao commandHandler nem ao logger visual.
+  sockRef.ev.on('messaging-history.set', (data = {}) => {
+    const chats = Array.isArray(data.chats) ? data.chats.length : 0;
+    const messages = Array.isArray(data.messages) ? data.messages.length : 0;
+    socketInputStats.historyChats += chats;
+    socketInputStats.historyMessages += messages;
+    socketDiagLog({ chats, messages, contacts: Array.isArray(data.contacts) ? data.contacts.length : 0, isLatest: !!data.isLatest, syncType: data.syncType }, '[HISTORY_SYNC]');
+  });
+
+  // Instrumentação runtime:  o fork também expõe pedidos como group.join-request
+  // em process-message.js. Neste estágio apenas observamos; não redirecionamos
+  // o fluxo automático antes de confirmar o evento real no Termux.
+  sockRef.ev.on('group.join-request', (request) => {
+    logger.info(
+      {
+        groupJid: request && request.id,
+        participant: request && request.participant,
+        action: request && request.action,
+        method: request && request.method,
+      },
+      '[WA_RUNTIME] group.join-request'
+    );
   });
 
   // Instrumentação runtime: o fork também expõe pedidos como group.join-request
@@ -492,6 +553,13 @@ function wireEvents(sockRef, saveCreds) {
   sockRef.ev.on('call', (calls) => {
     if (listeners.call) listeners.call(sockRef, calls);
   });
+
+  if (SOCKET_DIAG) {
+    const listenerCount = typeof sockRef.ev.listenerCount === 'function'
+      ? sockRef.ev.listenerCount('messages.upsert')
+      : (typeof sockRef.ev.listeners === 'function' ? sockRef.ev.listeners('messages.upsert').length : 'unavailable');
+    logger.info({ event: 'messages.upsert', listenerCount }, '[SOCKET_LISTENERS]');
+  }
 }
 
 /** Mensagem amigável (pt-BR) para um código de fechamento da conexão. */
@@ -746,6 +814,7 @@ module.exports = {
   changeSession,
   restoreSession,
   getSocket,
+  getSocketInputStats: () => ({ ...socketInputStats }),
   isConnected,
   onMessage,
   onGroupParticipants,

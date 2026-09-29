@@ -23,8 +23,8 @@ function clean(s) {
   return String(s == null ? '' : s)
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^\x20-\x7EÀ-ÿ]/g, '')
-    .replace(/[^\x20-\x7E]/g, '')
+    .replace(/[^\x20-\x7EÀ-ÿ\n]/g, '')
+    .replace(/[^\x20-\x7E\n]/g, '')
     .trim();
 }
 
@@ -52,8 +52,32 @@ function fit(font, text, maxWidth) {
   return t.length < text.length ? t.slice(0, -1) + '…' : t;
 }
 
+const fontCache = new Map();
 async function loadFont(name) {
-  return Jimp.loadFont(Jimp[name]);
+  if (!fontCache.has(name)) fontCache.set(name, Jimp.loadFont(Jimp[name]));
+  return fontCache.get(name);
+}
+
+function wrapText(font, value, maxWidth, maxLines = 4) {
+  const words = String(value == null ? '' : value).split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = '';
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (line && Jimp.measureText(font, candidate) > maxWidth) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  }
+  if (line || !lines.length) lines.push(line);
+  if (lines.length > maxLines) {
+    const kept = lines.slice(0, maxLines);
+    kept[maxLines - 1] = fit(font, `${kept[maxLines - 1]}…`, maxWidth);
+    return kept;
+  }
+  return lines.map((line) => fit(font, line, maxWidth));
 }
 
 /* ------------------------------ scrims ------------------------------ */
@@ -279,19 +303,26 @@ async function drawInfo(card, data) {
   labelBar(card, rx - 20, 172, 350, 54, 165);
   card.print(fSub, rx, 184, label.subtitle);
 
-  // linhas de dados
+  // Texto resolvido da configuração do grupo. O card recebe o mesmo texto
+  // que será usado no fallback/caption; o renderer não consulta banco, socket
+  // ou comunidade e apenas adapta a representação à área disponível.
+  const greetingLines = wrapText(fValue, clean(data.renderedText || ''), 620, 4);
+  const textHeight = Math.max(76, greetingLines.length * 38 + 28);
+  labelBar(card, rx - 20, 242, 640, textHeight, 175);
+  greetingLines.forEach((line, i) => card.print(fValue, rx, 250 + i * 38, line));
+
+  // Linhas compactas de contexto
   const rows = [
     ['MEMBROS', clean(String(data.members || '—'))],
     ['GRUPO', fit(fValue, clean(data.group || '—'), 620)],
-    ['DATA', clean(data.date)],
-    ['HORA', clean(data.time)],
+    ['DATA', clean(`${data.date}  ·  ${data.time}`)],
   ];
-  let ry = 272;
+  let ry = 242 + textHeight + 12;
   for (const [lab, val] of rows) {
-    labelBar(card, rx - 20, ry, 640, 76, 160);
-    card.print(fLabel, rx, ry + 9, lab);
-    card.print(fValue, rx, ry + 33, val);
-    ry += 92;
+    labelBar(card, rx - 20, ry, 640, 68, 160);
+    card.print(fLabel, rx, ry + 7, lab);
+    card.print(fValue, rx, ry + 29, val);
+    ry += 82;
   }
 
   /* ---- rodapé: marca ---- */
