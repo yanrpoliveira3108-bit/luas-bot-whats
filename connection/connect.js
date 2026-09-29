@@ -50,6 +50,7 @@ let activeGeneration = 0;
 let reconnectInFlight = null;
 const reconnectHistory = [];
 let lastSessionSync = null;
+let conflictDetected = false;
 
 // Diagnóstico focado no caminho de entrada. Desligado por padrão para não
 // acrescentar I/O ao runtime normal. Não registra texto/conteúdo de mensagens.
@@ -198,6 +199,7 @@ function getStatus() {
     lastReason: lastCloseReason,
     socketGeneration: activeGeneration,
     reconnectInProgress: Boolean(reconnectInFlight || reconnectTimer || connecting),
+    reconnectBlockedByConflict: conflictDetected,
     reconnectsLast5m: reconnectHistory.filter((t) => Date.now() - t < 5 * 60 * 1000).length,
     sessionSync: lastSessionSync,
   };
@@ -239,6 +241,13 @@ async function connect({ phone } = {}) {
     return sock;
   }
   connecting = true;
+  // Uma chamada explícita (menu/boot) pode tentar novamente após o operador
+  // verificar processos/sessões. O scheduler nunca chega aqui enquanto o
+  // conflito estiver bloqueado.
+  if (conflictDetected) {
+    conflictDetected = false;
+    logger.info('[CONNECTION_CONFLICT_RESET] tentativa manual após conflito');
+  }
   if (phone) {
     // novo pareamento solicitado explicitamente → libera a trava de logout
     // e zera o contador de reconexões (recomeço limpo)
@@ -651,6 +660,16 @@ function handleConnectionUpdate(update, sockRef, generation = activeGeneration) 
       // sessão registrada: 429 é recuperável → cai no bloco de reconexão abaixo
     }
 
+    if (statusCode === DisconnectReason.connectionReplaced) {
+      // 440 é conflito real: outra sessão/processo assumiu o número. Não fazer
+      // loop de reconexão, não apagar auth e não disputar a sessão.
+      conflictDetected = true;
+      reconnectAttempts = 0;
+      logger.error({ socketGeneration: generation, statusCode, reason }, '[CONNECTION_CONFLICT_STOPPED]');
+      emitStatus({ type: 'failed', reason: friendlyCloseReason(statusCode) });
+      return;
+    }
+
     if (statusCode === DisconnectReason.loggedOut) {
       // logout real: credenciais invalidadas — NUNCA reconecta sozinho
       loggedOutDetected = true;
@@ -710,7 +729,10 @@ function scheduleReconnect(minDelay = 0) {
     logger.info({ reason: 'already_open', socketGeneration: activeGeneration }, '[RECONNECT_SKIPPED]');
     return;
   }
-  if (shutdownRequested || reconnectTimer || reconnectInFlight || loggedOutDetected) return;
+  if (shutdownRequested || reconnectTimer || reconnectInFlight || loggedOutDetected || conflictDetected) {
+    if (conflictDetected) logger.warn({ reason: 'connectionReplaced', socketGeneration: activeGeneration }, '[RECONNECT_BLOCKED]');
+    return;
+  }
   if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
     logger.error('muitas tentativas de reconexão sem sucesso — encerrando tentativas automáticas');
     emitStatus({
