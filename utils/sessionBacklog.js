@@ -16,8 +16,12 @@ function timestampMs(value) {
   return n < 1e12 ? n * 1000 : n;
 }
 
+function runtimeConfig() {
+  try { return freio.get(); } catch (_) { return freio.DEFAULTS; }
+}
+
 function markSessionOnline(at = Date.now()) {
-  freio.get();
+  runtimeConfig();
   sessionOnlineAt = Number(at) || Date.now();
   sessionId += 1;
   dropped = 0;
@@ -27,7 +31,7 @@ function markSessionOnline(at = Date.now()) {
 }
 
 function shouldDrop(type, msg, receivedAt = Date.now()) {
-  const cfg = freio.get();
+  const cfg = runtimeConfig();
   if (!cfg.ignoreOfflineBacklog || !sessionOnlineAt) return false;
   // append é histórico/sincronização nesta fork. Mesmo sem timestamp confiável,
   // não deve entrar no pipeline normal durante a política de backlog.
