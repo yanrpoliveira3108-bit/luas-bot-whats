@@ -131,6 +131,14 @@ function buildGreetingContext(input = {}) {
   };
 }
 
+function buildGreetingPayload(template, context, extra = {}) {
+  return {
+    ...extra,
+    context,
+    renderedText: resolveGreetingTemplate(template, context),
+  };
+}
+
 function resolveGreetingTemplate(template, context) {
   const values = context && context.values ? context.values : {};
   return normalizeTemplate(template).replace(/\{([A-Za-zÀ-ÿ][\wÀ-ÿ]*)\}/g, (full, key) => {
@@ -156,4 +164,5 @@ module.exports = {
   resetGreetingTemplate,
   buildGreetingContext,
   resolveGreetingTemplate,
+  buildGreetingPayload,
 };

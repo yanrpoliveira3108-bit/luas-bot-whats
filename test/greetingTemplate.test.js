@@ -23,6 +23,11 @@ assert.equal(greeting.resolveGreetingTemplate('{usuario} {usuario}', context), '
 assert.equal(greeting.resolveGreetingTemplate('{banana}', context), '{banana}');
 assert.equal(greeting.resolveGreetingTemplate('{nome} {numero} {membros} {prefix}', context), 'Karma +55 19 *****-4235 198 ,');
 assert.equal(greeting.resolveGreetingTemplate('Olá\n{grupo}', context), 'Olá\nLua Desenvolvimento');
+const previewPayload = greeting.buildGreetingPayload('Linha A\nLinha B\nLinha C', context, { type: 'WELCOME' });
+assert.strictEqual(previewPayload.renderedText, 'Linha A\nLinha B\nLinha C');
+assert.notStrictEqual(previewPayload.renderedText, greeting.DEFAULTS.welcome);
+const placeholderPayload = greeting.buildGreetingPayload('Olá {usuario}\nBem-vindo ao {grupo}\nHora: {hora}', context);
+assert.strictEqual(placeholderPayload.renderedText, 'Olá Karma\nBem-vindo ao Lua Desenvolvimento\nHora: 23:20');
 
 const original = `👑🔥 𝑩𝑬𝑴-𝑽𝑰𝑵𝑫𝑶𝑺 𝑨𝑶 𝑩𝑶𝑵𝑫𝑬 𝑫𝑨 𝒁𝑶𝑬𝑰𝑹𝑨! 🔥👑
 😎 Chegou agora? Então se apresente pra galera:

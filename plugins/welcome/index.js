@@ -64,9 +64,12 @@ async function buildData(sock, groupJid, userJid, kind, opts = {}) {
     occurredAt: eventTime(opts),
   });
   if (opts.metrics) opts.metrics.contextMs = Date.now() - contextStarted;
+  const configStarted = Date.now();
   const settings = greeting.getGreetingSettings(groupJid, opts.preview ? { create: false } : {});
+  if (opts.metrics) opts.metrics.configMs = Date.now() - configStarted;
   const template = kind === 'goodbye' ? settings.goodbyeText : settings.welcomeText;
-  const renderedText = greeting.resolveGreetingTemplate(template, context);
+  const greetingPayload = greeting.buildGreetingPayload(template, context, { template });
+  const renderedText = greetingPayload.renderedText;
   const profileStarted = Date.now();
   const photoBuffer = await profile.getPhoto(sock, userJid);
   if (opts.metrics) opts.metrics.profileMs = Date.now() - profileStarted;
@@ -74,6 +77,7 @@ async function buildData(sock, groupJid, userJid, kind, opts = {}) {
     meta,
     context,
     renderedText,
+    messageText: renderedText,
     kind,
     templateId: opts.preview
       ? store.peekTemplate(groupJid, kind, CONFIG.templates[kind])

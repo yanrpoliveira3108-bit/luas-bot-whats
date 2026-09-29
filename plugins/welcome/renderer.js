@@ -324,23 +324,29 @@ async function drawInfo(card, data, metrics) {
   // Texto resolvido da configuração do grupo. O card recebe o mesmo texto
   // que será usado no fallback/caption; o renderer não consulta banco, socket
   // ou comunidade e apenas adapta a representação à área disponível.
-  const greetingLines = wrapText(fValue, clean(data.renderedText || ''), 620, 4);
-  const textHeight = Math.max(76, greetingLines.length * 38 + 28);
+  const messageText = data.messageText != null ? data.messageText : data.renderedText;
+  const visualText = clean(messageText || '');
+  const longMessage = visualText.split('\n').length > 4 || visualText.length > 180;
+  const messageFont = longMessage ? fSmall : fValue;
+  const lineHeight = longMessage ? 22 : 38;
+  const maxLines = longMessage ? 8 : 4;
+  const greetingLines = wrapText(messageFont, visualText, 620, maxLines);
+  const textHeight = Math.max(76, greetingLines.length * lineHeight + 28);
   labelBar(card, rx - 20, 242, 640, textHeight, 175);
-  greetingLines.forEach((line, i) => card.print(fValue, rx, 250 + i * 38, line));
+  greetingLines.forEach((line, i) => card.print(messageFont, rx, 250 + i * lineHeight, line));
 
-  // Linhas compactas de contexto
+  // Linhas compactas de contexto; a mensagem customizada tem prioridade visual.
   const rows = [
     ['MEMBROS', clean(String(data.members || '—'))],
-    ['GRUPO', fit(fValue, clean(data.group || '—'), 620)],
+    ['GRUPO', fit(fSmall, clean(data.group || '—'), 620)],
     ['DATA', clean(`${data.date}  ·  ${data.time}`)],
   ];
-  let ry = 242 + textHeight + 12;
+  let ry = 242 + textHeight + 10;
   for (const [lab, val] of rows) {
-    labelBar(card, rx - 20, ry, 640, 68, 160);
-    card.print(fLabel, rx, ry + 7, lab);
-    card.print(fValue, rx, ry + 29, val);
-    ry += 82;
+    labelBar(card, rx - 20, ry, 640, 60, 160);
+    card.print(fLabel, rx, ry + 5, lab);
+    card.print(fSmall, rx, ry + 26, val);
+    ry += 72;
   }
 
   /* ---- rodapé: marca ---- */
