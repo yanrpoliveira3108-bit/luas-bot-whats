@@ -267,6 +267,9 @@ async function handleGroupParticipants(sock, ev) {
   autobot.ensureGroupDefaults(id);
   const who = author || '';
   const list = Array.isArray(participants) ? participants : [];
+  if (process.env.WELCOME_DEBUG === '1' || process.env.PERF_DEBUG === '1') {
+    logger.info({ groupJid: id, action, participantsCount: list.length, handlerReached: true }, '[WELCOME_EVENT]');
+  }
   const botJid = (sock.user && sock.user.id) || '';
   const botLid = (sock.user && sock.user.lid) || '';
 

@@ -172,7 +172,15 @@ connection.onMessage((sock, messages, type, transportMeta = {}) => {
   }
 });
 connection.onGroupParticipants((sock, ev) => {
-  if (ev && ev.id && !require('./database/rental').isGroupBotEnabled(ev.id)) return;
+  const groupJid = ev && ev.id;
+  const list = Array.isArray(ev && ev.participants) ? ev.participants : [];
+  let botEnabled = true;
+  try { botEnabled = groupJid ? require('./database/rental').isGroupBotEnabled(groupJid) : false; } catch (_) { botEnabled = false; }
+  if (process.env.WELCOME_DEBUG === '1' || process.env.PERF_DEBUG === '1') {
+    const welcomeState = groupJid ? require('./database/welcome').getState(groupJid) : {};
+    logger.info({ groupJid, action: ev && ev.action, participantsCount: list.length, welcomeEnabled: !!welcomeState.welcome_enabled, botEnabled, handlerReached: botEnabled }, '[WELCOME_EVENT]');
+  }
+  if (!botEnabled) return;
   require('./plugins/communityAudit').handle(sock, ev).catch((err) => {
     logger.error({ err: err.message, groupJid: ev && ev.id }, '[DATABASE_AUDIT_ERROR] handler failed');
   });

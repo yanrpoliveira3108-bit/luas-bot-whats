@@ -10,6 +10,10 @@ const { generateFakeId } = require('./fakeId');
 const { withLock } = require('../../utils/keyedMutex');
 const permissions = require('../../utils/permissions');
 const logger = require('../../utils/logger').child('welcome');
+const WELCOME_TRACE = process.env.WELCOME_DEBUG === '1' || process.env.PERF_DEBUG === '1';
+function trace(payload, message) {
+  if (WELCOME_TRACE) logger.info(payload, message);
+}
 
 function safeMeta(sock, groupJid, provided) {
   if (provided && typeof provided === 'object') return Promise.resolve(provided);
@@ -100,20 +104,37 @@ async function resolveText(sock, groupJid, userJid, kind, opts = {}) {
 
 async function emit(sock, groupJid, userJid, kind, opts = {}) {
   const totalStarted = Date.now();
+  trace({ stage: 'event', type: kind.toUpperCase(), groupJid, participant: userJid, preview: !!opts.preview }, '[WELCOME_FLOW]');
   const metrics = opts.preview ? {} : null;
   const data = await buildData(sock, groupJid, userJid, kind, Object.assign({}, opts, { metrics }));
   if (metrics) data.metrics = metrics;
   const state = store.getState(groupJid, opts.preview ? { create: false } : {});
-  const buf = await renderer.renderCard(data);
-  const label = CONFIG.labels[kind];
+  trace({ stage: 'template', custom: !!data.renderedText, textLength: String(data.renderedText || '').length }, '[WELCOME_FLOW]');
+  trace({ stage: 'render', type: kind.toUpperCase() }, '[WELCOME_FLOW]');
+  let buf;
+  try {
+    buf = await renderer.renderCard(data);
+  } catch (err) {
+    logger.error({ stage: 'render', code: err && err.code, message: err && err.message }, '[WELCOME_CARD_ERROR]');
+    throw err;
+  }
   const sendPayload = {
     image: buf,
-    // Evita duplicar o texto completo da imagem. O fallback usa renderedText.
-    caption: `${label.title} • ${data.name}`,
+    // O texto customizado é a caption do card: uma única entrega contém
+    // imagem + texto, sem depender de uma segunda mensagem separada.
+    caption: data.renderedText,
   };
   if (state.welcome_mention && userJid) sendPayload.mentions = [userJid];
+  trace({ stage: 'send-card', captionMode: 'custom-text', textLength: String(data.renderedText || '').length }, '[WELCOME_FLOW]');
   const sendStarted = Date.now();
-  await sock.sendMessage(groupJid, sendPayload);
+  try {
+    await sock.sendMessage(groupJid, sendPayload);
+  } catch (err) {
+    logger.error({ stage: 'send-card', code: err && err.code, message: err && err.message }, '[WELCOME_ERROR]');
+    throw err;
+  }
+  trace({ cardAttempted: true, cardSent: true, textAttempted: true, textSent: true, captionMode: 'custom-text', errorCode: null }, '[WELCOME_SEND]');
+  trace({ stage: 'done', type: kind.toUpperCase() }, '[WELCOME_FLOW]');
   if (metrics) {
     metrics.sendMs = Date.now() - sendStarted;
     metrics.totalMs = Date.now() - totalStarted;
@@ -126,7 +147,12 @@ async function emit(sock, groupJid, userJid, kind, opts = {}) {
 
 async function onMemberAdded(sock, groupJid, userJid, opts = {}) {
   const st = store.getState(groupJid);
-  if (!st.welcome_enabled) return false;
+  trace({ stage: 'config', groupJid, welcomeEnabled: !!st.welcome_enabled }, '[WELCOME_FLOW]');
+  if (!st.welcome_enabled) {
+    trace({ stage: 'skip', reason: 'welcome_disabled', groupJid }, '[WELCOME_FLOW]');
+    return false;
+  }
+  trace({ stage: 'participant', participantKind: String(userJid || '').endsWith('@lid') ? 'LID' : String(userJid || '').includes('@') ? 'PN' : 'OTHER' }, '[WELCOME_FLOW]');
   return withLock(groupJid, async () => {
     try { await emit(sock, groupJid, userJid, 'welcome', opts); return true; }
     catch (err) { logger.error({ err: err && err.message }, '[WELCOME ERROR] falha geral'); return false; }
@@ -135,7 +161,9 @@ async function onMemberAdded(sock, groupJid, userJid, opts = {}) {
 
 async function onMemberRemoved(sock, groupJid, userJid, opts = {}) {
   const st = store.getState(groupJid);
+  trace({ stage: 'config', groupJid, goodbyeEnabled: !!st.goodbye_enabled }, '[GOODBYE_FLOW]');
   if (!st.goodbye_enabled) return false;
+  trace({ stage: 'participant', participantKind: String(userJid || '').endsWith('@lid') ? 'LID' : String(userJid || '').includes('@') ? 'PN' : 'OTHER' }, '[GOODBYE_FLOW]');
   return withLock(groupJid, async () => {
     try { await emit(sock, groupJid, userJid, 'goodbye', opts); return true; }
     catch (err) { logger.error({ err: err && err.message }, '[GOODBYE ERROR] falha geral'); return false; }
