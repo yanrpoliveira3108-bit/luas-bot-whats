@@ -808,15 +808,17 @@ async function pump() {
         return;
       }
 
-      // teto global por minuto
-      if (globalWindow.length >= maxPerMinute()) {
-        schedule(globalWindow[0] + WINDOW_MS - now);
-        return;
-      }
-
+      // PPM continua limitando tráfego normal. Diagnósticos owner-only são
+      // classificados como CONTROL e recebem uma vaga de controle para não
+      // ficar atrás de uma rajada de mídia/HTML; permissões continuam sendo
+      // validadas antes de chegar aqui.
       const picked = pickNext(now, apenasDono);
       if (!picked) {
         schedule(nextWait(now));
+        return;
+      }
+      if (globalWindow.length >= maxPerMinute() && picked.item.kind !== 'control') {
+        schedule(globalWindow[0] + WINDOW_MS - now);
         return;
       }
 
