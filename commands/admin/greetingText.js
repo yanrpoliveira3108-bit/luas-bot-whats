@@ -51,7 +51,9 @@ function make(kind) {
       if (sub !== 'atualizar' && sub !== 'update') {
         return ctx.reply(`Uso: ${ctx.prefix || ','}${command} atualizar <texto> | reset | preview | vars`);
       }
-      let value = ctx.args.slice(1).join(' ');
+      // Não reconstruir a mensagem com ctx.args.join(' '): splitCommand()
+      // tokeniza por whitespace e destruiria todas as quebras de linha.
+      let value = greeting.extractTemplateFromCommand(ctx.text, ctx.prefix, command);
       if (!value && ctx.quotedText) value = ctx.quotedText;
       const result = greeting.setGreetingTemplate(ctx.remoteJid, kind, value);
       if (!result.ok) return ctx.reply(`⚠️ ${result.error}`);

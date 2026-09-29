@@ -37,7 +37,9 @@ function eventTime(opts) {
 }
 
 async function buildData(sock, groupJid, userJid, kind, opts = {}) {
+  const metaStarted = Date.now();
   const meta = await safeMeta(sock, groupJid, opts.meta);
+  if (opts.metrics) opts.metrics.metadataMs = Date.now() - metaStarted;
   const participants = Array.isArray(meta.participants) ? meta.participants : [];
   const pn = permissions.toPn(userJid, participants);
   let name = resolveName(participants, userJid, null);
@@ -47,6 +49,7 @@ async function buildData(sock, groupJid, userJid, kind, opts = {}) {
       name = user && user.name;
     } catch (_) {}
   }
+  const contextStarted = Date.now();
   const context = greeting.buildGreetingContext({
     type: kind.toUpperCase(),
     participantJid: userJid,
@@ -60,9 +63,13 @@ async function buildData(sock, groupJid, userJid, kind, opts = {}) {
     communityName: opts.communityName,
     occurredAt: eventTime(opts),
   });
+  if (opts.metrics) opts.metrics.contextMs = Date.now() - contextStarted;
   const settings = greeting.getGreetingSettings(groupJid, opts.preview ? { create: false } : {});
   const template = kind === 'goodbye' ? settings.goodbyeText : settings.welcomeText;
   const renderedText = greeting.resolveGreetingTemplate(template, context);
+  const profileStarted = Date.now();
+  const photoBuffer = await profile.getPhoto(sock, userJid);
+  if (opts.metrics) opts.metrics.profileMs = Date.now() - profileStarted;
   return {
     meta,
     context,
@@ -71,7 +78,7 @@ async function buildData(sock, groupJid, userJid, kind, opts = {}) {
     templateId: opts.preview
       ? store.peekTemplate(groupJid, kind, CONFIG.templates[kind])
       : store.nextTemplate(groupJid, kind, CONFIG.templates[kind]),
-    photoBuffer: await profile.getPhoto(sock, userJid),
+    photoBuffer,
     name: context.participantName,
     number: context.participantNumber,
     fakeId: generateFakeId(),
@@ -88,7 +95,10 @@ async function resolveText(sock, groupJid, userJid, kind, opts = {}) {
 }
 
 async function emit(sock, groupJid, userJid, kind, opts = {}) {
-  const data = await buildData(sock, groupJid, userJid, kind, opts);
+  const totalStarted = Date.now();
+  const metrics = opts.preview ? {} : null;
+  const data = await buildData(sock, groupJid, userJid, kind, Object.assign({}, opts, { metrics }));
+  if (metrics) data.metrics = metrics;
   const state = store.getState(groupJid, opts.preview ? { create: false } : {});
   const buf = await renderer.renderCard(data);
   const label = CONFIG.labels[kind];
@@ -98,7 +108,13 @@ async function emit(sock, groupJid, userJid, kind, opts = {}) {
     caption: `${label.title} • ${data.name}`,
   };
   if (state.welcome_mention && userJid) sendPayload.mentions = [userJid];
+  const sendStarted = Date.now();
   await sock.sendMessage(groupJid, sendPayload);
+  if (metrics) {
+    metrics.sendMs = Date.now() - sendStarted;
+    metrics.totalMs = Date.now() - totalStarted;
+    logger.info(metrics, '[WELCOME_PREVIEW_PERF]');
+  }
   if (!opts.preview) store.recordEvent(groupJid, userJid, kind, data.fakeId, data.templateId);
   logger.info({ usuario: data.name, grupo: data.group, template: data.templateId, fakeId: data.fakeId, membros: data.members }, `[${kind.toUpperCase()}] OK`);
   return { sent: true, templateId: data.templateId, fakeId: data.fakeId, text: data.renderedText };

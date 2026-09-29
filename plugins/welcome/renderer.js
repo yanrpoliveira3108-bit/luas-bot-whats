@@ -20,10 +20,13 @@ const C = CONFIG.theme.colors;
 
 /** Remove acentos (fontes bitmap do Jimp não têm glifos acentuados). */
 function clean(s) {
+  // NFKC converte Mathematical Alphanumeric Symbols (𝑩, 𝒐, ...) para uma
+  // representação visual ASCII antes da fonte bitmap. O texto persistido e o
+  // fallback textual nunca passam por esta função.
   return String(s == null ? '' : s)
+    .normalize('NFKC')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^\x20-\x7EÀ-ÿ\n]/g, '')
     .replace(/[^\x20-\x7E\n]/g, '')
     .trim();
 }
@@ -58,20 +61,33 @@ async function loadFont(name) {
   return fontCache.get(name);
 }
 
-function wrapText(font, value, maxWidth, maxLines = 4) {
-  const words = String(value == null ? '' : value).split(/\s+/).filter(Boolean);
+function wrapText(font, value, maxWidth, maxLines = 6) {
+  const paragraphs = String(value == null ? '' : value).split('\n');
   const lines = [];
-  let line = '';
-  for (const word of words) {
-    const candidate = line ? `${line} ${word}` : word;
-    if (line && Jimp.measureText(font, candidate) > maxWidth) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = candidate;
+  for (const paragraph of paragraphs) {
+    if (!paragraph) {
+      lines.push('');
+      continue;
     }
+    const words = paragraph.split(/[ \t]+/).filter(Boolean);
+    let line = '';
+    for (const word of words) {
+      // Palavras muito grandes também precisam caber sem estourar a borda.
+      if (!line && Jimp.measureText(font, word) > maxWidth) {
+        lines.push(fit(font, word, maxWidth));
+        continue;
+      }
+      const candidate = line ? `${line} ${word}` : word;
+      if (line && Jimp.measureText(font, candidate) > maxWidth) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = candidate;
+      }
+    }
+    if (line) lines.push(line);
   }
-  if (line || !lines.length) lines.push(line);
+  if (!lines.length) lines.push('');
   if (lines.length > maxLines) {
     const kept = lines.slice(0, maxLines);
     kept[maxLines - 1] = fit(font, `${kept[maxLines - 1]}…`, maxWidth);
@@ -242,7 +258,8 @@ function labelBar(img, x, y, w, h, a = 150) {
   blendRegion(img, x, y, w, h, a, 9, 5, 22);
 }
 
-async function drawInfo(card, data) {
+async function drawInfo(card, data, metrics) {
+  const fontStarted = Date.now();
   const [fTitle, fSub, fName, fValue, fLabel, fBrand, fSmall] = await Promise.all([
     loadFont(CONFIG.fonts.title),
     loadFont(CONFIG.fonts.subtitle),
@@ -253,6 +270,7 @@ async function drawInfo(card, data) {
     loadFont(CONFIG.fonts.small),
   ]);
 
+  if (metrics) metrics.fontMs = Date.now() - fontStarted;
   const label = CONFIG.labels[data.kind] || CONFIG.labels.welcome;
 
   /* ---- coluna esquerda (foto + identidade) ---- */
@@ -333,14 +351,19 @@ async function drawInfo(card, data) {
 
 /** Renderiza a card completa e devolve o Buffer JPEG. */
 async function renderCard(data) {
+  const metrics = data.metrics;
+  const renderStarted = Date.now();
   const img = await templates.load(data.templateId);
-  // véus para unificar e dar contraste (arte permanece visível)
   scrim(img, 16);
   scrimRight(img, 470, 74);
   drawHud(img);
   await compositePhoto(img, data.photoBuffer);
-  await drawInfo(img, data);
-  return img.getBufferAsync(Jimp.MIME_JPEG, { quality: 92 });
+  await drawInfo(img, data, metrics);
+  if (metrics) metrics.renderMs = Date.now() - renderStarted - (metrics.fontMs || 0);
+  const encodeStarted = Date.now();
+  const output = await img.getBufferAsync(Jimp.MIME_JPEG, { quality: 92 });
+  if (metrics) metrics.encodeMs = Date.now() - encodeStarted;
+  return output;
 }
 
 module.exports = { renderCard, clean };

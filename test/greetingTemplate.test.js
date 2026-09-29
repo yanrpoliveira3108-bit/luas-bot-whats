@@ -24,9 +24,22 @@ assert.equal(greeting.resolveGreetingTemplate('{banana}', context), '{banana}');
 assert.equal(greeting.resolveGreetingTemplate('{nome} {numero} {membros} {prefix}', context), 'Karma +55 19 *****-4235 198 ,');
 assert.equal(greeting.resolveGreetingTemplate('Olá\n{grupo}', context), 'Olá\nLua Desenvolvimento');
 
+const original = `👑🔥 𝑩𝑬𝑴-𝑽𝑰𝑵𝑫𝑶𝑺 𝑨𝑶 𝑩𝑶𝑵𝑫𝑬 𝑫𝑨 𝒁𝑶𝑬𝑰𝑹𝑨! 🔥👑
+😎 Chegou agora? Então se apresente pra galera:
+👤 𝑵𝒐𝒎𝒆:
+🎂 𝑰𝒅𝒂𝒅𝒆:
+📍 𝑪𝒊𝒅𝒂𝒅𝒆:
+📸 𝑭𝒐𝒕𝒐 𝒅𝒆 𝑽𝑰𝑺𝑼𝑨𝑳𝑰𝒁𝑨𝑪̧𝑨̃𝑶 𝑼́𝑵𝑰𝑪𝑨:
+⚠️ 𝑺𝒊𝒈𝒂𝒎 𝒂𝒔 𝒓𝒆𝒈𝒓𝒂𝒔 𝒍𝒂́ 𝒆𝒎 𝒄𝒊𝒎𝒂!
+🔥 𝑬 𝑽𝑨𝑴𝑶𝑺 𝑷𝑨𝑹𝑨 𝑨 𝑹𝑬𝑺𝑬𝑵𝑯𝑨! 😂👑`;
+assert.strictEqual(greeting.validateTemplate(original).value, original);
+assert.strictEqual(greeting.extractTemplateFromCommand(`,welcometext atualizar ${original}`, ',', 'welcometext'), original);
+assert.strictEqual(greeting.extractTemplateFromCommand(`,goodbyetext atualizar ${original}`, ',', 'goodbyetext'), original);
+assert.strictEqual(original.split('\n').length, 8);
+
 const noIdentity = greeting.buildGreetingContext({ groupJid: '120@g.us', groupSubject: '', occurredAt: context.occurredAt });
 assert.ok(!noIdentity.values.nome.includes('@'));
 assert.ok(!noIdentity.values.numero.includes('@'));
-assert.ok(greeting.validateTemplate('x'.repeat(greeting.MAX_TEMPLATE_LENGTH + 1)).ok === false);
+assert.equal(greeting.validateTemplate('x'.repeat(greeting.MAX_TEMPLATE_LENGTH + 1)).ok, false);
 
 console.log('greetingTemplate.test.js: ok');

@@ -24,7 +24,23 @@ function normalizeGroupJid(jid) {
 }
 
 function normalizeTemplate(value) {
+  // Remove somente whitespace externo; newline, tabs, espaços internos e linhas
+  // vazias fazem parte do conteúdo administrado.
   return String(value == null ? '' : value).replace(/\\n/g, '\n').trim();
+}
+
+function extractTemplateFromCommand(rawText, prefix, command) {
+  const raw = String(rawText == null ? '' : rawText);
+  const p = String(prefix || ',');
+  const c = String(command || 'welcometext');
+  if (!raw.trimStart().startsWith(p)) return '';
+  let body = raw.trimStart().slice(p.length);
+  const commandMatch = body.match(new RegExp(`^${c.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}(?:[\\t ]+|$)`, 'i'));
+  if (!commandMatch) return '';
+  body = body.slice(commandMatch[0].length);
+  const subMatch = body.match(/^[\\t ]*(?:atualizar|update)(?:[\\t ]+|$)/i);
+  if (!subMatch) return '';
+  return body.slice(subMatch[0].length).replace(/^\\s+/, '').replace(/\\s+$/, '');
 }
 
 function validateTemplate(value) {
@@ -134,6 +150,7 @@ module.exports = {
   availableVariables,
   defaultTemplate,
   validateTemplate,
+  extractTemplateFromCommand,
   getGreetingSettings,
   setGreetingTemplate,
   resetGreetingTemplate,
